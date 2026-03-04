@@ -80,5 +80,9 @@ class DeepSetSpace(BaseSearchSpace):
             mlp_widths_invariant_inner=(width,) * 2,
             mlp_widths_invariant_outer=(width,) * 2,
             mlp_widths_invariant_last=(width,) * 2,
+            activation=params.get("ds_activation", "silu"),
+            spectral_normalization=bool(params.get("ds_spectral_norm", False)),
+            inner_pooling=params.get("ds_pooling", "mean"),
+            output_pooling=params.get("ds_pooling", "mean"),
             dropout=float(params["ds_dropout"]),
         )

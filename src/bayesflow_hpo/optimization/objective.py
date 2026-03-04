@@ -90,11 +90,12 @@ class GenericObjective:
 
         callbacks: list[Any] = [
             MovingAverageEarlyStopping(
+                monitor="loss",
                 window=self.config.early_stopping_window,
                 patience=self.config.early_stopping_patience,
                 restore_best_weights=True,
             ),
-            OptunaReportCallback(trial),
+            OptunaReportCallback(trial, monitor="loss"),
         ]
 
         try:
@@ -119,8 +120,11 @@ class GenericObjective:
             )
             metrics = validation_result["metrics"]
         else:
-            history = getattr(workflow.approximator, "history", {})
-            last_loss = float(history.get("loss", [FAILED_TRIAL_CAL_ERROR])[-1])
+            # Training history is stored on the workflow (not the approximator)
+            # as a keras.callbacks.History object whose .history attr is the dict.
+            hist_obj = getattr(workflow, "history", None)
+            hist_dict = getattr(hist_obj, "history", {}) if hist_obj is not None else {}
+            last_loss = float(hist_dict.get("loss", [FAILED_TRIAL_CAL_ERROR])[-1])
             metrics = {"summary": {"mean_cal_error": last_loss}}
 
         param_count = get_param_count(workflow.approximator)

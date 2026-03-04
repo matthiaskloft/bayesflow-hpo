@@ -50,11 +50,18 @@ def save_workflow_with_metadata(approximator: Any, path: str | Path, metadata: d
 
 
 def load_workflow_with_metadata(path: str | Path) -> tuple[Any, dict[str, Any]]:
-    """Load workflow model and metadata sidecar if present."""
+    """Load approximator model and metadata sidecar if present.
+
+    Returns the *approximator* (a Keras model), not a full ``BasicWorkflow``,
+    because BayesFlow 2.x persists the approximator via ``keras.saving`` and
+    reconstructing a workflow requires the original simulator and adapter.
+    """
+    import keras
+
     base_path = Path(path)
     model_path = base_path.with_suffix(".keras")
     meta_path = base_path.with_suffix(".json")
 
-    workflow = bf.BasicWorkflow.load(model_path)
+    approximator = keras.saving.load_model(model_path)
     metadata = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {}
-    return workflow, metadata
+    return approximator, metadata

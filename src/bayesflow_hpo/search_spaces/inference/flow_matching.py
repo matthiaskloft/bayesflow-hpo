@@ -74,6 +74,8 @@ class FlowMatchingSpace(BaseSearchSpace):
         depth = int(params["fm_subnet_depth"])
         return bf.networks.FlowMatching(
             use_optimal_transport=bool(params.get("fm_use_ot", False)),
+            time_power_law_alpha=float(params.get("fm_time_alpha", 0.0)),
+            loss_fn=params.get("fm_loss", "mse"),
             subnet_kwargs={
                 "widths": tuple([width] * depth),
                 "activation": params["fm_activation"],
