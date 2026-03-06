@@ -19,7 +19,24 @@ from bayesflow_hpo.search_spaces.base import (
 
 @dataclass
 class FlowMatchingSpace(BaseSearchSpace):
-    """Search space for `bf.networks.FlowMatching`."""
+    """Search space for `bf.networks.FlowMatching`.
+
+    Default ranges
+    --------------
+    fm_subnet_width : int
+        MLP width (32--256, step 32).
+    fm_subnet_depth : int
+        MLP depth (1--4).
+    fm_dropout : float
+        Dropout rate (0.0--0.2).
+    fm_activation : str
+        **Optional** (off by default). Falls back to BayesFlow's TimeMLP
+        default ``"mish"``.
+
+    Optional dimensions (enabled via ``include_optional=True``)
+    -----------------------------------------------------------
+    fm_use_ot, fm_time_alpha.
+    """
 
     include_optional: bool = False
 
@@ -36,7 +53,7 @@ class FlowMatchingSpace(BaseSearchSpace):
     )
     activation: CategoricalDimension = field(
         default_factory=lambda: CategoricalDimension(
-            "fm_activation", choices=["mish", "silu"]
+            "fm_activation", choices=["mish", "silu"], default=False
         )
     )
 
@@ -50,6 +67,7 @@ class FlowMatchingSpace(BaseSearchSpace):
             "fm_time_alpha", low=0.0, high=2.0, default=False
         )
     )
+
     @property
     def dimensions(self) -> list[Dimension]:
         return [
@@ -67,7 +85,7 @@ class FlowMatchingSpace(BaseSearchSpace):
     def build(self, params: dict[str, Any]) -> bf.networks.FlowMatching:
         validate_required_params(
             params,
-            ["fm_subnet_width", "fm_subnet_depth", "fm_dropout", "fm_activation"],
+            ["fm_subnet_width", "fm_subnet_depth", "fm_dropout"],
             "FlowMatchingSpace.build",
         )
 
@@ -79,7 +97,7 @@ class FlowMatchingSpace(BaseSearchSpace):
             loss_fn="mse",
             subnet_kwargs={
                 "widths": tuple([width] * depth),
-                "activation": params["fm_activation"],
+                "activation": params.get("fm_activation", "mish"),
                 "dropout": float(params["fm_dropout"]),
             },
         )

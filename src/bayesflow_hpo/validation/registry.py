@@ -212,7 +212,7 @@ def _correlation_metric(
 # SBC rank-based coverage
 # ---------------------------------------------------------------------------
 
-DEFAULT_COVERAGE_LEVELS = [0.5, 0.8, 0.9, 0.95, 0.99]
+DEFAULT_COVERAGE_LEVELS = [0.9, 0.95, 0.975, 0.99]
 
 
 def make_coverage_metric(
@@ -325,7 +325,7 @@ def _coverage_right(
 # ---------------------------------------------------------------------------
 
 DEFAULT_METRICS = [
-    "mean_cal_error", "nrmse", "correlation", "coverage", "rmse", "contraction", "sbc",
+    "calibration_error", "nrmse", "correlation", "coverage", "rmse", "contraction",
 ]
 
 # BF wrappers

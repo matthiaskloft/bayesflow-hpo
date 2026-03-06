@@ -9,9 +9,13 @@ import numpy as np
 
 KERAS_AVAILABLE = importlib.util.find_spec("keras") is not None
 
-PARAM_COUNT_LOG_SCALE = 6.0
+# Default budget boundaries for log-linear normalization.
+MIN_PARAM_COUNT = 1_000
+MAX_PARAM_COUNT = 1_000_000
+
+# Penalty values returned for failed / budget-rejected trials.
 FAILED_TRIAL_CAL_ERROR = 1.0
-FAILED_TRIAL_PARAM_SCORE = 1.5
+FAILED_TRIAL_PARAM_SCORE = 1.0
 
 
 def get_param_count(model: Any) -> int:
@@ -33,30 +37,79 @@ def get_param_count(model: Any) -> int:
     raise TypeError(f"Cannot count parameters for type: {type(model)}")
 
 
-def normalize_param_count(param_count: int) -> float:
-    """Map raw parameter count to ~0-1 log scale."""
+def normalize_param_count(
+    param_count: int,
+    min_count: int = MIN_PARAM_COUNT,
+    max_count: int = MAX_PARAM_COUNT,
+) -> float:
+    """Map raw parameter count to 0--1 via log-linear scaling.
+
+    Uses ``log10(count / min) / log10(max / min)`` so that *min_count*
+    maps to 0.0 and *max_count* maps to 1.0.
+
+    Parameters
+    ----------
+    param_count
+        Raw trainable parameter count.
+    min_count
+        Lower reference (maps to 0.0).  Default ``1_000``.
+    max_count
+        Upper reference (maps to 1.0).  Default ``1_000_000``.
+    """
     if param_count <= 0:
         return 0.0
-    return float(np.log10(param_count) / PARAM_COUNT_LOG_SCALE)
+    if min_count <= 0:
+        min_count = 1
+    if max_count <= min_count:
+        return 0.0
+    clamped = max(param_count, min_count)
+    return float(np.log10(clamped / min_count) / np.log10(max_count / min_count))
 
 
-def denormalize_param_count(normalized: float) -> int:
-    """Invert normalized parameter count back to raw count."""
+def denormalize_param_count(
+    normalized: float,
+    min_count: int = MIN_PARAM_COUNT,
+    max_count: int = MAX_PARAM_COUNT,
+) -> int:
+    """Invert :func:`normalize_param_count` back to a raw count."""
     if normalized <= 0:
         return 0
-    return int(10 ** (normalized * PARAM_COUNT_LOG_SCALE))
+    if min_count <= 0:
+        min_count = 1
+    log_range = np.log10(max_count / min_count)
+    return int(min_count * 10 ** (normalized * log_range))
 
 
 def extract_objective_values(
     metrics: dict[str, Any],
     param_count: int,
     objective_metric: str = "calibration_error",
+    min_param_count: int = MIN_PARAM_COUNT,
+    max_param_count: int = MAX_PARAM_COUNT,
 ) -> tuple[float, float]:
-    """Extract (objective_value, normalized_param_score)."""
+    """Extract ``(objective_value, normalized_param_score)``.
+
+    Parameters
+    ----------
+    metrics
+        Nested dict with at least ``{"summary": {objective_metric: value}}``.
+    param_count
+        Raw trainable parameter count.
+    objective_metric
+        Key to look up inside the summary dict.
+    min_param_count, max_param_count
+        Boundaries for :func:`normalize_param_count`.
+    """
     summary = metrics.get("summary", metrics)
-    # Try the requested metric, fall back to mean_cal_error, then 1.0
     objective_value = float(
-        summary.get(objective_metric, summary.get("mean_cal_error", 1.0))
+        summary.get(
+            objective_metric,
+            summary.get("calibration_error", 1.0),
+        )
     )
-    param_score = normalize_param_count(param_count)
+    param_score = normalize_param_count(
+        param_count,
+        min_count=min_param_count,
+        max_count=max_param_count,
+    )
     return objective_value, param_score

@@ -10,46 +10,59 @@ from keras.callbacks import Callback
 
 
 class OptunaReportCallback(Callback):
-    """Report monitored Keras metric to Optuna and enable pruning."""
+    """Report monitored Keras metric to Optuna for logging.
+
+    This callback records the training loss to the Optuna trial's
+    intermediate values.  It does **not** trigger pruning — pruning is
+    handled by :class:`~bayesflow_hpo.optimization.validation_callback.PeriodicValidationCallback`
+    which uses validation metrics that are comparable across network types.
+    """
 
     def __init__(
         self,
         trial: optuna.Trial,
-        monitor: str = "val_loss",
+        monitor: str = "loss",
         report_frequency: int = 1,
     ):
         super().__init__()
         self.trial = trial
         self.monitor = monitor
         self.report_frequency = report_frequency
-        directions = getattr(getattr(trial, "study", None), "directions", None)
-        self._supports_report = directions is None or len(directions) <= 1
 
     def on_epoch_end(self, epoch: int, logs: Any = None) -> None:
-        if (
-            logs is None
-            or epoch % self.report_frequency != 0
-            or not self._supports_report
-        ):
+        if logs is None or epoch % self.report_frequency != 0:
             return
 
         value = logs.get(self.monitor)
         if value is None:
             return
 
-        self.trial.report(float(value), step=epoch)
-        if self.trial.should_prune():
-            raise optuna.TrialPruned()
+        self.trial.set_user_attr(f"epoch_{epoch}_loss", round(float(value), 6))
 
 
 class MovingAverageEarlyStopping(Callback):
-    """Early stopping on moving average of a monitored metric."""
+    """Early stopping on moving average of a monitored metric.
+
+    Parameters
+    ----------
+    monitor
+        Metric name to track (default ``"loss"``).
+    window
+        Moving-average window size (default 7).
+    patience
+        Number of epochs with no MA improvement before stopping
+        (default 5).  Together with *window* this means stagnation is
+        detected within roughly ``window + patience`` epochs.
+    restore_best_weights
+        Whether to restore model weights from the epoch with the best
+        moving average (default ``True``).
+    """
 
     def __init__(
         self,
         monitor: str = "loss",
-        window: int = 5,
-        patience: int = 3,
+        window: int = 7,
+        patience: int = 5,
         restore_best_weights: bool = True,
     ):
         super().__init__()

@@ -19,12 +19,31 @@ from bayesflow_hpo.search_spaces.base import (
 
 @dataclass
 class CouplingFlowSpace(BaseSearchSpace):
-    """Search space for `bf.networks.CouplingFlow`."""
+    """Search space for `bf.networks.CouplingFlow`.
+
+    Default ranges
+    --------------
+    cf_depth : int
+        Number of coupling layers (2--8).
+    cf_subnet_width : int
+        MLP width per coupling subnet (32--256, step 32).
+    cf_subnet_depth : int
+        MLP depth per coupling subnet (1--3).
+    cf_dropout : float
+        Dropout rate (0.0--0.3).
+    cf_activation : str
+        **Optional** (off by default). Falls back to BayesFlow's MLP default
+        ``"mish"``.
+
+    Optional dimensions (enabled via ``include_optional=True``)
+    -----------------------------------------------------------
+    cf_transform, cf_permutation, cf_actnorm.
+    """
 
     include_optional: bool = False
 
     depth: IntDimension = field(
-        default_factory=lambda: IntDimension("cf_depth", low=2, high=12)
+        default_factory=lambda: IntDimension("cf_depth", low=2, high=8)
     )
     subnet_width: IntDimension = field(
         default_factory=lambda: IntDimension(
@@ -39,7 +58,7 @@ class CouplingFlowSpace(BaseSearchSpace):
     )
     activation: CategoricalDimension = field(
         default_factory=lambda: CategoricalDimension(
-            "cf_activation", choices=["silu", "relu", "mish"]
+            "cf_activation", choices=["silu", "relu", "mish"], default=False
         )
     )
 
@@ -83,7 +102,6 @@ class CouplingFlowSpace(BaseSearchSpace):
                 "cf_subnet_width",
                 "cf_subnet_depth",
                 "cf_dropout",
-                "cf_activation",
             ],
             "CouplingFlowSpace.build",
         )
@@ -97,7 +115,7 @@ class CouplingFlowSpace(BaseSearchSpace):
             use_actnorm=bool(params.get("cf_actnorm", True)),
             subnet_kwargs={
                 "widths": tuple([width] * n_layers),
-                "activation": params["cf_activation"],
+                "activation": params.get("cf_activation", "mish"),
                 "dropout": float(params["cf_dropout"]),
             },
         )

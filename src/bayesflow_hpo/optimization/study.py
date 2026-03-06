@@ -6,10 +6,14 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
+import numpy as np
 import optuna
 from optuna.trial import TrialState
 
 logger = logging.getLogger(__name__)
+
+# Default SQLite storage file used by :func:`create_study`.
+DEFAULT_STORAGE = "sqlite:///bayesflow_hpo.db"
 
 
 def _budget_constraints_func(trial: optuna.trial.FrozenTrial) -> list[float]:
@@ -23,20 +27,67 @@ def _budget_constraints_func(trial: optuna.trial.FrozenTrial) -> list[float]:
     return [0.0]
 
 
+def _geomean_ranking_key(trial: optuna.trial.FrozenTrial) -> float:
+    """Rank a trial by the geometric mean of nrmse and calibration_error.
+
+    Falls back to the first objective value when the user attributes are
+    not available (e.g. studies without validation).
+    """
+    nrmse = trial.user_attrs.get("nrmse")
+    cal_err = trial.user_attrs.get("calibration_error")
+
+    if nrmse is not None and cal_err is not None:
+        return float(np.sqrt(max(nrmse, 1e-12) * max(cal_err, 1e-12)))
+    if trial.values:
+        return float(trial.values[0])
+    return float("inf")
+
+
 def create_study(
     study_name: str = "bayesflow_hpo",
     directions: list[str] | None = None,
     metric_names: list[str] | None = None,
-    storage: str | None = None,
+    storage: str | None = DEFAULT_STORAGE,
     load_if_exists: bool = True,
     sampler: Any | None = None,
     pruner: Any | None = None,
     warm_start_from: optuna.Study | None = None,
-    warm_start_top_k: int = 20,
-    warm_start_metric_index: int = 0,
+    warm_start_top_k: int = 25,
     budget_aware: bool = True,
 ) -> optuna.Study:
-    """Create or resume an Optuna study."""
+    """Create or resume an Optuna study.
+
+    Parameters
+    ----------
+    study_name
+        Optuna study name (default ``"bayesflow_hpo"``).
+    directions
+        Optimization directions.  Default ``["minimize", "minimize"]``
+        (calibration_error, param_count).
+    metric_names
+        Human-readable names for each objective.
+    storage
+        Optuna storage URL.  Default ``"sqlite:///bayesflow_hpo.db"``
+        for automatic persistence and crash recovery.  Pass ``None``
+        for in-memory only.
+    load_if_exists
+        Resume a study with the same name if it already exists.
+    sampler
+        Optuna sampler.  Default ``TPESampler(seed=42,
+        multivariate=True, n_startup_trials=25)``.
+    pruner
+        Optuna pruner.  Default ``MedianPruner(n_startup_trials=5,
+        n_warmup_steps=1, interval_steps=1)`` — the actual pruning
+        schedule is controlled by
+        :class:`~bayesflow_hpo.optimization.validation_callback.PeriodicValidationCallback`.
+    warm_start_from
+        Optional source study to seed initial trials from.
+    warm_start_top_k
+        Number of best trials to copy from the source study.
+    budget_aware
+        Whether to attach a constraints function that marks
+        budget-rejected trials as infeasible for the sampler.
+    """
     if directions is None:
         directions = ["minimize", "minimize"]
 
@@ -44,15 +95,17 @@ def create_study(
         sampler = optuna.samplers.TPESampler(
             seed=42,
             multivariate=True,
-            n_startup_trials=20,
+            n_startup_trials=25,
             constraints_func=_budget_constraints_func if budget_aware else None,
         )
 
     if pruner is None:
+        # The step counter is managed by PeriodicValidationCallback, so
+        # we set warmup/interval to 1 and let the callback decide timing.
         pruner = optuna.pruners.MedianPruner(
             n_startup_trials=5,
-            n_warmup_steps=10,
-            interval_steps=5,
+            n_warmup_steps=1,
+            interval_steps=1,
         )
 
     create_kwargs: dict[str, Any] = dict(
@@ -63,7 +116,7 @@ def create_study(
         sampler=sampler,
         pruner=pruner,
     )
-    # metric_names was added in Optuna ≥4.x — pass it only when supported.
+    # metric_names was added in Optuna >=4.x — pass it only when supported.
     import inspect
 
     if "metric_names" in inspect.signature(optuna.create_study).parameters:
@@ -77,7 +130,6 @@ def create_study(
             target_study=study,
             source_study=warm_start_from,
             top_k=warm_start_top_k,
-            metric_index=warm_start_metric_index,
         )
     return study
 
@@ -90,10 +142,28 @@ def resume_study(study_name: str, storage: str) -> optuna.Study:
 def warm_start_study(
     target_study: optuna.Study,
     source_study: optuna.Study,
-    top_k: int = 20,
-    metric_index: int = 0,
+    top_k: int = 25,
 ) -> int:
-    """Seed `target_study` with best completed trials from `source_study`."""
+    """Seed *target_study* with best completed trials from *source_study*.
+
+    Trials are ranked by the geometric mean of nrmse and
+    calibration_error (falling back to the first objective when user
+    attributes are unavailable).
+
+    Parameters
+    ----------
+    target_study
+        Study to seed.
+    source_study
+        Study to copy trials from.
+    top_k
+        Maximum number of trials to copy.
+
+    Returns
+    -------
+    int
+        Number of trials actually added.
+    """
     complete_trials = [
         trial
         for trial in source_study.trials
@@ -102,10 +172,7 @@ def warm_start_study(
     if not complete_trials:
         return 0
 
-    ranked = sorted(
-        complete_trials,
-        key=lambda trial: trial.values[metric_index],
-    )
+    ranked = sorted(complete_trials, key=_geomean_ranking_key)
 
     added = 0
     for trial in ranked[: max(0, int(top_k))]:
@@ -153,12 +220,13 @@ def optimize_until(
     n_trained
         Target number of trials that pass budget checks and complete training.
     max_total_trials
-        Hard cap on total trials (including rejected). Defaults to ``5 * n_trained``.
+        Hard cap on total trials (including rejected). Defaults to
+        ``3 * n_trained``.
     show_progress_bar
         Whether to show Optuna's progress bar.
     """
     if max_total_trials is None:
-        max_total_trials = 5 * n_trained
+        max_total_trials = 3 * n_trained
 
     trained_before = count_trained_trials(study)
     target = trained_before + n_trained

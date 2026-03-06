@@ -7,11 +7,18 @@ from typing import Any
 
 import bayesflow as bf
 
+from bayesflow_hpo.optimization.checkpoint_pool import CheckpointPool
 from bayesflow_hpo.optimization.objective import GenericObjective, ObjectiveConfig
-from bayesflow_hpo.optimization.study import create_study, optimize_until
-from bayesflow_hpo.search_spaces.composite import CompositeSearchSpace
+from bayesflow_hpo.optimization.study import DEFAULT_STORAGE, create_study, optimize_until
+from bayesflow_hpo.search_spaces.composite import (
+    CompositeSearchSpace,
+    NetworkSelectionSpace,
+    SummarySelectionSpace,
+)
 from bayesflow_hpo.search_spaces.inference.coupling_flow import CouplingFlowSpace
+from bayesflow_hpo.search_spaces.inference.flow_matching import FlowMatchingSpace
 from bayesflow_hpo.search_spaces.summary.deep_set import DeepSetSpace
+from bayesflow_hpo.search_spaces.summary.set_transformer import SetTransformerSpace
 from bayesflow_hpo.search_spaces.training import TrainingSpace
 from bayesflow_hpo.validation.data import ValidationDataset, generate_validation_dataset
 
@@ -26,47 +33,128 @@ def optimize(
     sims_per_condition: int = 200,
     search_space: CompositeSearchSpace | None = None,
     inference_conditions: list[str] | None = None,
-    n_trials: int = 100,
+    n_trials: int = 50,
     max_total_trials: int | None = None,
     epochs: int = 200,
     batches_per_epoch: int = 50,
-    max_param_count: int = 2_000_000,
+    max_param_count: int = 1_000_000,
     max_memory_mb: float | None = None,
     metrics: list[str] | None = None,
-    objective_metric: str = "mean_cal_error",
+    objective_metric: str = "calibration_error",
     train_fn: Callable[[bf.BasicWorkflow, dict, list], None] | None = None,
-    storage: str | None = None,
+    storage: str | None = DEFAULT_STORAGE,
     study_name: str = "bayesflow_hpo",
     directions: list[str] | None = None,
     warm_start_from: Any | None = None,
-    warm_start_top_k: int = 20,
-    warm_start_metric_index: int = 0,
+    warm_start_top_k: int = 25,
+    checkpoint_pool: CheckpointPool | None = None,
     show_progress_bar: bool = True,
 ) -> Any:
     """Run HPO with a high-level convenience API.
 
+    This is the main entry point for hyperparameter optimization.  It
+    creates an Optuna study, builds a search space (if not provided),
+    generates validation data (if ``validation_conditions`` are given),
+    and runs ``n_trials`` fully-trained trials.
+
     Parameters
     ----------
+    simulator
+        BayesFlow simulator used for online training and (optionally)
+        for generating validation data.
+    adapter
+        BayesFlow adapter for data preprocessing.
+    param_keys
+        Names of the parameters to infer.
+    data_keys
+        Names of the data/observable variables.
+    validation_data
+        Pre-generated :class:`ValidationDataset`.  When ``None`` and
+        ``validation_conditions`` is provided, data is generated
+        automatically.
+    validation_conditions
+        Condition grid specification
+        (e.g. ``{"N": [50, 100, 200]}``).  Used to build a
+        ``ValidationDataset`` via :func:`generate_validation_dataset`.
+    sims_per_condition
+        Simulations per condition grid point (default 200).
+    search_space
+        Search space defining the tunable dimensions.  Default is
+        ``NetworkSelectionSpace`` over CouplingFlow + FlowMatching
+        for inference, ``SummarySelectionSpace`` over DeepSet +
+        SetTransformer for summary, plus ``TrainingSpace``.
+    inference_conditions
+        Names of conditioning variables passed to the workflow.
     n_trials
-        Number of *trained* trials to collect. Budget-rejected trials
-        (those exceeding ``max_param_count`` or ``max_memory_mb``) are
-        not counted toward this number.
+        Number of *trained* trials to collect (default 50).
+        Budget-rejected trials (those exceeding ``max_param_count``
+        or ``max_memory_mb``) are not counted toward this number.
     max_total_trials
         Hard cap on total trials including budget-rejected ones.
-        Defaults to ``5 * n_trials``.
+        Defaults to ``3 * n_trials``.
+    epochs
+        Maximum training epochs per trial (default 200).  A cosine-
+        annealed learning rate schedule decays from ``initial_lr`` to
+        near-zero over this many epochs.  Early stopping typically
+        halts training before reaching the limit.
+    batches_per_epoch
+        Number of online simulation batches per epoch (default 50).
+    max_param_count
+        Trials with estimated parameter count above this value are
+        rejected before training (default 1 000 000).
+    max_memory_mb
+        Optional peak-memory budget in MB.  Disabled by default.
     metrics
-        List of metric names for validation (resolved via the metric
-        registry). Defaults to ``DEFAULT_METRICS``.
+        List of metric names for post-training validation (resolved
+        via the metric registry).  Defaults to ``DEFAULT_METRICS``
+        (calibration_error, nrmse, correlation, coverage, rmse,
+        contraction).
     objective_metric
-        Key in the validation summary used as the HPO objective.
+        Key in the validation summary used as the first HPO objective
+        (default ``"calibration_error"``).
     train_fn
-        Optional custom training function ``(workflow, params, callbacks) -> None``.
-        Defaults to ``workflow.fit_online(...)``.
+        Optional custom training function
+        ``(workflow, params, callbacks) -> None``.  By default uses
+        ``workflow.fit_online(...)``.
+    storage
+        Optuna storage URL (default ``"sqlite:///bayesflow_hpo.db"``
+        for automatic persistence).  Pass ``None`` for in-memory.
+    study_name
+        Optuna study name (default ``"bayesflow_hpo"``).
+    directions
+        Optimization directions (default ``["minimize", "minimize"]``
+        for calibration_error + param_count).
+    warm_start_from
+        Optional source ``optuna.Study`` to seed initial trials from.
+    warm_start_top_k
+        Number of best trials to copy from the source study
+        (default 25).
+    checkpoint_pool
+        Optional :class:`CheckpointPool` for persisting the best
+        trial weights.  Default creates a pool of size 5 under
+        ``checkpoints/``.
+    show_progress_bar
+        Whether to show Optuna's progress bar (default ``True``).
+
+    Returns
+    -------
+    optuna.Study
+        The optimized Optuna study.
     """
     if search_space is None:
         search_space = CompositeSearchSpace(
-            inference_space=CouplingFlowSpace(),
-            summary_space=DeepSetSpace(),
+            inference_space=NetworkSelectionSpace(
+                candidates={
+                    "coupling_flow": CouplingFlowSpace(),
+                    "flow_matching": FlowMatchingSpace(),
+                }
+            ),
+            summary_space=SummarySelectionSpace(
+                candidates={
+                    "deep_set": DeepSetSpace(),
+                    "set_transformer": SetTransformerSpace(),
+                }
+            ),
             training_space=TrainingSpace(),
         )
 
@@ -89,6 +177,8 @@ def optimize(
             search_space=search_space,
             inference_conditions=inference_conditions,
             validation_data=validation_data,
+            param_keys=param_keys,
+            data_keys=data_keys,
             epochs=epochs,
             batches_per_epoch=batches_per_epoch,
             max_param_count=max_param_count,
@@ -96,6 +186,7 @@ def optimize(
             metrics=metrics,
             objective_metric=objective_metric,
             train_fn=train_fn,
+            checkpoint_pool=checkpoint_pool,
         )
     )
 
@@ -107,7 +198,6 @@ def optimize(
         load_if_exists=True,
         warm_start_from=warm_start_from,
         warm_start_top_k=warm_start_top_k,
-        warm_start_metric_index=warm_start_metric_index,
     )
     optimize_until(
         study,

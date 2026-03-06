@@ -33,9 +33,11 @@ DEFAULT_RESULT_ATTRS = [
     "param_count",
     "training_time_s",
     "inference_time_s",
+    "calibration_error",
     "nrmse",
     "correlation",
-    "mean_cal_error",
+    "training_error",
+    "rejected_reason",
 ]
 
 
@@ -170,7 +172,7 @@ def summarize_study(
             ("inference_time_s", "Inference time (s)"),
             ("nrmse", "NRMSE"),
             ("correlation", "Correlation"),
-            ("mean_cal_error", "Mean cal. error"),
+            ("calibration_error", "Calibration error"),
         ]
         for attr_key, label in attr_display:
             if attr_key in trial.user_attrs:

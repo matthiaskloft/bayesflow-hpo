@@ -72,12 +72,12 @@ class ValidationResult:
     # Objective extraction
     # ------------------------------------------------------------------
 
-    def objective_scalar(self, key: str = "mean_cal_error") -> float:
+    def objective_scalar(self, key: str = "calibration_error") -> float:
         """Extract a single scalar for HPO objective from summary dict.
 
-        Falls back to ``calibration_error`` → ``1.0`` if *key* is missing.
+        Falls back to ``1.0`` if *key* is missing.
         """
-        return float(self.summary.get(key, self.summary.get("mean_cal_error", 1.0)))
+        return float(self.summary.get(key, 1.0))
 
     # ------------------------------------------------------------------
     # Display

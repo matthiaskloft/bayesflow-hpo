@@ -21,10 +21,13 @@ from bayesflow_hpo.objectives import (
     normalize_param_count,
 )
 from bayesflow_hpo.optimization import (
+    CheckpointPool,
+    DEFAULT_STORAGE,
     GenericObjective,
     MovingAverageEarlyStopping,
     ObjectiveConfig,
     OptunaReportCallback,
+    PeriodicValidationCallback,
     cleanup_trial,
     count_trained_trials,
     create_study,
@@ -104,10 +107,13 @@ __all__ = [
     "get_param_count",
     "normalize_param_count",
     # Optimization
+    "CheckpointPool",
+    "DEFAULT_STORAGE",
     "GenericObjective",
     "MovingAverageEarlyStopping",
     "ObjectiveConfig",
     "OptunaReportCallback",
+    "PeriodicValidationCallback",
     "cleanup_trial",
     "count_trained_trials",
     "create_study",

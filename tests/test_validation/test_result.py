@@ -49,13 +49,14 @@ def test_objective_scalar_default():
 
 
 def test_objective_scalar_fallback():
+    """When the requested key is missing, objective_scalar returns 1.0."""
     result = ValidationResult(
         condition_metrics=pd.DataFrame(),
         summary={"mean_cal_error": 0.1},
         n_conditions=0,
         n_posterior_samples=0,
     )
-    assert result.objective_scalar("missing_key") == 0.1
+    assert result.objective_scalar("missing_key") == 1.0
 
 
 def test_objective_scalar_final_fallback():
