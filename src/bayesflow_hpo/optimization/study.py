@@ -202,6 +202,15 @@ def count_trained_trials(study: optuna.Study) -> int:
     )
 
 
+def _count_pruned(study: optuna.Study, since_trial: int = 0) -> int:
+    """Count trials pruned by intermediate validation."""
+    return sum(
+        1
+        for t in study.trials
+        if t.number >= since_trial and t.state == TrialState.PRUNED
+    )
+
+
 def _count_failure_reasons(
     study: optuna.Study,
     since_trial: int = 0,
@@ -289,23 +298,30 @@ def optimize_until(
         # --- Live progress summary after each batch ---
         trained_now = count_trained_trials(study) - trained_before
         total_now = len(study.trials) - total_before
-        rejected = total_now - trained_now
+        pruned = _count_pruned(study, since_trial=total_before)
+        rejected = total_now - trained_now - pruned
         best = _best_objective_so_far(study)
         best_str = f"{best:.4f}" if best is not None else "n/a"
-        logger.info(
-            "Progress: %d/%d trained | %d rejected | %d total | best: %s",
-            trained_now, n_trained, rejected, total_now, best_str,
-        )
+        parts = [f"{trained_now}/{n_trained} trained"]
+        if pruned:
+            parts.append(f"{pruned} pruned")
+        if rejected:
+            parts.append(f"{rejected} rejected")
+        parts += [f"{total_now} total", f"best: {best_str}"]
+        logger.info("Progress: %s", " | ".join(parts))
 
     # --- Final summary ---
     trained_now = count_trained_trials(study) - trained_before
     total_now = len(study.trials) - total_before
-    rejected = total_now - trained_now
-    if rejected > 0:
-        logger.info(
-            "Completed %d trained trials (%d total, %d budget-rejected).",
-            trained_now, total_now, rejected,
-        )
+    pruned = _count_pruned(study, since_trial=total_before)
+    rejected = total_now - trained_now - pruned
+    if rejected > 0 or pruned > 0:
+        parts = [f"{trained_now} trained", f"{total_now} total"]
+        if pruned:
+            parts.append(f"{pruned} pruned")
+        if rejected:
+            parts.append(f"{rejected} rejected")
+        logger.info("Completed %s.", ", ".join(parts))
 
     # --- Failure reason breakdown ---
     reasons = _count_failure_reasons(study, since_trial=total_before)
@@ -323,7 +339,8 @@ def optimize_until(
 
     if trained_now < n_trained:
         logger.warning(
-            "Reached max_total_trials=%d before achieving %d trained trials "
-            "(got %d). Consider raising max_param_count or tightening the search space.",
+            "Reached max_total_trials=%d before achieving %d trained "
+            "trials (got %d). Consider raising max_param_count or "
+            "tightening the search space.",
             max_total_trials, n_trained, trained_now,
         )

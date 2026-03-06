@@ -77,6 +77,9 @@ class ObjectiveConfig:
     intermediate_validation_warmup
         Skip the first *n* epochs before intermediate validation
         (default 10).
+    pruning_n_startup_trials
+        Minimum completed trials before multi-objective pruning
+        activates (default 5).
     metrics
         Metric names for final validation (default ``DEFAULT_METRICS``).
     objective_metric
@@ -119,6 +122,7 @@ class ObjectiveConfig:
     n_intermediate_posterior_samples: int = 250
     intermediate_validation_interval: int = 10
     intermediate_validation_warmup: int = 10
+    pruning_n_startup_trials: int = 5
     metrics: list[str] | None = None
     objective_metric: str = "calibration_error"
     checkpoint_pool: CheckpointPool | None = None
@@ -263,6 +267,7 @@ class GenericObjective:
                     interval=self.config.intermediate_validation_interval,
                     warmup=self.config.intermediate_validation_warmup,
                     n_posterior_samples=self.config.n_intermediate_posterior_samples,
+                    n_startup_trials=self.config.pruning_n_startup_trials,
                 )
             )
 

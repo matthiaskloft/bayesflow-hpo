@@ -1,10 +1,16 @@
 """Periodic validation callback for mid-training pruning.
 
 Runs a lightweight validation (calibration_error + nrmse only) every
-*interval* epochs and reports the geometric mean to Optuna for pruning
-decisions.  This allows the MedianPruner to compare trials on a
-metric that is comparable across different network types (unlike the
-training loss, which differs between CouplingFlow and FlowMatching).
+*interval* epochs and uses the geometric mean for pruning decisions.
+
+For single-objective studies, the standard ``trial.report()`` /
+``trial.should_prune()`` API is used with the study's pruner.
+
+For multi-objective studies (the default in bayesflow_hpo), Optuna
+does not support ``trial.report()``.  Instead, a custom median-based
+pruning strategy compares the current trial's intermediate score
+against completed trials at the same step and prunes if it exceeds
+the median.
 """
 
 from __future__ import annotations
@@ -22,6 +28,60 @@ logger = logging.getLogger(__name__)
 _INTERMEDIATE_METRICS = ["calibration_error", "nrmse"]
 
 
+def _should_prune_multi_objective(
+    trial: optuna.Trial,
+    score: float,
+    step: int,
+    n_startup_trials: int = 5,
+) -> bool:
+    """Return True if this trial should be pruned (multi-objective).
+
+    Collects ``val_score_step_{step}`` from all COMPLETE non-rejected
+    trials and prunes when the current *score* exceeds the median.
+    Requires at least *n_startup_trials* reference scores before
+    activating.
+
+    Parameters
+    ----------
+    trial
+        The running Optuna trial.
+    score
+        Current intermediate pruning score (geometric mean).
+    step
+        Monotonic step counter (1-indexed).
+    n_startup_trials
+        Minimum completed trials before pruning activates.
+    """
+    if n_startup_trials < 1:
+        return False
+
+    # NaN/Inf scores indicate a degenerate trial — prune immediately.
+    if not np.isfinite(score):
+        return True
+
+    attr_key = f"val_score_step_{step}"
+    completed_scores: list[float] = []
+
+    for t in trial.study.get_trials(
+        deepcopy=False, states=[optuna.trial.TrialState.COMPLETE]
+    ):
+        if "rejected_reason" in t.user_attrs:
+            continue
+        if t.number == trial.number:
+            continue
+        stored = t.user_attrs.get(attr_key)
+        if stored is not None:
+            val = float(stored)
+            if np.isfinite(val):
+                completed_scores.append(val)
+
+    if len(completed_scores) < n_startup_trials:
+        return False
+
+    median_score = float(np.median(completed_scores))
+    return score > median_score
+
+
 class PeriodicValidationCallback(Callback):
     """Run validation every *interval* epochs and report to Optuna.
 
@@ -29,9 +89,11 @@ class PeriodicValidationCallback(Callback):
     mean).  If either metric is missing the callback falls back to
     ``calibration_error`` alone.
 
-    In multi-objective studies, ``trial.report()`` is not supported by
-    Optuna, so the callback stores intermediate scores as user
-    attributes instead and skips pruning.
+    For single-objective studies the score is reported via
+    ``trial.report()`` and pruning uses the study's pruner.  For
+    multi-objective studies (where ``trial.report()`` is unsupported),
+    a custom median-based strategy prunes trials whose intermediate
+    score exceeds the median of completed trials at the same step.
 
     Parameters
     ----------
@@ -52,6 +114,9 @@ class PeriodicValidationCallback(Callback):
     n_posterior_samples
         Number of posterior draws for intermediate validation.
         Default 250.
+    n_startup_trials
+        Minimum completed trials before multi-objective pruning
+        activates.  Default 5.
     """
 
     def __init__(
@@ -64,6 +129,7 @@ class PeriodicValidationCallback(Callback):
         interval: int = 10,
         warmup: int = 10,
         n_posterior_samples: int = 250,
+        n_startup_trials: int = 5,
     ):
         super().__init__()
         self.trial = trial
@@ -74,6 +140,7 @@ class PeriodicValidationCallback(Callback):
         self.interval = interval
         self.warmup = warmup
         self.n_posterior_samples = n_posterior_samples
+        self.n_startup_trials = n_startup_trials
         self._step = 0  # monotonic step counter for Optuna
         self._is_multi_objective = len(trial.study.directions) > 1
 
@@ -90,12 +157,13 @@ class PeriodicValidationCallback(Callback):
         self._step += 1
 
         if self._is_multi_objective:
-            # TODO: implement proper multi-objective pruning strategy
-            # (e.g. Hyperband with custom dominance check). For now we
-            # only persist intermediate scores for diagnostics.
             self.trial.set_user_attr(
-                f"val_score_epoch_{epoch}", round(float(score), 6)
+                f"val_score_step_{self._step}", round(float(score), 6)
             )
+            if _should_prune_multi_objective(
+                self.trial, score, self._step, self.n_startup_trials
+            ):
+                raise optuna.TrialPruned()
         else:
             self.trial.report(float(score), step=self._step)
             if self.trial.should_prune():

@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import Any
 
 import bayesflow as bf
+import optuna
 
 from bayesflow_hpo.optimization.checkpoint_pool import CheckpointPool
 from bayesflow_hpo.optimization.objective import GenericObjective, ObjectiveConfig
@@ -45,6 +46,7 @@ def optimize(
     storage: str | None = DEFAULT_STORAGE,
     study_name: str = "bayesflow_hpo",
     directions: list[str] | None = None,
+    resume: bool = False,
     warm_start_from: Any | None = None,
     warm_start_top_k: int = 25,
     checkpoint_pool: CheckpointPool | None = None,
@@ -124,6 +126,11 @@ def optimize(
     directions
         Optimization directions (default ``["minimize", "minimize"]``
         for calibration_error + param_count).
+    resume
+        If ``True``, continue a previously persisted study with the
+        same ``study_name`` and ``storage``.  If ``False`` (default),
+        any existing study with that name is deleted first so the
+        optimization starts from scratch.
     warm_start_from
         Optional source ``optuna.Study`` to seed initial trials from.
     warm_start_top_k
@@ -190,12 +197,18 @@ def optimize(
         )
     )
 
+    if not resume and storage is not None:
+        try:
+            optuna.delete_study(study_name=study_name, storage=storage)
+        except KeyError:
+            pass  # no existing study to delete
+
     study = create_study(
         study_name=study_name,
         directions=directions,
         metric_names=[objective_metric, "param_count"] if len(directions) == 2 else None,
         storage=storage,
-        load_if_exists=True,
+        load_if_exists=resume or storage is None,
         warm_start_from=warm_start_from,
         warm_start_top_k=warm_start_top_k,
     )
