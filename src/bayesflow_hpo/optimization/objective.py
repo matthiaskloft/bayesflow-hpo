@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import logging
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -26,7 +29,8 @@ from bayesflow_hpo.optimization.constraints import (
 )
 from bayesflow_hpo.search_spaces.composite import CompositeSearchSpace
 from bayesflow_hpo.validation.data import ValidationDataset
-from bayesflow_hpo.validation.pipeline import run_validation_pipeline
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -43,13 +47,40 @@ class ObjectiveConfig:
     early_stopping_patience: int = 15
     early_stopping_window: int = 15
     max_param_count: int = 2_000_000
-    param_budget_penalty: tuple[float, float] = (FAILED_TRIAL_CAL_ERROR, FAILED_TRIAL_PARAM_SCORE)
+    param_budget_penalty: tuple[float, float] = (
+        FAILED_TRIAL_CAL_ERROR,
+        FAILED_TRIAL_PARAM_SCORE,
+    )
     max_memory_mb: float | None = None
     memory_budget_penalty: tuple[float, float] = (
         FAILED_TRIAL_CAL_ERROR,
         FAILED_TRIAL_PARAM_SCORE,
     )
+    training_failure_penalty: tuple[float, float] = (
+        FAILED_TRIAL_CAL_ERROR,
+        FAILED_TRIAL_PARAM_SCORE,
+    )
     n_posterior_samples: int = 500
+    metrics: list[str] | None = None
+    objective_metric: str = "mean_cal_error"
+    train_fn: Callable[[bf.BasicWorkflow, dict, list], None] | None = None
+
+
+def _default_train_fn(
+    workflow: bf.BasicWorkflow,
+    params: dict[str, Any],
+    callbacks: list[Any],
+    *,
+    epochs: int,
+    batches_per_epoch: int,
+) -> None:
+    """Default training function using fit_online."""
+    workflow.fit_online(
+        epochs=epochs,
+        batch_size=int(params.get("batch_size", 256)),
+        num_batches_per_epoch=batches_per_epoch,
+        callbacks=callbacks,
+    )
 
 
 class GenericObjective:
@@ -64,6 +95,7 @@ class GenericObjective:
         estimated = estimate_param_count(params)
         trial.set_user_attr("estimated_param_count", int(estimated))
         if estimated > self.config.max_param_count:
+            trial.set_user_attr("rejected_reason", "param_budget")
             return self.config.param_budget_penalty
 
         estimated_memory = estimate_peak_memory_mb(params)
@@ -72,6 +104,7 @@ class GenericObjective:
             self.config.max_memory_mb is not None
             and estimated_memory > self.config.max_memory_mb
         ):
+            trial.set_user_attr("rejected_reason", "memory_budget")
             return self.config.memory_budget_penalty
 
         inference_net = self.config.search_space.inference_space.build(params)
@@ -85,7 +118,10 @@ class GenericObjective:
             inference_network=inference_net,
             summary_network=summary_net,
             params=params,
-            config=WorkflowBuildConfig(inference_conditions=self.config.inference_conditions),
+            config=WorkflowBuildConfig(
+                inference_conditions=self.config.inference_conditions,
+                batches_per_epoch=self.config.batches_per_epoch,
+            ),
         )
 
         callbacks: list[Any] = [
@@ -98,36 +134,56 @@ class GenericObjective:
             OptunaReportCallback(trial, monitor="loss"),
         ]
 
+        t_train_start = time.perf_counter()
         try:
-            workflow.fit_online(
-                epochs=self.config.epochs,
-                batch_size=int(params.get("batch_size", 256)),
-                num_batches_per_epoch=self.config.batches_per_epoch,
-                callbacks=callbacks,
-            )
+            if self.config.train_fn is not None:
+                self.config.train_fn(workflow, params, callbacks)
+            else:
+                _default_train_fn(
+                    workflow,
+                    params,
+                    callbacks,
+                    epochs=self.config.epochs,
+                    batches_per_epoch=self.config.batches_per_epoch,
+                )
         except optuna.TrialPruned:
             cleanup_trial()
             raise
-        except Exception:
+        except Exception as exc:
+            logger.warning("Trial %d failed during training: %s", trial.number, exc)
+            trial.set_user_attr("training_error", str(exc))
             cleanup_trial()
-            return self.config.param_budget_penalty
+            return self.config.training_failure_penalty
+        training_time = time.perf_counter() - t_train_start
+        trial.set_user_attr("training_time_s", round(training_time, 2))
 
         if self.config.validation_data is not None:
+            from bayesflow_hpo.validation.pipeline import run_validation_pipeline
+
             validation_result = run_validation_pipeline(
                 approximator=workflow.approximator,
                 validation_data=self.config.validation_data,
                 n_posterior_samples=self.config.n_posterior_samples,
+                metrics=self.config.metrics,
             )
-            metrics = validation_result["metrics"]
+            cal_error = validation_result.objective_scalar(self.config.objective_metric)
+            metrics = {"summary": {self.config.objective_metric: cal_error}}
+
+            # Store validation timing and summary metrics as trial attrs
+            trial.set_user_attr(
+                "inference_time_s",
+                round(validation_result.timing.get("inference", 0.0), 2),
+            )
+            for key, val in validation_result.summary.items():
+                trial.set_user_attr(key, round(float(val), 6))
         else:
-            # Training history is stored on the workflow (not the approximator)
-            # as a keras.callbacks.History object whose .history attr is the dict.
             hist_obj = getattr(workflow, "history", None)
             hist_dict = getattr(hist_obj, "history", {}) if hist_obj is not None else {}
             last_loss = float(hist_dict.get("loss", [FAILED_TRIAL_CAL_ERROR])[-1])
-            metrics = {"summary": {"mean_cal_error": last_loss}}
+            metrics = {"summary": {self.config.objective_metric: last_loss}}
 
         param_count = get_param_count(workflow.approximator)
+        trial.set_user_attr("param_count", param_count)
         values = extract_objective_values(metrics, param_count)
         cleanup_trial()
         return values

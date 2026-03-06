@@ -27,7 +27,12 @@ def test_estimate_param_count_positive():
         {"dm_subnet_width": 64, "dm_subnet_depth": 2},
         {"cm_subnet_width": 64, "cm_subnet_depth": 2},
         {"scm_subnet_width": 64, "scm_subnet_depth": 2},
-        {"st_summary_dim": 16, "st_embed_dim": 64, "st_num_heads": 4, "st_num_layers": 2},
+        {
+            "st_summary_dim": 16,
+            "st_embed_dim": 64,
+            "st_num_heads": 4,
+            "st_num_layers": 2,
+        },
         {
             "tst_summary_dim": 16,
             "tst_embed_dim": 64,

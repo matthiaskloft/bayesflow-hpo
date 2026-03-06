@@ -24,7 +24,9 @@ class FlowMatchingSpace(BaseSearchSpace):
     include_optional: bool = False
 
     subnet_width: IntDimension = field(
-        default_factory=lambda: IntDimension("fm_subnet_width", low=32, high=256, step=32)
+        default_factory=lambda: IntDimension(
+            "fm_subnet_width", low=32, high=256, step=32
+        )
     )
     subnet_depth: IntDimension = field(
         default_factory=lambda: IntDimension("fm_subnet_depth", low=1, high=4)
@@ -33,7 +35,9 @@ class FlowMatchingSpace(BaseSearchSpace):
         default_factory=lambda: FloatDimension("fm_dropout", low=0.0, high=0.2)
     )
     activation: CategoricalDimension = field(
-        default_factory=lambda: CategoricalDimension("fm_activation", choices=["mish", "silu"])
+        default_factory=lambda: CategoricalDimension(
+            "fm_activation", choices=["mish", "silu"]
+        )
     )
 
     use_optimal_transport: CategoricalDimension = field(
@@ -42,12 +46,10 @@ class FlowMatchingSpace(BaseSearchSpace):
         )
     )
     time_alpha: FloatDimension = field(
-        default_factory=lambda: FloatDimension("fm_time_alpha", low=0.0, high=2.0, default=False)
+        default_factory=lambda: FloatDimension(
+            "fm_time_alpha", low=0.0, high=2.0, default=False
+        )
     )
-    loss_fn: CategoricalDimension = field(
-        default_factory=lambda: CategoricalDimension("fm_loss", choices=["mse"], default=False)
-    )
-
     @property
     def dimensions(self) -> list[Dimension]:
         return [
@@ -57,7 +59,6 @@ class FlowMatchingSpace(BaseSearchSpace):
             self.activation,
             self.use_optimal_transport,
             self.time_alpha,
-            self.loss_fn,
         ]
 
     def sample(self, trial: Any) -> dict[str, Any]:
@@ -75,7 +76,7 @@ class FlowMatchingSpace(BaseSearchSpace):
         return bf.networks.FlowMatching(
             use_optimal_transport=bool(params.get("fm_use_ot", False)),
             time_power_law_alpha=float(params.get("fm_time_alpha", 0.0)),
-            loss_fn=params.get("fm_loss", "mse"),
+            loss_fn="mse",
             subnet_kwargs={
                 "widths": tuple([width] * depth),
                 "activation": params["fm_activation"],

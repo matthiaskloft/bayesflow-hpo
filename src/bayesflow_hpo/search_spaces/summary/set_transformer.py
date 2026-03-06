@@ -30,7 +30,9 @@ class SetTransformerSpace(BaseSearchSpace):
         default_factory=lambda: IntDimension("st_embed_dim", low=32, high=256, step=32)
     )
     num_heads: CategoricalDimension = field(
-        default_factory=lambda: CategoricalDimension("st_num_heads", choices=[1, 2, 4, 8])
+        default_factory=lambda: CategoricalDimension(
+            "st_num_heads", choices=[1, 2, 4, 8]
+        )
     )
     num_layers: IntDimension = field(
         default_factory=lambda: IntDimension("st_num_layers", low=1, high=4)
@@ -40,13 +42,19 @@ class SetTransformerSpace(BaseSearchSpace):
     )
 
     mlp_width: IntDimension = field(
-        default_factory=lambda: IntDimension("st_mlp_width", low=64, high=512, step=64, default=False)
+        default_factory=lambda: IntDimension(
+            "st_mlp_width", low=64, high=512, step=64, default=False
+        )
     )
     mlp_depth: IntDimension = field(
-        default_factory=lambda: IntDimension("st_mlp_depth", low=1, high=4, default=False)
+        default_factory=lambda: IntDimension(
+            "st_mlp_depth", low=1, high=4, default=False
+        )
     )
     num_inducing: IntDimension = field(
-        default_factory=lambda: IntDimension("st_num_inducing", low=8, high=64, step=8, default=False)
+        default_factory=lambda: IntDimension(
+            "st_num_inducing", low=8, high=64, step=8, default=False
+        )
     )
 
     @property

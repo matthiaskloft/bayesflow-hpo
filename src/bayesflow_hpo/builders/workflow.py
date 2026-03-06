@@ -9,12 +9,38 @@ import bayesflow as bf
 import keras
 
 
+def _compile_candidate_for_compat(candidate: Any, optimizer: Any) -> None:
+    """Try common compile signatures without raising on incompatible variants."""
+    compile_fn = getattr(candidate, "compile", None)
+    if compile_fn is None:
+        return
+
+    try:
+        compile_fn()
+        return
+    except TypeError:
+        pass
+
+    try:
+        compile_fn(optimizer=optimizer)
+        return
+    except TypeError:
+        pass
+
+    try:
+        compile_fn(optimizer)
+    except TypeError:
+        return
+
+
 @dataclass
 class WorkflowBuildConfig:
     """Runtime settings used to instantiate a BayesFlow workflow."""
 
     inference_conditions: list[str] | None = None
     checkpoint_name: str = "bayesflow_hpo_trial"
+    batches_per_epoch: int = 50
+    optimizer: Any | None = None
 
 
 def build_workflow(
@@ -26,15 +52,19 @@ def build_workflow(
     config: WorkflowBuildConfig,
 ) -> bf.BasicWorkflow:
     """Create and compile a `bf.BasicWorkflow` for one trial."""
-    batch_size = int(params.get("batch_size", 256))
-    decay_steps = max(1, batch_size)
-    lr_schedule = keras.optimizers.schedules.ExponentialDecay(
-        initial_learning_rate=float(params["initial_lr"]),
-        decay_steps=decay_steps,
-        decay_rate=float(params.get("decay_rate", 0.95)),
-        staircase=True,
-    )
-    optimizer = keras.optimizers.Adam(learning_rate=lr_schedule)
+    initial_lr = float(params["initial_lr"])
+
+    if config.optimizer is not None:
+        optimizer = config.optimizer
+    else:
+        decay_steps = max(1, config.batches_per_epoch)
+        lr_schedule = keras.optimizers.schedules.ExponentialDecay(
+            initial_learning_rate=initial_lr,
+            decay_steps=decay_steps,
+            decay_rate=float(params.get("decay_rate", 0.95)),
+            staircase=True,
+        )
+        optimizer = keras.optimizers.Adam(learning_rate=lr_schedule)
 
     workflow = bf.BasicWorkflow(
         simulator=simulator,
@@ -42,15 +72,14 @@ def build_workflow(
         inference_network=inference_network,
         summary_network=summary_network,
         optimizer=optimizer,
+        initial_learning_rate=initial_lr,
         inference_conditions=config.inference_conditions,
         checkpoint_name=config.checkpoint_name,
     )
 
-    try:
-        workflow.approximator.compile(optimizer=optimizer)
-    except Exception as exc:
-        raise RuntimeError(
-            "Failed to compile workflow approximator in build_workflow()."
-        ) from exc
+    _compile_candidate_for_compat(workflow, optimizer)
+    approximator = getattr(workflow, "approximator", None)
+    if approximator is not None:
+        _compile_candidate_for_compat(approximator, optimizer)
 
     return workflow

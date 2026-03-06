@@ -37,7 +37,11 @@ def get_workflow_metadata(
     return metadata
 
 
-def save_workflow_with_metadata(approximator: Any, path: str | Path, metadata: dict[str, Any]) -> Path:
+def save_workflow_with_metadata(
+    approximator: Any,
+    path: str | Path,
+    metadata: dict[str, Any],
+) -> Path:
     """Save workflow model (`.keras`) and metadata (`.json`)."""
     base_path = Path(path)
     model_path = base_path.with_suffix(".keras")
@@ -63,5 +67,9 @@ def load_workflow_with_metadata(path: str | Path) -> tuple[Any, dict[str, Any]]:
     meta_path = base_path.with_suffix(".json")
 
     approximator = keras.saving.load_model(model_path)
-    metadata = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {}
+    metadata = (
+        json.loads(meta_path.read_text(encoding="utf-8"))
+        if meta_path.exists()
+        else {}
+    )
     return approximator, metadata

@@ -1,6 +1,7 @@
 """Tests for newly added Phase 2 search spaces."""
 
 import pytest
+from conftest import FakeTrial
 
 from bayesflow_hpo.search_spaces.inference.consistency import ConsistencyModelSpace
 from bayesflow_hpo.search_spaces.inference.diffusion import DiffusionModelSpace
@@ -17,17 +18,6 @@ from bayesflow_hpo.search_spaces.summary.time_series_network import (
 from bayesflow_hpo.search_spaces.summary.time_series_transformer import (
     TimeSeriesTransformerSpace,
 )
-
-
-class FakeTrial:
-    def suggest_int(self, name, low, high, step=None, log=False):
-        return low
-
-    def suggest_float(self, name, low, high, log=False):
-        return low
-
-    def suggest_categorical(self, name, choices):
-        return choices[0]
 
 
 @pytest.mark.parametrize(

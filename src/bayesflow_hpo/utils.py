@@ -12,6 +12,10 @@ def loguniform_int(
     rng: np.random.Generator | np.random.RandomState | None = None,
 ) -> int:
     """Sample an integer from a generalized log-uniform distribution."""
+    if low <= 0:
+        raise ValueError(f"low must be positive, got {low}")
+    if high < low:
+        raise ValueError(f"high must be >= low, got low={low}, high={high}")
     random = rng if rng is not None else np.random
     log_low = np.log(low)
     log_high = np.log(high)
@@ -27,6 +31,10 @@ def loguniform_float(
     rng: np.random.Generator | np.random.RandomState | None = None,
 ) -> float:
     """Sample a float from a generalized log-uniform distribution."""
+    if low <= 0:
+        raise ValueError(f"low must be positive, got {low}")
+    if high < low:
+        raise ValueError(f"high must be >= low, got low={low}, high={high}")
     random = rng if rng is not None else np.random
     log_low = np.log(low)
     log_high = np.log(high)

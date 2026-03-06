@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(KERAS_BACKEND=torch python -c \"import bayesflow; print\\(bayesflow.__file__\\)\")",
+      "Bash(xargs grep -l \"hpo\\\\|hyperparameter\\\\|search\\\\|optim\")",
+      "Bash(xargs grep -l \"validation\\\\|sbc\\\\|diag\")",
+      "Bash(pip install ruff)",
+      "Bash(ruff check src/)",
+      "Bash(ruff check tests/)",
+      "Bash(ruff check src/bayesflow_hpo/validation/)",
+      "Bash(ruff check --fix src/bayesflow_hpo/validation/)",
+      "Bash(ruff check src/ tests/)",
+      "Bash(ruff check --fix tests/test_validation/ tests/test_search_spaces/test_registry.py)",
+      "Bash(ruff check --fix src/bayesflow_hpo/optimization/__init__.py)",
+      "Bash(pip install pytest)",
+      "Bash(KERAS_BACKEND=torch python -m pytest tests/ -v --tb=short)",
+      "Bash(pip install torch --index-url https://download.pytorch.org/whl/cpu)",
+      "Bash(find . -name \"__pycache__\" -exec rm -rf {} +)",
+      "Bash(KERAS_BACKEND=torch python -m pytest tests/test_validation/test_metric_registry.py::test_coverage_metric_two_sided -v --tb=short)",
+      "Bash(KERAS_BACKEND=torch PYTHONIOENCODING=utf-8 jupyter nbconvert --to notebook --execute --inplace examples/quickstart.ipynb --ExecutePreprocessor.timeout=600)"
+    ]
+  }
+}

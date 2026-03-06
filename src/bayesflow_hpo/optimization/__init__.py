@@ -12,7 +12,13 @@ from bayesflow_hpo.optimization.constraints import (
 )
 from bayesflow_hpo.optimization.objective import GenericObjective, ObjectiveConfig
 from bayesflow_hpo.optimization.sampling import sample_hyperparameters
-from bayesflow_hpo.optimization.study import create_study, resume_study, warm_start_study
+from bayesflow_hpo.optimization.study import (
+    count_trained_trials,
+    create_study,
+    optimize_until,
+    resume_study,
+    warm_start_study,
+)
 
 __all__ = [
     "GenericObjective",
@@ -20,10 +26,12 @@ __all__ = [
     "ObjectiveConfig",
     "OptunaReportCallback",
     "cleanup_trial",
+    "count_trained_trials",
     "create_study",
     "estimate_param_count",
     "estimate_peak_memory_mb",
     "exceeds_memory_budget",
+    "optimize_until",
     "resume_study",
     "sample_hyperparameters",
     "warm_start_study",

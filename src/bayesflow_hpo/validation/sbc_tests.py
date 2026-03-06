@@ -26,11 +26,13 @@ def compute_sbc_uniformity_tests(
     ks_stat, ks_pvalue = kstest(normalized_ranks, "uniform")
 
     n_bins_actual = min(n_bins, n_posterior_samples + 1)
-    hist, _ = np.histogram(ranks, bins=n_bins_actual, range=(-0.5, n_posterior_samples + 0.5))
+    bin_range = (-0.5, n_posterior_samples + 0.5)
+    hist, _ = np.histogram(ranks, bins=n_bins_actual, range=bin_range)
     expected_per_bin = n_sims / n_bins_actual
 
     if expected_per_bin >= 5:
-        chi2_stat, chi2_pvalue = chisquare(hist, f_exp=[expected_per_bin] * n_bins_actual)
+        expected = [expected_per_bin] * n_bins_actual
+        chi2_stat, chi2_pvalue = chisquare(hist, f_exp=expected)
     else:
         chi2_stat, chi2_pvalue = np.nan, np.nan
 
@@ -65,7 +67,9 @@ def compute_sbc_c2st(
     x_data = np.concatenate([ranks, uniform_ranks]).reshape(-1, 1)
     y = np.concatenate([np.ones(n_sims), np.zeros(n_sims)])
 
-    clf = RandomForestClassifier(n_estimators=50, max_depth=5, random_state=random_state)
+    clf = RandomForestClassifier(
+        n_estimators=50, max_depth=5, random_state=random_state,
+    )
     scores = cross_val_score(clf, x_data, y, cv=n_folds, scoring="accuracy")
 
     return {

@@ -30,13 +30,17 @@ class FusionTransformerSpace(BaseSearchSpace):
         default_factory=lambda: IntDimension("ft_embed_dim", low=32, high=256, step=32)
     )
     num_heads: CategoricalDimension = field(
-        default_factory=lambda: CategoricalDimension("ft_num_heads", choices=[1, 2, 4, 8])
+        default_factory=lambda: CategoricalDimension(
+            "ft_num_heads", choices=[1, 2, 4, 8]
+        )
     )
     num_layers: IntDimension = field(
         default_factory=lambda: IntDimension("ft_num_layers", low=1, high=4)
     )
     template_dim: IntDimension = field(
-        default_factory=lambda: IntDimension("ft_template_dim", low=32, high=256, step=32)
+        default_factory=lambda: IntDimension(
+            "ft_template_dim", low=32, high=256, step=32
+        )
     )
     dropout: FloatDimension = field(
         default_factory=lambda: FloatDimension("ft_dropout", low=0.0, high=0.3)

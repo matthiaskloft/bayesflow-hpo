@@ -12,7 +12,9 @@ from bayesflow_hpo.search_spaces.registry import get_summary_space
 
 @dataclass
 class _DummySummarySpace(BaseSearchSpace):
-    width: IntDimension = field(default_factory=lambda: IntDimension("dummy_width", 8, 16, step=8))
+    width: IntDimension = field(
+        default_factory=lambda: IntDimension("dummy_width", 8, 16, step=8)
+    )
 
     @property
     def dimensions(self) -> list[Dimension]:

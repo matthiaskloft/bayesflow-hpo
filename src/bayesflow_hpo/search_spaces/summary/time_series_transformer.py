@@ -30,7 +30,9 @@ class TimeSeriesTransformerSpace(BaseSearchSpace):
         default_factory=lambda: IntDimension("tst_embed_dim", low=32, high=256, step=32)
     )
     num_heads: CategoricalDimension = field(
-        default_factory=lambda: CategoricalDimension("tst_num_heads", choices=[1, 2, 4, 8])
+        default_factory=lambda: CategoricalDimension(
+            "tst_num_heads", choices=[1, 2, 4, 8]
+        )
     )
     num_layers: IntDimension = field(
         default_factory=lambda: IntDimension("tst_num_layers", low=1, high=4)
@@ -40,7 +42,9 @@ class TimeSeriesTransformerSpace(BaseSearchSpace):
     )
 
     mlp_width: IntDimension = field(
-        default_factory=lambda: IntDimension("tst_mlp_width", low=64, high=512, step=64, default=False)
+        default_factory=lambda: IntDimension(
+            "tst_mlp_width", low=64, high=512, step=64, default=False
+        )
     )
     time_embed: CategoricalDimension = field(
         default_factory=lambda: CategoricalDimension(

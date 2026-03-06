@@ -27,7 +27,9 @@ class TimeSeriesNetworkSpace(BaseSearchSpace):
         default_factory=lambda: IntDimension("tsn_summary_dim", low=8, high=64, step=8)
     )
     recurrent_dim: IntDimension = field(
-        default_factory=lambda: IntDimension("tsn_recurrent_dim", low=32, high=256, step=32)
+        default_factory=lambda: IntDimension(
+            "tsn_recurrent_dim", low=32, high=256, step=32
+        )
     )
     filters: IntDimension = field(
         default_factory=lambda: IntDimension("tsn_filters", low=16, high=128, step=16)
@@ -47,7 +49,9 @@ class TimeSeriesNetworkSpace(BaseSearchSpace):
         )
     )
     skip_steps: IntDimension = field(
-        default_factory=lambda: IntDimension("tsn_skip_steps", low=1, high=8, default=False)
+        default_factory=lambda: IntDimension(
+            "tsn_skip_steps", low=1, high=8, default=False
+        )
     )
 
     @property

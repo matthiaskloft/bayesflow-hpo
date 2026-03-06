@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from bayesflow_hpo.search_spaces.base import SearchSpace
-
 from bayesflow_hpo.search_spaces.inference import (
     ConsistencyModelSpace,
     CouplingFlowSpace,
@@ -20,7 +19,6 @@ from bayesflow_hpo.search_spaces.summary import (
     TimeSeriesNetworkSpace,
     TimeSeriesTransformerSpace,
 )
-
 
 INFERENCE_SPACE_FACTORIES: dict[str, Callable[[], SearchSpace]] = {
     "coupling_flow": CouplingFlowSpace,

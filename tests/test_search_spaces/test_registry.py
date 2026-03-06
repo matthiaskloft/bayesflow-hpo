@@ -9,8 +9,9 @@ from bayesflow_hpo.search_spaces.inference import (
     FlowMatchingSpace,
     StableConsistencyModelSpace,
 )
-from bayesflow_hpo.search_spaces.registry import get_inference_space, get_summary_space
 from bayesflow_hpo.search_spaces.registry import (
+    get_inference_space,
+    get_summary_space,
     list_inference_spaces,
     register_inference_space,
 )

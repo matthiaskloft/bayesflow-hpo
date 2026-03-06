@@ -12,14 +12,25 @@ from keras.callbacks import Callback
 class OptunaReportCallback(Callback):
     """Report monitored Keras metric to Optuna and enable pruning."""
 
-    def __init__(self, trial: optuna.Trial, monitor: str = "val_loss", report_frequency: int = 1):
+    def __init__(
+        self,
+        trial: optuna.Trial,
+        monitor: str = "val_loss",
+        report_frequency: int = 1,
+    ):
         super().__init__()
         self.trial = trial
         self.monitor = monitor
         self.report_frequency = report_frequency
+        directions = getattr(getattr(trial, "study", None), "directions", None)
+        self._supports_report = directions is None or len(directions) <= 1
 
     def on_epoch_end(self, epoch: int, logs: Any = None) -> None:
-        if logs is None or epoch % self.report_frequency != 0:
+        if (
+            logs is None
+            or epoch % self.report_frequency != 0
+            or not self._supports_report
+        ):
             return
 
         value = logs.get(self.monitor)

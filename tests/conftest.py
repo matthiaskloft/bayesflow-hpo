@@ -1,0 +1,41 @@
+"""Shared test fixtures for bayesflow_hpo."""
+
+import numpy as np
+import pytest
+
+
+class FakeTrial:
+    """Minimal Optuna trial stub for unit tests."""
+
+    def suggest_int(self, name, low, high, step=None, log=False):
+        return low
+
+    def suggest_float(self, name, low, high, log=False):
+        return low
+
+    def suggest_categorical(self, name, choices):
+        return choices[0]
+
+
+class DummySimulator:
+    """Simulator that generates Gaussian data."""
+
+    def sample(self, n_sims, conditions=None, seed=None):
+        rng = np.random.default_rng(seed)
+        theta = rng.normal(size=(n_sims, 1))
+        x = theta + rng.normal(scale=0.1, size=(n_sims, 1))
+        out = {"theta": theta, "x": x}
+        if conditions is not None:
+            for key, value in conditions.items():
+                out[key] = np.full((n_sims, 1), value)
+        return out
+
+
+@pytest.fixture
+def fake_trial():
+    return FakeTrial()
+
+
+@pytest.fixture
+def dummy_simulator():
+    return DummySimulator()

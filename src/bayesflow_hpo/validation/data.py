@@ -54,7 +54,9 @@ def generate_validation_dataset(
     for point in grid_points:
         condition = dict(zip(keys, point, strict=False))
         batch_seed = int(rng.integers(0, 2**31))
-        sims = simulator.sample(sims_per_condition, conditions=condition, seed=batch_seed)
+        sims = simulator.sample(
+            sims_per_condition, conditions=condition, seed=batch_seed,
+        )
         simulations.append(sims)
         condition_labels.append(condition)
 
@@ -79,7 +81,8 @@ def save_validation_dataset(dataset: ValidationDataset, path: str | Path) -> Non
         "seed": dataset.seed,
         "n_batches": len(dataset.simulations),
     }
-    (out_dir / "metadata.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+    meta_text = json.dumps(metadata, indent=2)
+    (out_dir / "metadata.json").write_text(meta_text, encoding="utf-8")
 
     arrays: dict[str, np.ndarray] = {}
     for batch_idx, batch in enumerate(dataset.simulations):
@@ -87,6 +90,71 @@ def save_validation_dataset(dataset: ValidationDataset, path: str | Path) -> Non
             arrays[f"b{batch_idx}__{key}"] = np.asarray(value)
 
     np.savez_compressed(out_dir / "arrays.npz", **arrays)
+
+
+def make_condition_grid(
+    *,
+    linspace: dict[str, tuple[float, float, int]] | None = None,
+    logspace: dict[str, tuple[float, float, int]] | None = None,
+    values: dict[str, list[Any]] | None = None,
+) -> dict[str, list[Any]]:
+    """Build a condition grid from convenience specs.
+
+    Parameters
+    ----------
+    linspace
+        ``{name: (start, stop, n_points)}`` — linearly spaced values.
+    logspace
+        ``{name: (start, stop, n_points)}`` — log-spaced values
+        (base 10, start/stop are **not** exponents — they are raw values).
+    values
+        ``{name: [v1, v2, ...]}`` — explicit value lists.
+
+    Returns
+    -------
+    dict[str, list]
+        Condition grid suitable for :func:`generate_validation_dataset`.
+    """
+    grid: dict[str, list[Any]] = {}
+    if linspace:
+        for name, (start, stop, n) in linspace.items():
+            grid[name] = np.linspace(start, stop, n).tolist()
+    if logspace:
+        for name, (start, stop, n) in logspace.items():
+            grid[name] = np.geomspace(start, stop, n).tolist()
+    if values:
+        for name, vals in values.items():
+            grid[name] = list(vals)
+    return grid
+
+
+def make_validation_dataset(
+    simulator: Any,
+    param_keys: list[str],
+    data_keys: list[str],
+    *,
+    linspace: dict[str, tuple[float, float, int]] | None = None,
+    logspace: dict[str, tuple[float, float, int]] | None = None,
+    values: dict[str, list[Any]] | None = None,
+    sims_per_condition: int = 200,
+    seed: int = 42,
+) -> ValidationDataset:
+    """One-step dataset creation combining grid construction + generation.
+
+    Convenience wrapper that calls :func:`make_condition_grid` then
+    :func:`generate_validation_dataset`.
+    """
+    grid = make_condition_grid(
+        linspace=linspace, logspace=logspace, values=values,
+    ) or None
+    return generate_validation_dataset(
+        simulator=simulator,
+        param_keys=param_keys,
+        data_keys=data_keys,
+        condition_grid=grid,
+        sims_per_condition=sims_per_condition,
+        seed=seed,
+    )
 
 
 def load_validation_dataset(path: str | Path) -> ValidationDataset:

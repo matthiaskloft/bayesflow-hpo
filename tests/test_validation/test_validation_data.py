@@ -3,26 +3,60 @@
 from pathlib import Path
 
 import numpy as np
+from conftest import DummySimulator
 
 from bayesflow_hpo.validation.data import (
     ValidationDataset,
     generate_validation_dataset,
     load_validation_dataset,
+    make_condition_grid,
+    make_validation_dataset,
     save_validation_dataset,
 )
 
 
-class DummySimulator:
-    def sample(self, n_sims, conditions=None, seed=None):
-        rng = np.random.default_rng(seed)
-        theta = rng.normal(size=(n_sims, 1))
-        x = theta + rng.normal(scale=0.1, size=(n_sims, 1))
+def test_make_condition_grid_linspace():
+    grid = make_condition_grid(linspace={"N": (10, 100, 5)})
+    assert "N" in grid
+    assert len(grid["N"]) == 5
+    assert abs(grid["N"][0] - 10) < 1e-9
+    assert abs(grid["N"][-1] - 100) < 1e-9
 
-        out = {"theta": theta, "x": x}
-        if conditions is not None:
-            for key, value in conditions.items():
-                out[key] = np.full((n_sims, 1), value)
-        return out
+
+def test_make_condition_grid_logspace():
+    grid = make_condition_grid(logspace={"lr": (1e-4, 1e-1, 4)})
+    assert len(grid["lr"]) == 4
+    assert grid["lr"][0] > 0
+    assert grid["lr"][-1] < grid["lr"][0] * 2000
+
+
+def test_make_condition_grid_values():
+    grid = make_condition_grid(values={"method": ["A", "B", "C"]})
+    assert grid["method"] == ["A", "B", "C"]
+
+
+def test_make_condition_grid_combined():
+    grid = make_condition_grid(
+        linspace={"N": (10, 50, 3)},
+        values={"group": [1, 2]},
+    )
+    assert "N" in grid
+    assert "group" in grid
+    assert len(grid["N"]) == 3
+    assert len(grid["group"]) == 2
+
+
+def test_make_validation_dataset():
+    simulator = DummySimulator()
+    ds = make_validation_dataset(
+        simulator=simulator,
+        param_keys=["theta"],
+        data_keys=["x"],
+        linspace={"N": (10, 50, 3)},
+        sims_per_condition=5,
+    )
+    assert isinstance(ds, ValidationDataset)
+    assert len(ds.simulations) == 3
 
 
 def test_generate_validation_dataset_without_conditions():

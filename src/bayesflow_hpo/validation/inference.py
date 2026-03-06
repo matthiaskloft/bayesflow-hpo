@@ -21,7 +21,9 @@ def make_bayesflow_infer_fn(
 
     def infer_fn(sim_data: dict[str, Any], n_posterior_samples: int) -> np.ndarray:
         conditions = {k: sim_data[k] for k in data_keys if k in sim_data}
-        post_draws = approximator.sample(conditions=conditions, num_samples=int(n_posterior_samples))
+        post_draws = approximator.sample(
+            conditions=conditions, num_samples=int(n_posterior_samples),
+        )
 
         if len(param_keys) == 1:
             draws = np.asarray(post_draws[param_keys[0]])

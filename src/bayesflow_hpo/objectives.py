@@ -47,9 +47,16 @@ def denormalize_param_count(normalized: float) -> int:
     return int(10 ** (normalized * PARAM_COUNT_LOG_SCALE))
 
 
-def extract_objective_values(metrics: dict[str, Any], param_count: int) -> tuple[float, float]:
-    """Extract (calibration_error, normalized_param_score)."""
+def extract_objective_values(
+    metrics: dict[str, Any],
+    param_count: int,
+    objective_metric: str = "calibration_error",
+) -> tuple[float, float]:
+    """Extract (objective_value, normalized_param_score)."""
     summary = metrics.get("summary", metrics)
-    cal_error = float(summary.get("mean_cal_error", 1.0))
+    # Try the requested metric, fall back to mean_cal_error, then 1.0
+    objective_value = float(
+        summary.get(objective_metric, summary.get("mean_cal_error", 1.0))
+    )
     param_score = normalize_param_count(param_count)
-    return cal_error, param_score
+    return objective_value, param_score

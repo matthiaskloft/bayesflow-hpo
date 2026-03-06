@@ -23,7 +23,9 @@ class StableConsistencyModelSpace(BaseSearchSpace):
     include_optional: bool = False
 
     subnet_width: IntDimension = field(
-        default_factory=lambda: IntDimension("scm_subnet_width", low=32, high=256, step=32)
+        default_factory=lambda: IntDimension(
+            "scm_subnet_width", low=32, high=256, step=32
+        )
     )
     subnet_depth: IntDimension = field(
         default_factory=lambda: IntDimension("scm_subnet_depth", low=1, high=4)
@@ -33,7 +35,9 @@ class StableConsistencyModelSpace(BaseSearchSpace):
     )
 
     sigma: FloatDimension = field(
-        default_factory=lambda: FloatDimension("scm_sigma", low=0.1, high=2.0, default=False)
+        default_factory=lambda: FloatDimension(
+            "scm_sigma", low=0.1, high=2.0, default=False
+        )
     )
 
     @property

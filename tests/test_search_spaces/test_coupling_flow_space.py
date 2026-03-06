@@ -1,17 +1,8 @@
 """Tests for CouplingFlow search space behavior."""
 
+from conftest import FakeTrial
+
 from bayesflow_hpo.search_spaces.inference.coupling_flow import CouplingFlowSpace
-
-
-class FakeTrial:
-    def suggest_int(self, name, low, high, step=None, log=False):
-        return low
-
-    def suggest_float(self, name, low, high, log=False):
-        return low
-
-    def suggest_categorical(self, name, choices):
-        return choices[0]
 
 
 def test_default_sampling_skips_optional_dimensions():

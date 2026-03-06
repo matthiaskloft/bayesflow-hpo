@@ -20,13 +20,19 @@ class TrainingSpace(BaseSearchSpace):
     include_optional: bool = False
 
     initial_lr: FloatDimension = field(
-        default_factory=lambda: FloatDimension("initial_lr", low=1e-4, high=5e-3, log=True)
+        default_factory=lambda: FloatDimension(
+            "initial_lr", low=1e-4, high=5e-3, log=True
+        )
     )
     batch_size: IntDimension = field(
-        default_factory=lambda: IntDimension("batch_size", low=32, high=1024, step=32, default=False)
+        default_factory=lambda: IntDimension(
+            "batch_size", low=32, high=1024, step=32, default=False
+        )
     )
     decay_rate: FloatDimension = field(
-        default_factory=lambda: FloatDimension("decay_rate", low=0.8, high=0.99, default=False)
+        default_factory=lambda: FloatDimension(
+            "decay_rate", low=0.8, high=0.99, default=False
+        )
     )
 
     @property

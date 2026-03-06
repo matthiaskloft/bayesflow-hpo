@@ -8,8 +8,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import optuna
 
-from bayesflow_hpo.objectives import denormalize_param_count
-from bayesflow_hpo.results.extraction import trials_to_dataframe
+from bayesflow_hpo.objectives import FAILED_TRIAL_PARAM_SCORE, denormalize_param_count
+from bayesflow_hpo.results.extraction import _objective_column_names, trials_to_dataframe
 
 
 def plot_pareto_front(study: optuna.Study, ax: Any | None = None) -> Any:
@@ -18,19 +18,50 @@ def plot_pareto_front(study: optuna.Study, ax: Any | None = None) -> Any:
         _, ax = plt.subplots(figsize=(8, 6))
 
     trials_df = trials_to_dataframe(study)
-    if "objective_0" not in trials_df.columns or "objective_1" not in trials_df.columns:
-        ax.text(0.5, 0.5, "Single-objective study", ha="center", va="center", transform=ax.transAxes)
+    obj_cols = _objective_column_names(study)
+    if len(obj_cols) < 2 or obj_cols[0] not in trials_df.columns or obj_cols[1] not in trials_df.columns:
+        ax.text(
+            0.5,
+            0.5,
+            "Single-objective study",
+            ha="center",
+            va="center",
+            transform=ax.transAxes,
+        )
         return ax
 
-    denorm_params = trials_df["objective_1"].apply(denormalize_param_count)
-    ax.scatter(trials_df["objective_0"], denorm_params, alpha=0.4, label="Trials")
+    col_cal, col_params = obj_cols[0], obj_cols[1]
+    valid = trials_df[col_params] < FAILED_TRIAL_PARAM_SCORE
+    trials_df = trials_df[valid]
+    denorm_params = trials_df[col_params].apply(denormalize_param_count)
+    ax.scatter(trials_df[col_cal], denorm_params, alpha=0.4, label="Trials")
 
     pareto = study.best_trials
-    pareto_cal = [t.values[0] for t in pareto if t.values is not None]
-    pareto_params = [denormalize_param_count(t.values[1]) for t in pareto if t.values is not None]
+    pareto_cal = [
+        t.values[0]
+        for t in pareto
+        if t.values is not None and t.values[1] < FAILED_TRIAL_PARAM_SCORE
+    ]
+    pareto_params = [
+        denormalize_param_count(t.values[1])
+        for t in pareto
+        if t.values is not None and t.values[1] < FAILED_TRIAL_PARAM_SCORE
+    ]
     if pareto_cal:
         ax.scatter(pareto_cal, pareto_params, c="red", s=90, marker="*", label="Pareto")
 
+    ax.set_yscale("log")
+    ax.yaxis.set_major_formatter(
+        plt.FuncFormatter(
+            lambda y, _: (
+                f"{y / 1e6:.4g} M"
+                if y >= 1e6
+                else f"{y / 1e3:.4g} K"
+                if y >= 1e3
+                else f"{y:.4g}"
+            )
+        )
+    )
     ax.set_xlabel("Calibration error")
     ax.set_ylabel("Parameter count")
     ax.set_title("Pareto front")
@@ -38,7 +69,11 @@ def plot_pareto_front(study: optuna.Study, ax: Any | None = None) -> Any:
     return ax
 
 
-def plot_param_importance(study: optuna.Study, ax: Any | None = None, top_k: int = 10) -> Any:
+def plot_param_importance(
+    study: optuna.Study,
+    ax: Any | None = None,
+    top_k: int = 10,
+) -> Any:
     """Plot Optuna parameter importances (single-objective-style)."""
     if ax is None:
         _, ax = plt.subplots(figsize=(8, 6))
@@ -46,7 +81,14 @@ def plot_param_importance(study: optuna.Study, ax: Any | None = None, top_k: int
     try:
         importance = optuna.importance.get_param_importances(study)
     except Exception:
-        ax.text(0.5, 0.5, "Importance unavailable", ha="center", va="center", transform=ax.transAxes)
+        ax.text(
+            0.5,
+            0.5,
+            "Importance unavailable",
+            ha="center",
+            va="center",
+            transform=ax.transAxes,
+        )
         return ax
 
     params = list(importance.keys())[:top_k]

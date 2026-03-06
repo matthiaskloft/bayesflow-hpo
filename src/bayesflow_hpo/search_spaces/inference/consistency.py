@@ -34,7 +34,9 @@ class ConsistencyModelSpace(BaseSearchSpace):
     include_optional: bool = False
 
     subnet_width: IntDimension = field(
-        default_factory=lambda: IntDimension("cm_subnet_width", low=32, high=256, step=32)
+        default_factory=lambda: IntDimension(
+            "cm_subnet_width", low=32, high=256, step=32
+        )
     )
     subnet_depth: IntDimension = field(
         default_factory=lambda: IntDimension("cm_subnet_depth", low=1, high=4)
@@ -44,10 +46,14 @@ class ConsistencyModelSpace(BaseSearchSpace):
     )
 
     max_time: IntDimension = field(
-        default_factory=lambda: IntDimension("cm_max_time", low=50, high=500, default=False)
+        default_factory=lambda: IntDimension(
+            "cm_max_time", low=50, high=500, default=False
+        )
     )
     sigma2: FloatDimension = field(
-        default_factory=lambda: FloatDimension("cm_sigma2", low=0.1, high=2.0, default=False)
+        default_factory=lambda: FloatDimension(
+            "cm_sigma2", low=0.1, high=2.0, default=False
+        )
     )
     s0: IntDimension = field(
         default_factory=lambda: IntDimension("cm_s0", low=2, high=30, default=False)

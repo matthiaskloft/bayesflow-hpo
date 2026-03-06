@@ -46,10 +46,6 @@ class DeepSetSpace(BaseSearchSpace):
             "ds_spectral_norm", choices=[True, False], default=False
         )
     )
-    pooling: CategoricalDimension = field(
-        default_factory=lambda: CategoricalDimension("ds_pooling", choices=["mean"], default=False)
-    )
-
     @property
     def dimensions(self) -> list[Dimension]:
         return [
@@ -59,7 +55,6 @@ class DeepSetSpace(BaseSearchSpace):
             self.dropout,
             self.activation,
             self.spectral_norm,
-            self.pooling,
         ]
 
     def sample(self, trial: Any) -> dict[str, Any]:
@@ -82,7 +77,7 @@ class DeepSetSpace(BaseSearchSpace):
             mlp_widths_invariant_last=(width,) * 2,
             activation=params.get("ds_activation", "silu"),
             spectral_normalization=bool(params.get("ds_spectral_norm", False)),
-            inner_pooling=params.get("ds_pooling", "mean"),
-            output_pooling=params.get("ds_pooling", "mean"),
+            inner_pooling="mean",
+            output_pooling="mean",
             dropout=float(params["ds_dropout"]),
         )

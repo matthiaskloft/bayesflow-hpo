@@ -1,6 +1,7 @@
 """Tests for network/summary selection search spaces."""
 
 import pytest
+from conftest import FakeTrial
 
 from bayesflow_hpo.search_spaces.composite import (
     NetworkSelectionSpace,
@@ -8,17 +9,6 @@ from bayesflow_hpo.search_spaces.composite import (
 )
 from bayesflow_hpo.search_spaces.inference.coupling_flow import CouplingFlowSpace
 from bayesflow_hpo.search_spaces.summary.deep_set import DeepSetSpace
-
-
-class FakeTrial:
-    def suggest_int(self, name, low, high, step=None, log=False):
-        return low
-
-    def suggest_float(self, name, low, high, log=False):
-        return low
-
-    def suggest_categorical(self, name, choices):
-        return choices[0]
 
 
 def test_network_selection_space_marks_selected_type():

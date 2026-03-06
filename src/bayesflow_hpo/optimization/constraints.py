@@ -19,7 +19,12 @@ def _safe_float(value: Any, default: float) -> float:
         return default
 
 
-def _mlp_block_params(input_dim: int, hidden_dim: int, depth: int, output_dim: int) -> int:
+def _mlp_block_params(
+    input_dim: int,
+    hidden_dim: int,
+    depth: int,
+    output_dim: int,
+) -> int:
     if depth <= 0:
         return max(1, input_dim * output_dim)
 
@@ -44,7 +49,9 @@ def _estimate_summary_params(params: dict[str, Any]) -> tuple[int, int]:
         layers = _safe_int(params.get("tst_num_layers"), 2)
         heads = _safe_int(params.get("tst_num_heads"), 4)
         mlp_width = _safe_int(params.get("tst_mlp_width"), 2 * embed_dim)
-        total = layers * (embed_dim * embed_dim + embed_dim * mlp_width + heads * embed_dim)
+        total = layers * (
+            embed_dim * embed_dim + embed_dim * mlp_width + heads * embed_dim
+        )
         return max(1, total), summary_dim
 
     if "tsn_summary_dim" in params:
@@ -124,8 +131,7 @@ def estimate_param_count(params: dict[str, Any]) -> int:
     """Heuristic parameter estimate from supported search-space keys."""
     summary_params, summary_dim = _estimate_summary_params(params)
     inference_params = _estimate_inference_params(params, summary_dim)
-    regularization = int(1000 * _safe_float(params.get("initial_lr"), 1e-3))
-    return max(1, int(summary_params + inference_params + regularization))
+    return max(1, int(summary_params + inference_params))
 
 
 def estimate_peak_memory_mb(

@@ -1,20 +1,11 @@
 """Tests for composite search-space behavior."""
 
+from conftest import FakeTrial
+
 from bayesflow_hpo.search_spaces.composite import CompositeSearchSpace
 from bayesflow_hpo.search_spaces.inference.coupling_flow import CouplingFlowSpace
 from bayesflow_hpo.search_spaces.summary.deep_set import DeepSetSpace
 from bayesflow_hpo.search_spaces.training import TrainingSpace
-
-
-class FakeTrial:
-    def suggest_int(self, name, low, high, step=None, log=False):
-        return low
-
-    def suggest_float(self, name, low, high, log=False):
-        return low
-
-    def suggest_categorical(self, name, choices):
-        return choices[0]
 
 
 def test_composite_space_merges_inference_summary_and_training():
