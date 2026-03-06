@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import importlib.util
+import logging
 from typing import Any
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 KERAS_AVAILABLE = importlib.util.find_spec("keras") is not None
 
@@ -26,12 +29,14 @@ def get_param_count(model: Any) -> int:
     if hasattr(model, "count_params"):
         try:
             return int(model.count_params())
-        except ValueError:
-            return -1
+        except ValueError as exc:
+            logger.warning("count_params() failed — model may not be built")
+            raise ValueError("Model not built: count_params() failed") from exc
 
     if hasattr(model, "trainable_weights"):
         if len(model.trainable_weights) == 0:
-            return -1
+            logger.warning("Model has no trainable weights — may not be built")
+            raise ValueError("Model not built: no trainable weights")
         return int(sum(np.prod(w.shape) for w in model.trainable_weights))
 
     raise TypeError(f"Cannot count parameters for type: {type(model)}")
@@ -57,7 +62,7 @@ def normalize_param_count(
         Upper reference (maps to 1.0).  Default ``1_000_000``.
     """
     if param_count <= 0:
-        return 0.0
+        return 1.0  # worst score — signals broken or unbuilt model
     if min_count <= 0:
         min_count = 1
     if max_count <= min_count:

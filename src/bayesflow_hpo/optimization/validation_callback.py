@@ -142,6 +142,7 @@ class PeriodicValidationCallback(Callback):
         self.n_posterior_samples = n_posterior_samples
         self.n_startup_trials = n_startup_trials
         self._step = 0  # monotonic step counter for Optuna
+        self._consecutive_failures = 0
         self._is_multi_objective = len(trial.study.directions) > 1
 
     def on_epoch_end(self, epoch: int, logs: Any = None) -> None:
@@ -152,7 +153,16 @@ class PeriodicValidationCallback(Callback):
 
         score = self._run_lightweight_validation()
         if score is None:
+            self._consecutive_failures += 1
+            if self._consecutive_failures == 3:
+                logger.warning(
+                    "Trial %d: %d consecutive intermediate validation "
+                    "failures — pruning may be ineffective.",
+                    self.trial.number,
+                    self._consecutive_failures,
+                )
             return
+        self._consecutive_failures = 0
 
         self._step += 1
 
@@ -194,8 +204,10 @@ class PeriodicValidationCallback(Callback):
             if cal_err is not None:
                 return float(cal_err)
             return None
+        except optuna.TrialPruned:
+            raise
         except Exception:
-            logger.debug(
+            logger.warning(
                 "Intermediate validation failed (trial %d)",
                 self.trial.number,
                 exc_info=True,

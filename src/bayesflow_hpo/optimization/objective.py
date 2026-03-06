@@ -296,32 +296,68 @@ class GenericObjective:
         trial.set_user_attr("training_time_s", round(training_time, 2))
 
         # --- Final validation ---
-        if self.config.validation_data is not None:
-            from bayesflow_hpo.validation.pipeline import run_validation_pipeline
+        try:
+            if self.config.validation_data is not None:
+                from bayesflow_hpo.validation.pipeline import run_validation_pipeline
 
-            validation_result = run_validation_pipeline(
-                approximator=workflow.approximator,
-                validation_data=self.config.validation_data,
-                n_posterior_samples=self.config.n_posterior_samples,
-                metrics=self.config.metrics,
-            )
-            cal_error = validation_result.objective_scalar(self.config.objective_metric)
-            metrics = {"summary": {self.config.objective_metric: cal_error}}
+                validation_result = run_validation_pipeline(
+                    approximator=workflow.approximator,
+                    validation_data=self.config.validation_data,
+                    n_posterior_samples=self.config.n_posterior_samples,
+                    metrics=self.config.metrics,
+                )
+                cal_error = validation_result.objective_scalar(
+                    self.config.objective_metric
+                )
+                metrics = {"summary": {self.config.objective_metric: cal_error}}
 
-            # Store validation timing and summary metrics as trial attrs.
-            trial.set_user_attr(
-                "inference_time_s",
-                round(validation_result.timing.get("inference", 0.0), 2),
+                # Store validation timing and summary metrics as trial attrs.
+                trial.set_user_attr(
+                    "inference_time_s",
+                    round(validation_result.timing.get("inference", 0.0), 2),
+                )
+                for key, val in validation_result.summary.items():
+                    trial.set_user_attr(key, round(float(val), 6))
+            else:
+                hist_obj = getattr(workflow, "history", None)
+                hist_dict = (
+                    getattr(hist_obj, "history", {}) if hist_obj is not None else {}
+                )
+                last_loss = float(
+                    hist_dict.get("loss", [FAILED_TRIAL_CAL_ERROR])[-1]
+                )
+                metrics = {"summary": {self.config.objective_metric: last_loss}}
+
+        except optuna.TrialPruned:
+            cleanup_trial()
+            raise
+        except Exception as exc:
+            logger.warning(
+                "Trial %d failed during final validation: %s",
+                trial.number,
+                exc,
             )
-            for key, val in validation_result.summary.items():
-                trial.set_user_attr(key, round(float(val), 6))
-        else:
+            trial.set_user_attr("validation_error", str(exc))
+            # Fall back to training loss for the objective value.
             hist_obj = getattr(workflow, "history", None)
-            hist_dict = getattr(hist_obj, "history", {}) if hist_obj is not None else {}
-            last_loss = float(hist_dict.get("loss", [FAILED_TRIAL_CAL_ERROR])[-1])
-            metrics = {"summary": {self.config.objective_metric: last_loss}}
+            hist_dict = (
+                getattr(hist_obj, "history", {}) if hist_obj is not None else {}
+            )
+            fallback_loss = float(
+                hist_dict.get("loss", [FAILED_TRIAL_CAL_ERROR])[-1]
+            )
+            values = (fallback_loss, FAILED_TRIAL_PARAM_SCORE)
+            param_count = -1
+            _log_trial_summary(trial, values, param_count, training_time)
+            cleanup_trial()
+            return values
 
-        param_count = get_param_count(workflow.approximator)
+        # --- Parameter count (separate from validation) ---
+        try:
+            param_count = get_param_count(workflow.approximator)
+        except (TypeError, ValueError) as exc:
+            logger.warning("Trial %d: could not count params: %s", trial.number, exc)
+            param_count = -1  # normalize_param_count maps to 1.0 (worst)
         trial.set_user_attr("param_count", param_count)
         values = extract_objective_values(
             metrics,

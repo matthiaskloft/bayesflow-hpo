@@ -77,9 +77,12 @@ def create_study(
         multivariate=True, n_startup_trials=25)``.
     pruner
         Optuna pruner.  Default ``MedianPruner(n_startup_trials=5,
-        n_warmup_steps=1, interval_steps=1)`` — the actual pruning
-        schedule is controlled by
-        :class:`~bayesflow_hpo.optimization.validation_callback.PeriodicValidationCallback`.
+        n_warmup_steps=1, interval_steps=1)``.  For single-objective
+        studies, pruning uses this pruner via ``trial.should_prune()``.
+        For multi-objective studies (the default), the Optuna pruner is
+        **not** used; instead,
+        :class:`~bayesflow_hpo.optimization.validation_callback.PeriodicValidationCallback`
+        applies a custom median-based strategy.
     warm_start_from
         Optional source study to seed initial trials from.
     warm_start_top_k
@@ -338,9 +341,22 @@ def optimize_until(
             )
 
     if trained_now < n_trained:
+        hint_parts = []
+        if reasons:
+            hint_parts.append(
+                "failure breakdown: "
+                + ", ".join(f"{r}: {c}" for r, c in reasons.items())
+            )
+        if pruned:
+            hint_parts.append(f"{pruned} trials were pruned")
+        hint = (
+            f" ({'; '.join(hint_parts)})"
+            if hint_parts
+            else ""
+        )
         logger.warning(
             "Reached max_total_trials=%d before achieving %d trained "
-            "trials (got %d). Consider raising max_param_count or "
-            "tightening the search space.",
-            max_total_trials, n_trained, trained_now,
+            "trials (got %d)%s. Consider raising max_total_trials, "
+            "max_param_count, or adjusting the search space.",
+            max_total_trials, n_trained, trained_now, hint,
         )

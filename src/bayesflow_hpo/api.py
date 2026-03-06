@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 import bayesflow as bf
 import optuna
@@ -202,6 +205,13 @@ def optimize(
             optuna.delete_study(study_name=study_name, storage=storage)
         except KeyError:
             pass  # no existing study to delete
+        except Exception:
+            logger.warning(
+                "Could not delete existing study %r from storage %s",
+                study_name,
+                storage,
+                exc_info=True,
+            )
 
     study = create_study(
         study_name=study_name,

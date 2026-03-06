@@ -22,7 +22,7 @@ class OptunaReportCallback(Callback):
         self,
         trial: optuna.Trial,
         monitor: str = "loss",
-        report_frequency: int = 1,
+        report_frequency: int = 10,
     ):
         super().__init__()
         self.trial = trial
