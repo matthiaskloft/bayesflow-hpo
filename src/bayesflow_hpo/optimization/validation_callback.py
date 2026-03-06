@@ -29,6 +29,10 @@ class PeriodicValidationCallback(Callback):
     mean).  If either metric is missing the callback falls back to
     ``calibration_error`` alone.
 
+    In multi-objective studies, ``trial.report()`` is not supported by
+    Optuna, so the callback stores intermediate scores as user
+    attributes instead and skips pruning.
+
     Parameters
     ----------
     trial
@@ -71,6 +75,7 @@ class PeriodicValidationCallback(Callback):
         self.warmup = warmup
         self.n_posterior_samples = n_posterior_samples
         self._step = 0  # monotonic step counter for Optuna
+        self._is_multi_objective = len(trial.study.directions) > 1
 
     def on_epoch_end(self, epoch: int, logs: Any = None) -> None:
         if epoch < self.warmup:
@@ -83,9 +88,18 @@ class PeriodicValidationCallback(Callback):
             return
 
         self._step += 1
-        self.trial.report(float(score), step=self._step)
-        if self.trial.should_prune():
-            raise optuna.TrialPruned()
+
+        if self._is_multi_objective:
+            # TODO: implement proper multi-objective pruning strategy
+            # (e.g. Hyperband with custom dominance check). For now we
+            # only persist intermediate scores for diagnostics.
+            self.trial.set_user_attr(
+                f"val_score_epoch_{epoch}", round(float(score), 6)
+            )
+        else:
+            self.trial.report(float(score), step=self._step)
+            if self.trial.should_prune():
+                raise optuna.TrialPruned()
 
     # ------------------------------------------------------------------
     # Internal

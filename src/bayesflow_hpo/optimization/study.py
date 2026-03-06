@@ -96,6 +96,7 @@ def create_study(
             seed=42,
             multivariate=True,
             n_startup_trials=25,
+            warn_independent_sampling=False,
             constraints_func=_budget_constraints_func if budget_aware else None,
         )
 
@@ -201,6 +202,44 @@ def count_trained_trials(study: optuna.Study) -> int:
     )
 
 
+def _count_failure_reasons(
+    study: optuna.Study,
+    since_trial: int = 0,
+) -> dict[str, int]:
+    """Count training errors and rejection reasons for recent trials."""
+    counts: dict[str, int] = {}
+    for t in study.trials:
+        if t.number < since_trial:
+            continue
+        reason = t.user_attrs.get("rejected_reason")
+        if reason:
+            counts[reason] = counts.get(reason, 0) + 1
+        error = t.user_attrs.get("training_error")
+        if error:
+            # Group identical error messages.
+            key = f"error: {error[:80]}"
+            counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def _best_objective_so_far(
+    study: optuna.Study,
+    select_by: int = 0,
+) -> float | None:
+    """Return the best value for the selected objective across trained trials."""
+    best = None
+    for t in study.trials:
+        if (
+            t.state == TrialState.COMPLETE
+            and t.values is not None
+            and "rejected_reason" not in t.user_attrs
+        ):
+            val = t.values[select_by]
+            if best is None or val < best:
+                best = val
+    return best
+
+
 def optimize_until(
     study: optuna.Study,
     objective: Callable[[optuna.Trial], tuple[float, float]],
@@ -247,6 +286,18 @@ def optimize_until(
             gc_after_trial=True,
         )
 
+        # --- Live progress summary after each batch ---
+        trained_now = count_trained_trials(study) - trained_before
+        total_now = len(study.trials) - total_before
+        rejected = total_now - trained_now
+        best = _best_objective_so_far(study)
+        best_str = f"{best:.4f}" if best is not None else "n/a"
+        logger.info(
+            "Progress: %d/%d trained | %d rejected | %d total | best: %s",
+            trained_now, n_trained, rejected, total_now, best_str,
+        )
+
+    # --- Final summary ---
     trained_now = count_trained_trials(study) - trained_before
     total_now = len(study.trials) - total_before
     rejected = total_now - trained_now
@@ -255,6 +306,21 @@ def optimize_until(
             "Completed %d trained trials (%d total, %d budget-rejected).",
             trained_now, total_now, rejected,
         )
+
+    # --- Failure reason breakdown ---
+    reasons = _count_failure_reasons(study, since_trial=total_before)
+    if reasons:
+        reason_parts = [f"{reason}: {count}" for reason, count in reasons.items()]
+        logger.info("Failure breakdown: %s", " | ".join(reason_parts))
+        # Warn if a single reason dominates (signals a systemic issue).
+        dominant = max(reasons.values())
+        if total_now > 2 and dominant / total_now > 0.5:
+            logger.warning(
+                "Over half of trials failed for the same reason. "
+                "Check the most common failure above — it may indicate "
+                "a configuration issue rather than bad hyperparameters.",
+            )
+
     if trained_now < n_trained:
         logger.warning(
             "Reached max_total_trials=%d before achieving %d trained trials "

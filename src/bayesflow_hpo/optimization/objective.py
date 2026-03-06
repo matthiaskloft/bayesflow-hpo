@@ -142,6 +142,33 @@ def _default_train_fn(
     )
 
 
+def _log_trial_summary(
+    trial: optuna.Trial,
+    values: tuple[float, float],
+    param_count: int,
+    training_time: float,
+) -> None:
+    """Log a concise one-line summary after a trial completes."""
+    cal_err = values[0]
+    params_label = (
+        f"{param_count / 1e6:.2f}M"
+        if param_count >= 1e6
+        else f"{param_count / 1e3:.1f}K"
+        if param_count >= 1e3
+        else str(param_count)
+    )
+    # Collect key metric attrs if available
+    parts = [
+        f"Trial #{trial.number} done ({training_time:.0f}s)",
+        f"{trial.user_attrs.get('objective_metric', 'cal_error')}: {cal_err:.4f}",
+        f"params: {params_label}",
+    ]
+    nrmse = trial.user_attrs.get("nrmse")
+    if nrmse is not None:
+        parts.append(f"nrmse: {nrmse:.4f}")
+    logger.info(" | ".join(parts))
+
+
 class GenericObjective:
     """Optuna objective returning ``(calibration_error, param_score)``.
 
@@ -170,6 +197,10 @@ class GenericObjective:
         trial.set_user_attr("estimated_param_count", int(estimated))
         if estimated > self.config.max_param_count:
             trial.set_user_attr("rejected_reason", "param_budget")
+            logger.info(
+                "Trial #%d rejected: estimated %d params > budget %d",
+                trial.number, estimated, self.config.max_param_count,
+            )
             return self.config.param_budget_penalty
 
         # --- Budget pre-check (memory) ---
@@ -180,6 +211,10 @@ class GenericObjective:
             and estimated_memory > self.config.max_memory_mb
         ):
             trial.set_user_attr("rejected_reason", "memory_budget")
+            logger.info(
+                "Trial #%d rejected: estimated %.0f MB > budget %.0f MB",
+                trial.number, estimated_memory, self.config.max_memory_mb,
+            )
             return self.config.memory_budget_penalty
 
         # --- Build model ---
@@ -296,6 +331,9 @@ class GenericObjective:
             objective_value=values[0],
             workflow=workflow,
         )
+
+        # --- Per-trial summary log ---
+        _log_trial_summary(trial, values, param_count, training_time)
 
         cleanup_trial()
         return values
