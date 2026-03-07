@@ -26,11 +26,12 @@ def _mlp_block_params(
     output_dim: int,
 ) -> int:
     if depth <= 0:
-        return max(1, input_dim * output_dim)
+        return max(1, input_dim * output_dim + output_dim)
 
-    first = input_dim * hidden_dim
-    middle = max(0, depth - 1) * hidden_dim * hidden_dim
-    last = hidden_dim * output_dim
+    # Weights + biases for each layer.
+    first = input_dim * hidden_dim + hidden_dim
+    middle = max(0, depth - 1) * (hidden_dim * hidden_dim + hidden_dim)
+    last = hidden_dim * output_dim + output_dim
     return max(1, first + middle + last)
 
 
@@ -78,9 +79,12 @@ def _estimate_summary_params(params: dict[str, Any]) -> tuple[int, int]:
     summary_dim = _safe_int(params.get("ds_summary_dim"), 8)
     deepset_width = _safe_int(params.get("ds_width"), 64)
     deepset_depth = _safe_int(params.get("ds_depth"), 2)
-    deepset_params = 4 * deepset_depth * (deepset_width**2)
-    deepset_params += deepset_width * summary_dim
-    return max(1, deepset_params), summary_dim
+    # Inner MLP: obs_dim → width (depth hidden layers) + outer MLP: width → summary_dim (depth hidden layers).
+    # Use obs_dim=1 as conservative lower bound for the input embedding.
+    obs_dim = 1
+    inner = _mlp_block_params(obs_dim, deepset_width, deepset_depth, deepset_width)
+    outer = _mlp_block_params(deepset_width, deepset_width, deepset_depth, summary_dim)
+    return max(1, inner + outer), summary_dim
 
 
 def _estimate_inference_params(params: dict[str, Any], summary_dim: int) -> int:
@@ -93,7 +97,11 @@ def _estimate_inference_params(params: dict[str, Any], summary_dim: int) -> int:
         depth = _safe_int(params.get("cf_depth"), 6)
         hidden = _safe_int(params.get("cf_subnet_width"), 128)
         subnet_depth = _safe_int(params.get("cf_subnet_depth"), 2)
-        subnet = _mlp_block_params(input_dim, hidden, subnet_depth, output_dim)
+        # BayesFlow pads the latent dimension to at least 2 * depth.
+        latent_dim = max(n_params, 2 * depth)
+        cf_input = summary_dim + n_conditions + latent_dim // 2
+        cf_output = 2 * ((latent_dim + 1) // 2)
+        subnet = _mlp_block_params(cf_input, hidden, subnet_depth, cf_output)
         return max(1, depth * subnet)
 
     if "fm_subnet_width" in params:

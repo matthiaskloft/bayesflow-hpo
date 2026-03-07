@@ -17,8 +17,11 @@ MIN_PARAM_COUNT = 1_000
 MAX_PARAM_COUNT = 1_000_000
 
 # Penalty values returned for failed / budget-rejected trials.
+# FAILED_TRIAL_PARAM_SCORE must be strictly > 1.0 so that downstream
+# filters (``< FAILED_TRIAL_PARAM_SCORE``) don't exclude legitimately
+# trained models whose param count equals max_param_count (score 1.0).
 FAILED_TRIAL_CAL_ERROR = 1.0
-FAILED_TRIAL_PARAM_SCORE = 1.0
+FAILED_TRIAL_PARAM_SCORE = 1.01
 
 
 def get_param_count(model: Any) -> int:
@@ -67,7 +70,7 @@ def normalize_param_count(
         min_count = 1
     if max_count <= min_count:
         return 0.0
-    clamped = max(param_count, min_count)
+    clamped = max(min(param_count, max_count), min_count)
     return float(np.log10(clamped / min_count) / np.log10(max_count / min_count))
 
 

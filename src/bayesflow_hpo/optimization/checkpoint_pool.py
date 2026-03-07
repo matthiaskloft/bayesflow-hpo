@@ -73,7 +73,7 @@ class CheckpointPool:
         try:
             dest.mkdir(parents=True, exist_ok=True)
             approximator = getattr(workflow, "approximator", workflow)
-            approximator.save_weights(str(dest / "weights"))
+            approximator.save_weights(str(dest / "weights.weights.h5"))
         except Exception:
             logger.warning(
                 "Failed to save checkpoint for trial %d", trial_number,

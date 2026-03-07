@@ -197,6 +197,11 @@ class GenericObjective:
         params = self.config.search_space.sample(trial)
 
         # --- Budget pre-check (param count) ---
+        # Inject actual model dimensions so the heuristic is accurate.
+        if "n_params" not in params:
+            params["n_params"] = len(self.config.param_keys) if self.config.param_keys else 1
+        if "n_conditions" not in params:
+            params["n_conditions"] = len(self.config.inference_conditions) if self.config.inference_conditions else 0
         estimated = estimate_param_count(params)
         trial.set_user_attr("estimated_param_count", int(estimated))
         if estimated > self.config.max_param_count:

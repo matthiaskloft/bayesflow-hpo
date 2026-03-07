@@ -8,55 +8,61 @@ import matplotlib.pyplot as plt
 import numpy as np
 import optuna
 
-from bayesflow_hpo.objectives import FAILED_TRIAL_PARAM_SCORE, denormalize_param_count
-from bayesflow_hpo.results.extraction import _objective_column_names, trials_to_dataframe
+from bayesflow_hpo.results.extraction import _objective_column_names
 
 
 def plot_pareto_front(study: optuna.Study, ax: Any | None = None) -> Any:
-    """Plot calibration error versus parameter count."""
+    """Plot calibration error versus actual parameter count.
+
+    Uses the ``param_count`` user attribute (actual trainable parameters)
+    rather than the normalized objective value, which depends on the
+    min/max normalization constants and can be misleading.
+    """
     if ax is None:
         _, ax = plt.subplots(figsize=(8, 6))
 
-    trials_df = trials_to_dataframe(study)
     obj_cols = _objective_column_names(study)
-    if len(obj_cols) < 2 or obj_cols[0] not in trials_df.columns or obj_cols[1] not in trials_df.columns:
-        ax.text(
-            0.5,
-            0.5,
-            "Single-objective study",
-            ha="center",
-            va="center",
-            transform=ax.transAxes,
-        )
+    if len(obj_cols) < 2:
+        ax.text(0.5, 0.5, "Single-objective study",
+                ha="center", va="center", transform=ax.transAxes)
         return ax
 
-    col_cal, col_params = obj_cols[0], obj_cols[1]
-    valid = trials_df[col_params] < FAILED_TRIAL_PARAM_SCORE
-    trials_df = trials_df[valid]
-    denorm_params = trials_df[col_params].apply(denormalize_param_count)
-    ax.scatter(trials_df[col_cal], denorm_params, alpha=0.4, label="Trials")
+    # Collect trained trials with actual param counts
+    trained = [
+        t for t in study.trials
+        if t.state == optuna.trial.TrialState.COMPLETE
+        and t.values is not None
+        and "rejected_reason" not in t.user_attrs
+        and t.user_attrs.get("param_count", 0) > 0
+    ]
+    if not trained:
+        ax.text(0.5, 0.5, "No trained trials",
+                ha="center", va="center", transform=ax.transAxes)
+        return ax
 
-    pareto = study.best_trials
-    pareto_cal = [
-        t.values[0]
-        for t in pareto
-        if t.values is not None and t.values[1] < FAILED_TRIAL_PARAM_SCORE
+    cal_errors = [t.values[0] for t in trained]
+    param_counts = [t.user_attrs["param_count"] for t in trained]
+    ax.scatter(cal_errors, param_counts, alpha=0.4, label="Trials")
+
+    # Pareto front
+    pareto = [
+        t for t in study.best_trials
+        if t.values is not None
+        and "rejected_reason" not in t.user_attrs
+        and t.user_attrs.get("param_count", 0) > 0
     ]
-    pareto_params = [
-        denormalize_param_count(t.values[1])
-        for t in pareto
-        if t.values is not None and t.values[1] < FAILED_TRIAL_PARAM_SCORE
-    ]
-    if pareto_cal:
-        ax.scatter(pareto_cal, pareto_params, c="red", s=90, marker="*", label="Pareto")
+    if pareto:
+        p_cal = [t.values[0] for t in pareto]
+        p_params = [t.user_attrs["param_count"] for t in pareto]
+        ax.scatter(p_cal, p_params, c="red", s=90, marker="*", label="Pareto")
 
     ax.set_yscale("log")
     ax.yaxis.set_major_formatter(
         plt.FuncFormatter(
             lambda y, _: (
-                f"{y / 1e6:.4g} M"
+                f"{y / 1e6:.4g}M"
                 if y >= 1e6
-                else f"{y / 1e3:.4g} K"
+                else f"{y / 1e3:.4g}K"
                 if y >= 1e3
                 else f"{y:.4g}"
             )

@@ -7,7 +7,15 @@ from typing import Any
 import optuna
 import pandas as pd
 
-from bayesflow_hpo.objectives import FAILED_TRIAL_PARAM_SCORE, denormalize_param_count
+
+def _fmt_param_count(count: int | float) -> str:
+    """Format a raw parameter count as a human-readable string."""
+    count = int(count)
+    if count >= 1_000_000:
+        return f"{count / 1e6:.2f}M"
+    if count >= 1_000:
+        return f"{count / 1e3:.1f}K"
+    return str(count)
 
 
 def get_pareto_trials(study: optuna.Study) -> list[optuna.trial.FrozenTrial]:
@@ -34,8 +42,13 @@ DEFAULT_RESULT_ATTRS = [
     "training_time_s",
     "inference_time_s",
     "calibration_error",
+    "mean_cal_error",
     "nrmse",
     "correlation",
+    "rmse",
+    "contraction",
+    "coverage_90",
+    "coverage_95",
     "training_error",
     "rejected_reason",
 ]
@@ -155,24 +168,26 @@ def summarize_study(
         out: list[str] = []
         out.append(f"  Trial #{trial.number}")
 
-        # objectives
-        for name, val in zip(obj_cols, trial.values or []):
-            # denormalize param_count objective if it looks normalized
-            if "param" in name.lower() and 0 < val < FAILED_TRIAL_PARAM_SCORE:
-                raw = denormalize_param_count(val)
-                label = f"{raw:,}" if raw >= 1000 else str(raw)
-                out.append(f"    {name:25s}: {val:.4f}  ({label} params)")
-            else:
-                out.append(f"    {name:25s}: {val:.4f}")
+        # Show first objective (calibration error) from objective values
+        if trial.values:
+            out.append(f"    {obj_cols[0]:25s}: {trial.values[0]:.4f}")
 
-        # key user attributes
+        # Show actual param count from user attrs (more reliable than
+        # denormalizing the objective, which depends on min/max constants).
+        raw_params = trial.user_attrs.get("param_count")
+        if raw_params is not None and raw_params > 0:
+            label = _fmt_param_count(raw_params)
+            out.append(f"    {'Param count':25s}: {label}")
+
+        # Key user attributes (skip those already shown above)
         attr_display = [
-            ("param_count", "Param count"),
             ("training_time_s", "Training time (s)"),
             ("inference_time_s", "Inference time (s)"),
             ("nrmse", "NRMSE"),
             ("correlation", "Correlation"),
-            ("calibration_error", "Calibration error"),
+            ("contraction", "Contraction"),
+            ("coverage_90", "Coverage 90%"),
+            ("coverage_95", "Coverage 95%"),
         ]
         for attr_key, label in attr_display:
             if attr_key in trial.user_attrs:
@@ -185,10 +200,13 @@ def summarize_study(
 
     # --- Pareto front (multi-objective) ---
     if n_objectives > 1 and n_trained > 0:
+        # Filter to actually-trained Pareto trials (exclude budget-rejected
+        # ones that got penalty scores).
         pareto = [
             t
             for t in study.best_trials
-            if t.values is not None and t.values[1] < FAILED_TRIAL_PARAM_SCORE
+            if t.values is not None
+            and "rejected_reason" not in t.user_attrs
         ]
         lines.append(f"Pareto front: {len(pareto)} trials")
         lines.append("-" * 60)
@@ -220,10 +238,21 @@ def summarize_study(
         lines.append(f"Top {len(show)} trials (by {obj_cols[select_by]}):")
         lines.append("-" * 60)
         for t in show:
-            vals = "  |  ".join(
-                f"{name}: {v:.4f}" for name, v in zip(obj_cols, t.values)
-            )
-            lines.append(f"  #{t.number:>4d}  {vals}")
+            parts = [f"#{t.number:>4d}"]
+            # First objective value
+            parts.append(f"{obj_cols[0]}: {t.values[0]:.4f}")
+            # Actual param count from user attrs
+            raw_params = t.user_attrs.get("param_count")
+            if raw_params is not None and raw_params > 0:
+                parts.append(f"params: {_fmt_param_count(raw_params)}")
+            # Key metrics
+            nrmse = t.user_attrs.get("nrmse")
+            if nrmse is not None:
+                parts.append(f"nrmse: {nrmse:.4f}")
+            corr = t.user_attrs.get("correlation")
+            if corr is not None:
+                parts.append(f"corr: {corr:.4f}")
+            lines.append("  " + "  |  ".join(parts))
         lines.append("")
 
     # --- hyperparameters of best trial ---
@@ -234,7 +263,7 @@ def summarize_study(
                     t
                     for t in study.best_trials
                     if t.values is not None
-                    and (n_objectives == 1 or t.values[1] < FAILED_TRIAL_PARAM_SCORE)
+                    and "rejected_reason" not in t.user_attrs
                 ],
                 key=lambda t: t.values[select_by],
             )
