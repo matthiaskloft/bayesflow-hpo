@@ -27,17 +27,16 @@ def _budget_constraints_func(trial: optuna.trial.FrozenTrial) -> list[float]:
     return [0.0]
 
 
-def _geomean_ranking_key(trial: optuna.trial.FrozenTrial) -> float:
-    """Rank a trial by the geometric mean of nrmse and calibration_error.
+def _mean_ranking_key(trial: optuna.trial.FrozenTrial) -> float:
+    """Rank by the mean of objective values (excluding param_score).
 
-    Falls back to the first objective value when the user attributes are
-    not available (e.g. studies without validation).
+    Falls back to the first objective value when multi-objective values
+    are not available.
     """
-    nrmse = trial.user_attrs.get("nrmse")
-    cal_err = trial.user_attrs.get("calibration_error")
-
-    if nrmse is not None and cal_err is not None:
-        return float(np.sqrt(max(nrmse, 1e-12) * max(cal_err, 1e-12)))
+    if trial.values and len(trial.values) > 1:
+        # All values except the last (param_score) — lower is better.
+        metric_values = trial.values[:-1]
+        return float(np.mean(metric_values))
     if trial.values:
         return float(trial.values[0])
     return float("inf")
@@ -62,8 +61,9 @@ def create_study(
     study_name
         Optuna study name (default ``"bayesflow_hpo"``).
     directions
-        Optimization directions.  Default ``["minimize", "minimize"]``
-        (calibration_error, param_count).
+        Optimization directions.  Default ``["minimize", "minimize"]``.
+        The caller is responsible for passing the correct number of
+        directions matching the objective shape.
     metric_names
         Human-readable names for each objective.
     storage
@@ -150,9 +150,9 @@ def warm_start_study(
 ) -> int:
     """Seed *target_study* with best completed trials from *source_study*.
 
-    Trials are ranked by the geometric mean of nrmse and
-    calibration_error (falling back to the first objective when user
-    attributes are unavailable).
+    Trials are ranked by the arithmetic mean of their objective values
+    (excluding param_score), falling back to the first objective when
+    only a single value is available.
 
     Parameters
     ----------
@@ -176,7 +176,7 @@ def warm_start_study(
     if not complete_trials:
         return 0
 
-    ranked = sorted(complete_trials, key=_geomean_ranking_key)
+    ranked = sorted(complete_trials, key=_mean_ranking_key)
 
     added = 0
     for trial in ranked[: max(0, int(top_k))]:
@@ -254,7 +254,7 @@ def _best_objective_so_far(
 
 def optimize_until(
     study: optuna.Study,
-    objective: Callable[[optuna.Trial], tuple[float, float]],
+    objective: Callable[[optuna.Trial], tuple[float, ...]],
     n_trained: int,
     *,
     max_total_trials: int | None = None,

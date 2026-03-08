@@ -16,7 +16,7 @@ from bayesflow_hpo.objectives import (
     FAILED_TRIAL_CAL_ERROR,
     FAILED_TRIAL_PARAM_SCORE,
     MAX_PARAM_COUNT,
-    MIN_PARAM_COUNT,
+    extract_multi_objective_values,
     extract_objective_values,
     get_param_count,
 )
@@ -84,7 +84,19 @@ class ObjectiveConfig:
         Metric names for final validation (default ``DEFAULT_METRICS``).
     objective_metric
         Key in the validation summary used as the first HPO objective
-        (default ``"calibration_error"``).
+        (default ``"calibration_error"``).  Ignored when
+        ``objective_metrics`` is set.
+    objective_metrics
+        List of metric keys to optimize simultaneously.  When set,
+        overrides ``objective_metric`` and enables multi-metric mode
+        controlled by ``objective_mode``.
+    objective_mode
+        ``"mean"`` (default) — arithmetic mean of the listed metrics
+        forms a single scalar; the objective returns 2 values
+        ``(mean, param_score)``.
+        ``"pareto"`` — each metric becomes its own Optuna objective;
+        returns ``len(objective_metrics) + 1`` values
+        (one per metric + param_score).
     checkpoint_pool
         Optional :class:`CheckpointPool` to persist the best trial
         weights.  When ``None`` a default pool of size 5 is created.
@@ -105,19 +117,7 @@ class ObjectiveConfig:
     early_stopping_patience: int = 5
     early_stopping_window: int = 7
     max_param_count: int = MAX_PARAM_COUNT
-    param_budget_penalty: tuple[float, float] = (
-        FAILED_TRIAL_CAL_ERROR,
-        FAILED_TRIAL_PARAM_SCORE,
-    )
     max_memory_mb: float | None = None
-    memory_budget_penalty: tuple[float, float] = (
-        FAILED_TRIAL_CAL_ERROR,
-        FAILED_TRIAL_PARAM_SCORE,
-    )
-    training_failure_penalty: tuple[float, float] = (
-        FAILED_TRIAL_CAL_ERROR,
-        FAILED_TRIAL_PARAM_SCORE,
-    )
     n_posterior_samples: int = 500
     n_intermediate_posterior_samples: int = 250
     intermediate_validation_interval: int = 10
@@ -125,8 +125,17 @@ class ObjectiveConfig:
     pruning_n_startup_trials: int = 5
     metrics: list[str] | None = None
     objective_metric: str = "calibration_error"
+    objective_metrics: list[str] | None = None
+    objective_mode: str = "mean"
     checkpoint_pool: CheckpointPool | None = None
     train_fn: Callable[[bf.BasicWorkflow, dict, list], None] | None = None
+
+    def __post_init__(self):
+        if self.objective_mode not in ("mean", "pareto"):
+            raise ValueError(
+                f"Unknown objective_mode: {self.objective_mode!r}. "
+                f"Expected 'mean' or 'pareto'."
+            )
 
 
 def _default_train_fn(
@@ -148,12 +157,12 @@ def _default_train_fn(
 
 def _log_trial_summary(
     trial: optuna.Trial,
-    values: tuple[float, float],
+    values: tuple[float, ...],
     param_count: int,
     training_time: float,
+    metric_label: str = "obj[0]",
 ) -> None:
     """Log a concise one-line summary after a trial completes."""
-    cal_err = values[0]
     params_label = (
         f"{param_count / 1e6:.2f}M"
         if param_count >= 1e6
@@ -161,24 +170,32 @@ def _log_trial_summary(
         if param_count >= 1e3
         else str(param_count)
     )
-    # Collect key metric attrs if available
     parts = [
         f"Trial #{trial.number} done ({training_time:.0f}s)",
-        f"{trial.user_attrs.get('objective_metric', 'cal_error')}: {cal_err:.4f}",
+        f"{metric_label}: {values[0]:.4f}",
         f"params: {params_label}",
     ]
     nrmse = trial.user_attrs.get("nrmse")
     if nrmse is not None:
         parts.append(f"nrmse: {nrmse:.4f}")
+    corr = trial.user_attrs.get("correlation")
+    if corr is not None:
+        parts.append(f"corr: {corr:.4f}")
     logger.info(" | ".join(parts))
 
 
 class GenericObjective:
-    """Optuna objective returning ``(calibration_error, param_score)``.
+    """Optuna objective returning a minimize-all tuple of metric and parameter scores.
 
     Each call samples hyperparameters, builds the model, trains it,
-    validates, and returns a bi-objective tuple.  Failed, pruned, or
+    validates, and returns an objective tuple.  Failed, pruned, or
     budget-rejected trials return penalty values.
+
+    When ``config.objective_metrics`` is set, the return shape depends
+    on ``config.objective_mode``:
+
+    - ``"mean"`` → ``(mean_of_metrics, param_score)``
+    - ``"pareto"`` → ``(*metric_values, param_score)``
     """
 
     def __init__(self, config: ObjectiveConfig):
@@ -193,7 +210,34 @@ class GenericObjective:
         """The checkpoint pool used by this objective."""
         return self._checkpoint_pool
 
-    def __call__(self, trial: optuna.Trial) -> tuple[float, float]:
+    @property
+    def _metric_label(self) -> str:
+        """Human-readable label for the first objective value in logs."""
+        cfg = self.config
+        if cfg.objective_metrics:
+            if cfg.objective_mode == "pareto":
+                return cfg.objective_metrics[0]
+            return f"mean({'+'.join(cfg.objective_metrics)})"
+        return cfg.objective_metric
+
+    @property
+    def n_objectives(self) -> int:
+        """Number of objective values returned per trial."""
+        if self.config.objective_metrics:
+            if self.config.objective_mode == "pareto":
+                return len(self.config.objective_metrics) + 1  # metrics + param_score
+            return 2  # mean + param_score
+        return 2  # legacy: objective_metric + param_score
+
+    def _penalty(self) -> tuple[float, ...]:
+        """Return penalty values matching the expected objective shape."""
+        n = self.n_objectives
+        if n == 2:
+            return (FAILED_TRIAL_CAL_ERROR, FAILED_TRIAL_PARAM_SCORE)
+        # n > 2: penalty for each metric dimension + param_score
+        return tuple([FAILED_TRIAL_CAL_ERROR] * (n - 1)) + (FAILED_TRIAL_PARAM_SCORE,)
+
+    def __call__(self, trial: optuna.Trial) -> tuple[float, ...]:
         params = self.config.search_space.sample(trial)
 
         # --- Budget pre-check (param count) ---
@@ -210,7 +254,7 @@ class GenericObjective:
                 "Trial #%d rejected: estimated %d params > budget %d",
                 trial.number, estimated, self.config.max_param_count,
             )
-            return self.config.param_budget_penalty
+            return self._penalty()
 
         # --- Budget pre-check (memory) ---
         estimated_memory = estimate_peak_memory_mb(params)
@@ -224,7 +268,7 @@ class GenericObjective:
                 "Trial #%d rejected: estimated %.0f MB > budget %.0f MB",
                 trial.number, estimated_memory, self.config.max_memory_mb,
             )
-            return self.config.memory_budget_penalty
+            return self._penalty()
 
         # --- Build model ---
         inference_net = self.config.search_space.inference_space.build(params)
@@ -296,7 +340,7 @@ class GenericObjective:
             logger.warning("Trial %d failed during training: %s", trial.number, exc)
             trial.set_user_attr("training_error", str(exc))
             cleanup_trial()
-            return self.config.training_failure_penalty
+            return self._penalty()
         training_time = time.perf_counter() - t_train_start
         trial.set_user_attr("training_time_s", round(training_time, 2))
 
@@ -311,10 +355,8 @@ class GenericObjective:
                     n_posterior_samples=self.config.n_posterior_samples,
                     metrics=self.config.metrics,
                 )
-                cal_error = validation_result.objective_scalar(
-                    self.config.objective_metric
-                )
-                metrics = {"summary": {self.config.objective_metric: cal_error}}
+                # Pass the full summary so multi-metric extraction works.
+                metrics = {"summary": dict(validation_result.summary)}
 
                 # Store validation timing and summary metrics as trial attrs.
                 trial.set_user_attr(
@@ -343,17 +385,12 @@ class GenericObjective:
                 exc,
             )
             trial.set_user_attr("validation_error", str(exc))
-            # Fall back to training loss for the objective value.
-            hist_obj = getattr(workflow, "history", None)
-            hist_dict = (
-                getattr(hist_obj, "history", {}) if hist_obj is not None else {}
-            )
-            fallback_loss = float(
-                hist_dict.get("loss", [FAILED_TRIAL_CAL_ERROR])[-1]
-            )
-            values = (fallback_loss, FAILED_TRIAL_PARAM_SCORE)
+            # Fall back to penalty values.
+            values = self._penalty()
             param_count = -1
-            _log_trial_summary(trial, values, param_count, training_time)
+            _log_trial_summary(
+                trial, values, param_count, training_time, self._metric_label,
+            )
             cleanup_trial()
             return values
 
@@ -364,12 +401,22 @@ class GenericObjective:
             logger.warning("Trial %d: could not count params: %s", trial.number, exc)
             param_count = -1  # normalize_param_count maps to 1.0 (worst)
         trial.set_user_attr("param_count", param_count)
-        values = extract_objective_values(
-            metrics,
-            param_count,
-            objective_metric=self.config.objective_metric,
-            max_param_count=self.config.max_param_count,
-        )
+
+        if self.config.objective_metrics:
+            values = extract_multi_objective_values(
+                metrics,
+                param_count,
+                objective_metrics=self.config.objective_metrics,
+                objective_mode=self.config.objective_mode,
+                max_param_count=self.config.max_param_count,
+            )
+        else:
+            values = extract_objective_values(
+                metrics,
+                param_count,
+                objective_metric=self.config.objective_metric,
+                max_param_count=self.config.max_param_count,
+            )
 
         # --- Checkpoint pool ---
         self._checkpoint_pool.maybe_save(
@@ -379,7 +426,9 @@ class GenericObjective:
         )
 
         # --- Per-trial summary log ---
-        _log_trial_summary(trial, values, param_count, training_time)
+        _log_trial_summary(
+            trial, values, param_count, training_time, self._metric_label,
+        )
 
         cleanup_trial()
         return values

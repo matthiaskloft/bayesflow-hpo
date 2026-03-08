@@ -16,6 +16,7 @@ from bayesflow_hpo.builders import (
 )
 from bayesflow_hpo.objectives import (
     denormalize_param_count,
+    extract_multi_objective_values,
     extract_objective_values,
     get_param_count,
     normalize_param_count,
@@ -103,6 +104,7 @@ __all__ = [
     "build_workflow",
     # Objectives
     "denormalize_param_count",
+    "extract_multi_objective_values",
     "extract_objective_values",
     "get_param_count",
     "normalize_param_count",

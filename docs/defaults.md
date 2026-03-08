@@ -17,11 +17,14 @@ objects (e.g. `ObjectiveConfig`, `create_study`) directly.
 | `batches_per_epoch` | **50** | Online simulation batches per epoch. |
 | `max_param_count` | **1 000 000** | Trials exceeding this estimated param count are rejected. |
 | `max_memory_mb` | **None** (disabled) | Peak-memory budget in MB (disabled by default). |
-| `objective_metric` | **`"calibration_error"`** | Key in the validation summary used as the first HPO objective. |
+| `objective_metric` | **`"calibration_error"`** | Key in the validation summary used as the first HPO objective. Ignored when `objective_metrics` is set. |
+| `objective_metrics` | **`None`** | List of metric keys for multi-metric optimization (overrides `objective_metric`). |
+| `objective_mode` | **`"mean"`** | `"mean"` averages metrics into one scalar; `"pareto"` gives each metric its own direction. |
+| `resume` | **`False`** | Continue a previously persisted study instead of starting fresh. |
 | `sims_per_condition` | **200** | Simulations per condition grid point in validation data. |
 | `storage` | **`"sqlite:///bayesflow_hpo.db"`** | Optuna storage for persistence & crash recovery. |
 | `study_name` | **`"bayesflow_hpo"`** | Optuna study name. |
-| `directions` | **`["minimize", "minimize"]`** | Bi-objective: minimize calibration_error + param_count. |
+| `directions` | **`None`** (auto-derived) | Auto-derives `["minimize"] * n_objectives` from `objective_mode`. In mean mode: 2 directions; in pareto mode with N metrics: N+1 directions. |
 | `warm_start_top_k` | **25** | Best trials to copy when warm-starting from another study. |
 | `show_progress_bar` | **True** | Show Optuna's tqdm progress bar. |
 
@@ -142,7 +145,7 @@ search space or by passing a custom search space.
 | Intermediate posterior samples | **250** | `ObjectiveConfig` |
 | Batch loop size | `max(1, n_trials // 4)` | `optimize_until()` |
 | GC after trial | `True` | `optimize_until()` |
-| Warm-start ranking | Geometric mean of nrmse & calibration_error | `_geomean_ranking_key` |
+| Warm-start ranking | Arithmetic mean of objective values (excl. param_score) | `_mean_ranking_key` |
 | `load_if_exists` | `True` | `create_study()` |
 
 ---
@@ -167,7 +170,7 @@ search space or by passing a custom search space.
 | `max_param_count` | **1 000 000** | `optimize()` |
 | `max_memory_mb` | **None** (disabled) | `optimize()` |
 | Failed-trial calibration error | **1.0** | `FAILED_TRIAL_CAL_ERROR` |
-| Failed-trial param score | **1.0** | `FAILED_TRIAL_PARAM_SCORE` |
+| Failed-trial param score | **1.01** | `FAILED_TRIAL_PARAM_SCORE` |
 | Param normalization | `log10(count/1K) / log10(1M/1K)` (0--1) | `normalize_param_count()` |
 | Min param reference | **1 000** | `MIN_PARAM_COUNT` |
 | Max param reference | **1 000 000** | `MAX_PARAM_COUNT` |
