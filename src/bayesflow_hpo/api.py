@@ -45,6 +45,8 @@ def optimize(
     max_memory_mb: float | None = None,
     metrics: list[str] | None = None,
     objective_metric: str = "calibration_error",
+    objective_metrics: list[str] | None = None,
+    objective_mode: str = "mean",
     train_fn: Callable[[bf.BasicWorkflow, dict, list], None] | None = None,
     storage: str | None = DEFAULT_STORAGE,
     study_name: str = "bayesflow_hpo",
@@ -116,7 +118,18 @@ def optimize(
         contraction).
     objective_metric
         Key in the validation summary used as the first HPO objective
-        (default ``"calibration_error"``).
+        (default ``"calibration_error"``).  Ignored when
+        ``objective_metrics`` is set.
+    objective_metrics
+        List of metric keys to optimize simultaneously.  When set,
+        overrides ``objective_metric``.  The number of directions is
+        computed automatically based on ``objective_mode``.
+        Example: ``["calibration_error", "nrmse"]``.
+    objective_mode
+        ``"mean"`` (default) — arithmetic mean of the listed metrics
+        forms one scalar; study has 2 directions (mean + param_count).
+        ``"pareto"`` — each metric is its own objective; study has
+        ``len(objective_metrics) + 1`` directions.
     train_fn
         Optional custom training function
         ``(workflow, params, callbacks) -> None``.  By default uses
@@ -127,8 +140,9 @@ def optimize(
     study_name
         Optuna study name (default ``"bayesflow_hpo"``).
     directions
-        Optimization directions (default ``["minimize", "minimize"]``
-        for calibration_error + param_count).
+        Optimization directions.  Default ``None`` (auto-derived as
+        ``["minimize"] * n_objectives``).  Pass explicitly only to
+        override auto-derivation.
     resume
         If ``True``, continue a previously persisted study with the
         same ``study_name`` and ``storage``.  If ``False`` (default),
@@ -177,9 +191,6 @@ def optimize(
             sims_per_condition=sims_per_condition,
         )
 
-    if directions is None:
-        directions = ["minimize", "minimize"]
-
     objective = GenericObjective(
         ObjectiveConfig(
             simulator=simulator,
@@ -195,10 +206,33 @@ def optimize(
             max_memory_mb=max_memory_mb,
             metrics=metrics,
             objective_metric=objective_metric,
+            objective_metrics=objective_metrics,
+            objective_mode=objective_mode,
             train_fn=train_fn,
             checkpoint_pool=checkpoint_pool,
         )
     )
+
+    # Derive directions and metric_names from the objective shape.
+    n_obj = objective.n_objectives
+    if directions is None:
+        directions = ["minimize"] * n_obj
+    elif len(directions) != n_obj:
+        raise ValueError(
+            f"directions has {len(directions)} entries but the "
+            f"objective returns {n_obj} values "
+            f"(objective_mode={objective_mode!r}, "
+            f"objective_metrics={objective_metrics!r}). "
+            f"Either pass directions=None to auto-derive, or "
+            f"provide exactly {n_obj} directions."
+        )
+
+    if objective_metrics and objective_mode == "pareto":
+        metric_names = list(objective_metrics) + ["param_count"]
+    elif objective_metrics:
+        metric_names = ["mean(" + "+".join(objective_metrics) + ")", "param_count"]
+    else:
+        metric_names = [objective_metric, "param_count"]
 
     if not resume and storage is not None:
         try:
@@ -216,7 +250,7 @@ def optimize(
     study = create_study(
         study_name=study_name,
         directions=directions,
-        metric_names=[objective_metric, "param_count"] if len(directions) == 2 else None,
+        metric_names=metric_names,
         storage=storage,
         load_if_exists=resume or storage is None,
         warm_start_from=warm_start_from,

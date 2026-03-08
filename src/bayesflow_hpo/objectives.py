@@ -88,6 +88,17 @@ def denormalize_param_count(
     return int(min_count * 10 ** (normalized * log_range))
 
 
+# Metrics where higher is better — the objective value is ``1 - metric``.
+HIGHER_IS_BETTER = {"correlation"}
+
+
+def _metric_to_minimize(key: str, value: float) -> float:
+    """Convert a raw metric value to a minimize-is-better scalar."""
+    if key in HIGHER_IS_BETTER:
+        return 1.0 - value
+    return value
+
+
 def extract_objective_values(
     metrics: dict[str, Any],
     param_count: int,
@@ -109,15 +120,83 @@ def extract_objective_values(
         Boundaries for :func:`normalize_param_count`.
     """
     summary = metrics.get("summary", metrics)
-    objective_value = float(
+    if objective_metric not in summary:
+        logger.warning(
+            "Metric key %r not found in validation summary. "
+            "Available keys: %s. Falling back to 'calibration_error' or 1.0.",
+            objective_metric, list(summary.keys()),
+        )
+    default = 0.0 if objective_metric in HIGHER_IS_BETTER else 1.0
+    raw_value = float(
         summary.get(
             objective_metric,
-            summary.get("calibration_error", 1.0),
+            summary.get("calibration_error", default),
         )
     )
+    objective_value = _metric_to_minimize(objective_metric, raw_value)
     param_score = normalize_param_count(
         param_count,
         min_count=min_param_count,
         max_count=max_param_count,
     )
     return objective_value, param_score
+
+
+def extract_multi_objective_values(
+    metrics: dict[str, Any],
+    param_count: int,
+    objective_metrics: list[str],
+    objective_mode: str = "mean",
+    min_param_count: int = MIN_PARAM_COUNT,
+    max_param_count: int = MAX_PARAM_COUNT,
+) -> tuple[float, ...]:
+    """Extract objective values for multi-metric optimization.
+
+    Parameters
+    ----------
+    metrics
+        Nested dict with at least ``{"summary": {...}}``.
+    param_count
+        Raw trainable parameter count.
+    objective_metrics
+        List of metric keys to optimize.
+    objective_mode
+        ``"mean"`` — return ``(mean_of_metrics, param_score)`` (2 values).
+        ``"pareto"`` — return ``(*metric_values, param_score)``
+        (one value per metric + param_score).
+    min_param_count, max_param_count
+        Boundaries for :func:`normalize_param_count`.
+    """
+    if objective_mode not in ("mean", "pareto"):
+        raise ValueError(
+            f"Unknown objective_mode: {objective_mode!r}. "
+            f"Expected 'mean' or 'pareto'."
+        )
+
+    summary = metrics.get("summary", metrics)
+    param_score = normalize_param_count(
+        param_count,
+        min_count=min_param_count,
+        max_count=max_param_count,
+    )
+
+    raw_values: list[float] = []
+    for key in objective_metrics:
+        if key not in summary:
+            logger.warning(
+                "Metric key %r not found in validation summary. "
+                "Available keys: %s. Using worst-case default.",
+                key, list(summary.keys()),
+            )
+        # For higher-is-better metrics, default to 0.0 so that
+        # _metric_to_minimize inverts it to 1.0 (worst).
+        default = 0.0 if key in HIGHER_IS_BETTER else 1.0
+        val = float(summary.get(key, default))
+        raw_values.append(_metric_to_minimize(key, val))
+
+    if objective_mode == "pareto":
+        return tuple(raw_values) + (param_score,)
+
+    # "mean" mode — arithmetic mean of all metric values
+    mean_val = float(np.mean(raw_values))
+    return (mean_val, param_score)

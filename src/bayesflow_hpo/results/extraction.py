@@ -168,9 +168,10 @@ def summarize_study(
         out: list[str] = []
         out.append(f"  Trial #{trial.number}")
 
-        # Show first objective (calibration error) from objective values
+        # Show all objective values with their column names.
         if trial.values:
-            out.append(f"    {obj_cols[0]:25s}: {trial.values[0]:.4f}")
+            for col, val in zip(obj_cols, trial.values):
+                out.append(f"    {col:25s}: {val:.4f}")
 
         # Show actual param count from user attrs (more reliable than
         # denormalizing the objective, which depends on min/max constants).
@@ -239,19 +240,20 @@ def summarize_study(
         lines.append("-" * 60)
         for t in show:
             parts = [f"#{t.number:>4d}"]
-            # First objective value
-            parts.append(f"{obj_cols[0]}: {t.values[0]:.4f}")
+            # All objective values
+            for col, val in zip(obj_cols, t.values):
+                parts.append(f"{col}: {val:.4f}")
             # Actual param count from user attrs
             raw_params = t.user_attrs.get("param_count")
             if raw_params is not None and raw_params > 0:
                 parts.append(f"params: {_fmt_param_count(raw_params)}")
-            # Key metrics
-            nrmse = t.user_attrs.get("nrmse")
-            if nrmse is not None:
-                parts.append(f"nrmse: {nrmse:.4f}")
-            corr = t.user_attrs.get("correlation")
-            if corr is not None:
-                parts.append(f"corr: {corr:.4f}")
+            # Key metrics from user attrs (only if not already an objective)
+            obj_set = set(obj_cols)
+            for attr_key, label in [("nrmse", "nrmse"), ("correlation", "corr")]:
+                if attr_key not in obj_set:
+                    val = t.user_attrs.get(attr_key)
+                    if val is not None:
+                        parts.append(f"{label}: {val:.4f}")
             lines.append("  " + "  |  ".join(parts))
         lines.append("")
 
