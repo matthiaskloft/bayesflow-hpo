@@ -26,10 +26,7 @@ from bayesflow_hpo.optimization.callbacks import (
 )
 from bayesflow_hpo.optimization.checkpoint_pool import CheckpointPool
 from bayesflow_hpo.optimization.cleanup import cleanup_trial
-from bayesflow_hpo.optimization.constraints import (
-    estimate_param_count,
-    estimate_peak_memory_mb,
-)
+from bayesflow_hpo.optimization.constraints import estimate_peak_memory_mb
 from bayesflow_hpo.search_spaces.composite import CompositeSearchSpace
 from bayesflow_hpo.validation.data import ValidationDataset
 
@@ -62,7 +59,7 @@ class ObjectiveConfig:
     early_stopping_window
         Moving-average window size (default 7).
     max_param_count
-        Trials with estimated param count above this are rejected
+        Trials with actual param count above this are rejected
         before training (default 1 000 000).
     max_memory_mb
         Optional peak-memory budget in MB (disabled by default).
@@ -240,21 +237,11 @@ class GenericObjective:
     def __call__(self, trial: optuna.Trial) -> tuple[float, ...]:
         params = self.config.search_space.sample(trial)
 
-        # --- Budget pre-check (param count) ---
-        # Inject actual model dimensions so the heuristic is accurate.
+        # Inject actual model dimensions for memory estimation.
         if "n_params" not in params:
             params["n_params"] = len(self.config.param_keys) if self.config.param_keys else 1
         if "n_conditions" not in params:
             params["n_conditions"] = len(self.config.inference_conditions) if self.config.inference_conditions else 0
-        estimated = estimate_param_count(params)
-        trial.set_user_attr("estimated_param_count", int(estimated))
-        if estimated > self.config.max_param_count:
-            trial.set_user_attr("rejected_reason", "param_budget")
-            logger.info(
-                "Trial #%d rejected: estimated %d params > budget %d",
-                trial.number, estimated, self.config.max_param_count,
-            )
-            return self._penalty()
 
         # --- Budget pre-check (memory) ---
         estimated_memory = estimate_peak_memory_mb(params)
@@ -295,29 +282,35 @@ class GenericObjective:
             # Trigger Keras lazy weight initialization with a tiny batch.
             dummy = self.config.simulator.sample((2,))
             adapted = self.config.adapter(dummy)
-            approximator.compute_loss(adapted)
+            if hasattr(approximator, "build_from_data"):
+                approximator.build_from_data(adapted)
+            else:
+                approximator.compute_loss(adapted)
             param_count_actual = get_param_count(approximator)
-            trial.set_user_attr("param_count_pre_train", int(param_count_actual))
+            trial.set_user_attr("param_count", int(param_count_actual))
             if param_count_actual > self.config.max_param_count:
-                trial.set_user_attr("rejected_reason", "param_budget_exact")
+                trial.set_user_attr("rejected_reason", "param_budget")
                 logger.info(
-                    "Trial #%d rejected: actual %d params > budget %d "
-                    "(heuristic estimated %d)",
+                    "Trial #%d rejected: %d params > budget %d",
                     trial.number, param_count_actual,
-                    self.config.max_param_count, estimated,
+                    self.config.max_param_count,
                 )
                 cleanup_trial()
                 return self._penalty()
         except MemoryError:
             raise  # never swallow OOM
         except Exception as exc:
-            # If the probe fails (e.g. mock objects in tests, unusual model
-            # topology), log and continue to training — the heuristic
-            # already passed, so it's worth a try.
-            logger.debug(
-                "Trial #%d: pre-train param count probe failed: %s",
+            # Without the heuristic fallback, there is no alternative way
+            # to enforce the param budget.  Reject the trial so oversized
+            # models cannot bypass the check.
+            logger.warning(
+                "Trial #%d: param count probe failed, rejecting trial: %s",
                 trial.number, exc,
             )
+            trial.set_user_attr("rejected_reason", "param_probe_failed")
+            trial.set_user_attr("param_probe_error", str(exc))
+            cleanup_trial()
+            return self._penalty()
 
         # --- Callbacks ---
         callbacks: list[Any] = [

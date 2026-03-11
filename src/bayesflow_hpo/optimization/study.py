@@ -252,6 +252,15 @@ def _best_objective_so_far(
     return best
 
 
+def _count_non_rejected(study: optuna.Study) -> int:
+    """Count trials that actually attempted training (trained + pruned + failed)."""
+    return sum(
+        1
+        for t in study.trials
+        if "rejected_reason" not in t.user_attrs
+    )
+
+
 def optimize_until(
     study: optuna.Study,
     objective: Callable[[optuna.Trial], tuple[float, ...]],
@@ -262,6 +271,12 @@ def optimize_until(
 ) -> None:
     """Run trials until *n_trained* have actually trained (not budget-rejected).
 
+    Budget-rejected trials do not count toward ``max_total_trials``
+    because they are cheap (no training).  A hard safety cap of
+    ``5 * max_total_trials`` on *all* trials (including rejected)
+    prevents runaway loops when the search space consistently exceeds
+    the parameter budget.
+
     Parameters
     ----------
     study
@@ -271,26 +286,38 @@ def optimize_until(
     n_trained
         Target number of trials that pass budget checks and complete training.
     max_total_trials
-        Hard cap on total trials (including rejected). Defaults to
-        ``3 * n_trained``.
+        Cap on non-rejected trials (trained + pruned + failed).
+        Defaults to ``3 * n_trained``.
     show_progress_bar
         Whether to show Optuna's progress bar.
     """
     if max_total_trials is None:
         max_total_trials = 3 * n_trained
 
+    # Hard safety cap on ALL trials (including rejected) to prevent
+    # infinite loops when every sampled config exceeds the budget.
+    hard_cap = 5 * max_total_trials
+
     trained_before = count_trained_trials(study)
     target = trained_before + n_trained
     total_before = len(study.trials)
+    non_rejected_before = _count_non_rejected(study)
+
+    def _non_rejected_now() -> int:
+        return _count_non_rejected(study) - non_rejected_before
+
+    def _total_now() -> int:
+        return len(study.trials) - total_before
 
     while (
         count_trained_trials(study) < target
-        and len(study.trials) - total_before < max_total_trials
+        and _non_rejected_now() < max_total_trials
+        and _total_now() < hard_cap
     ):
         remaining_trained = target - count_trained_trials(study)
-        remaining_total = max_total_trials - (len(study.trials) - total_before)
+        remaining_non_rejected = max_total_trials - _non_rejected_now()
         # Run in small batches to re-check the trained count regularly.
-        batch = min(remaining_trained, remaining_total, max(1, n_trained // 4))
+        batch = min(remaining_trained, remaining_non_rejected, max(1, n_trained // 4))
         study.optimize(
             objective,
             n_trials=batch,
@@ -354,9 +381,17 @@ def optimize_until(
             if hint_parts
             else ""
         )
-        logger.warning(
-            "Reached max_total_trials=%d before achieving %d trained "
-            "trials (got %d)%s. Consider raising max_total_trials, "
-            "max_param_count, or adjusting the search space.",
-            max_total_trials, n_trained, trained_now, hint,
-        )
+        if _total_now() >= hard_cap:
+            logger.warning(
+                "Hit hard safety cap (%d total trials including rejected). "
+                "Most sampled configs are being rejected by budget checks%s. "
+                "Consider raising max_param_count or narrowing the search space.",
+                hard_cap, hint,
+            )
+        else:
+            logger.warning(
+                "Reached max_total_trials=%d before achieving %d trained "
+                "trials (got %d)%s. Consider raising max_total_trials, "
+                "max_param_count, or adjusting the search space.",
+                max_total_trials, n_trained, trained_now, hint,
+            )
