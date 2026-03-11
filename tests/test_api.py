@@ -80,6 +80,7 @@ def test_param_keys_mismatch_raises(validation_ds):
             simulator=MagicMock(),
             adapter=MagicMock(),
             param_keys=["wrong"],
+            data_keys=["x"],
             validation_data=validation_ds,
             storage=None,
         )
@@ -91,6 +92,7 @@ def test_data_keys_mismatch_raises(validation_ds):
         optimize(
             simulator=MagicMock(),
             adapter=MagicMock(),
+            param_keys=["theta"],
             data_keys=["wrong"],
             validation_data=validation_ds,
             storage=None,
