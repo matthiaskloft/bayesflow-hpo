@@ -252,13 +252,12 @@ def _best_objective_so_far(
     return best
 
 
-def _count_non_rejected(study: optuna.Study, since_trial: int = 0) -> int:
+def _count_non_rejected(study: optuna.Study) -> int:
     """Count trials that actually attempted training (trained + pruned + failed)."""
     return sum(
         1
         for t in study.trials
-        if t.number >= since_trial
-        and "rejected_reason" not in t.user_attrs
+        if "rejected_reason" not in t.user_attrs
     )
 
 

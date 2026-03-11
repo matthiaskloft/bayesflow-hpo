@@ -300,10 +300,13 @@ class GenericObjective:
         except MemoryError:
             raise  # never swallow OOM
         except Exception as exc:
-            logger.debug(
-                "Trial #%d: pre-train param count probe failed: %s",
+            # Without the probe, there is no param budget enforcement for
+            # this trial.  Log at warning so users notice.
+            logger.warning(
+                "Trial #%d: param count probe failed, budget not enforced: %s",
                 trial.number, exc,
             )
+            trial.set_user_attr("param_count_probe_failed", True)
 
         # --- Callbacks ---
         callbacks: list[Any] = [

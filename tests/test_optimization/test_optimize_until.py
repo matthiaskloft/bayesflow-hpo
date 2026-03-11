@@ -90,8 +90,8 @@ def test_optimize_until_respects_max_total_trials():
     )
 
     # All rejected -> non-rejected count never increases -> hits the hard
-    # safety cap of 5 * max_total_trials = 25 (+ batch overshoot).
-    assert len(study.trials) <= 30
+    # safety cap of 5 * max_total_trials = 25 (+ up to one batch of 2).
+    assert len(study.trials) <= 27
     assert count_trained_trials(study) == 0
 
 
