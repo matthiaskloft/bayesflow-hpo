@@ -381,9 +381,17 @@ def optimize_until(
             if hint_parts
             else ""
         )
-        logger.warning(
-            "Reached max_total_trials=%d before achieving %d trained "
-            "trials (got %d)%s. Consider raising max_total_trials, "
-            "max_param_count, or adjusting the search space.",
-            max_total_trials, n_trained, trained_now, hint,
-        )
+        if _total_now() >= hard_cap:
+            logger.warning(
+                "Hit hard safety cap (%d total trials including rejected). "
+                "Most sampled configs are being rejected by budget checks%s. "
+                "Consider raising max_param_count or narrowing the search space.",
+                hard_cap, hint,
+            )
+        else:
+            logger.warning(
+                "Reached max_total_trials=%d before achieving %d trained "
+                "trials (got %d)%s. Consider raising max_total_trials, "
+                "max_param_count, or adjusting the search space.",
+                max_total_trials, n_trained, trained_now, hint,
+            )

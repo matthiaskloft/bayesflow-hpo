@@ -47,22 +47,36 @@ def test_objective_training_failure_sets_user_attr_and_penalty(monkeypatch):
         "bayesflow_hpo.optimization.objective.estimate_peak_memory_mb",
         lambda params: 1.0,
     )
+
+    fake_approx = _FakeApproximator(param_count=50_000)
+
+    class _FakeWorkflow:
+        approximator = fake_approx
+
     monkeypatch.setattr(
         "bayesflow_hpo.optimization.objective.build_workflow",
-        lambda **kwargs: object(),
+        lambda **kwargs: _FakeWorkflow(),
     )
     monkeypatch.setattr(
         "bayesflow_hpo.optimization.objective.cleanup_trial",
         lambda: None,
     )
 
+    class _FakeSimulator:
+        def sample(self, shape):
+            return {}
+
+    class _FakeAdapter:
+        def __call__(self, data):
+            return data
+
     def _raise_training_error(workflow, params, callbacks):
         raise RuntimeError("You must call compile() before calling fit().")
 
     objective = GenericObjective(
         ObjectiveConfig(
-            simulator=object(),
-            adapter=object(),
+            simulator=_FakeSimulator(),
+            adapter=_FakeAdapter(),
             search_space=_FakeSearchSpace(),
             epochs=1,
             batches_per_epoch=1,
@@ -186,6 +200,161 @@ def test_objective_allows_trial_within_param_budget(monkeypatch):
     assert trial.user_attrs["param_count"] == 50_000
 
 
+def test_objective_allows_trial_at_exact_budget_boundary(monkeypatch):
+    """Trial with param_count == max_param_count should pass (strict >)."""
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.estimate_peak_memory_mb",
+        lambda params: 1.0,
+    )
+
+    fake_approx = _FakeApproximator(param_count=100_000)
+
+    class _FakeWorkflow:
+        approximator = fake_approx
+
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.build_workflow",
+        lambda **kwargs: _FakeWorkflow(),
+    )
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.cleanup_trial",
+        lambda: None,
+    )
+
+    class _FakeSimulator:
+        def sample(self, shape):
+            return {}
+
+    class _FakeAdapter:
+        def __call__(self, data):
+            return data
+
+    train_called = []
+
+    def _track_training(workflow, params, callbacks):
+        train_called.append(True)
+        raise RuntimeError("stop after confirming training was reached")
+
+    objective = GenericObjective(
+        ObjectiveConfig(
+            simulator=_FakeSimulator(),
+            adapter=_FakeAdapter(),
+            search_space=_FakeSearchSpace(),
+            epochs=1,
+            batches_per_epoch=1,
+            validation_data=None,
+            max_param_count=100_000,
+            train_fn=_track_training,
+        )
+    )
+
+    trial = _FakeTrial()
+    objective(trial)
+
+    assert len(train_called) == 1
+    assert "rejected_reason" not in trial.user_attrs
+    assert trial.user_attrs["param_count"] == 100_000
+
+
+def test_objective_rejects_trial_when_probe_fails(monkeypatch):
+    """When the param count probe fails, the trial must be rejected."""
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.estimate_peak_memory_mb",
+        lambda params: 1.0,
+    )
+
+    class _FakeWorkflow:
+        class approximator:
+            @staticmethod
+            def build_from_data(data):
+                raise RuntimeError("shape mismatch during probe")
+
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.build_workflow",
+        lambda **kwargs: _FakeWorkflow(),
+    )
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.cleanup_trial",
+        lambda: None,
+    )
+
+    class _FakeSimulator:
+        def sample(self, shape):
+            return {}
+
+    class _FakeAdapter:
+        def __call__(self, data):
+            return data
+
+    train_called = []
+
+    def _track_training(workflow, params, callbacks):
+        train_called.append(True)
+
+    objective = GenericObjective(
+        ObjectiveConfig(
+            simulator=_FakeSimulator(),
+            adapter=_FakeAdapter(),
+            search_space=_FakeSearchSpace(),
+            epochs=1,
+            batches_per_epoch=1,
+            validation_data=None,
+            train_fn=_track_training,
+        )
+    )
+
+    trial = _FakeTrial()
+    values = objective(trial)
+
+    # Trial should be rejected, not trained.
+    assert len(train_called) == 0
+    assert trial.user_attrs["rejected_reason"] == "param_probe_failed"
+    assert "shape mismatch" in trial.user_attrs["param_probe_error"]
+    assert values == (FAILED_TRIAL_CAL_ERROR, FAILED_TRIAL_PARAM_SCORE)
+
+
+def test_objective_reraises_memory_error_from_probe(monkeypatch):
+    """MemoryError during param probe must propagate, never be swallowed."""
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.estimate_peak_memory_mb",
+        lambda params: 1.0,
+    )
+
+    class _FakeWorkflow:
+        class approximator:
+            @staticmethod
+            def build_from_data(data):
+                raise MemoryError("CUDA OOM")
+
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.build_workflow",
+        lambda **kwargs: _FakeWorkflow(),
+    )
+
+    class _FakeSimulator:
+        def sample(self, shape):
+            return {}
+
+    class _FakeAdapter:
+        def __call__(self, data):
+            return data
+
+    objective = GenericObjective(
+        ObjectiveConfig(
+            simulator=_FakeSimulator(),
+            adapter=_FakeAdapter(),
+            search_space=_FakeSearchSpace(),
+            epochs=1,
+            batches_per_epoch=1,
+            validation_data=None,
+        )
+    )
+
+    trial = _FakeTrial()
+    with pytest.raises(MemoryError, match="CUDA OOM"):
+        objective(trial)
+
+
 def test_objective_config_rejects_invalid_mode():
     """ObjectiveConfig eagerly validates objective_mode."""
     with pytest.raises(ValueError, match="Unknown objective_mode"):
@@ -224,22 +393,36 @@ def test_objective_multi_metric_penalty_shape(monkeypatch):
         "bayesflow_hpo.optimization.objective.estimate_peak_memory_mb",
         lambda params: 1.0,
     )
+
+    fake_approx = _FakeApproximator(param_count=50_000)
+
+    class _FakeWorkflow:
+        approximator = fake_approx
+
     monkeypatch.setattr(
         "bayesflow_hpo.optimization.objective.build_workflow",
-        lambda **kwargs: object(),
+        lambda **kwargs: _FakeWorkflow(),
     )
     monkeypatch.setattr(
         "bayesflow_hpo.optimization.objective.cleanup_trial",
         lambda: None,
     )
 
+    class _FakeSimulator:
+        def sample(self, shape):
+            return {}
+
+    class _FakeAdapter:
+        def __call__(self, data):
+            return data
+
     def _raise_training_error(workflow, params, callbacks):
         raise RuntimeError("boom")
 
     objective = GenericObjective(
         ObjectiveConfig(
-            simulator=object(),
-            adapter=object(),
+            simulator=_FakeSimulator(),
+            adapter=_FakeAdapter(),
             search_space=_FakeSearchSpace(),
             epochs=1,
             batches_per_epoch=1,

@@ -300,13 +300,17 @@ class GenericObjective:
         except MemoryError:
             raise  # never swallow OOM
         except Exception as exc:
-            # Without the probe, there is no param budget enforcement for
-            # this trial.  Log at warning so users notice.
+            # Without the heuristic fallback, there is no alternative way
+            # to enforce the param budget.  Reject the trial so oversized
+            # models cannot bypass the check.
             logger.warning(
-                "Trial #%d: param count probe failed, budget not enforced: %s",
+                "Trial #%d: param count probe failed, rejecting trial: %s",
                 trial.number, exc,
             )
-            trial.set_user_attr("param_count_probe_failed", True)
+            trial.set_user_attr("rejected_reason", "param_probe_failed")
+            trial.set_user_attr("param_probe_error", str(exc))
+            cleanup_trial()
+            return self._penalty()
 
         # --- Callbacks ---
         callbacks: list[Any] = [
