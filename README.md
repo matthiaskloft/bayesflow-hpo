@@ -1,5 +1,8 @@
 # bayesflow-hpo
 
+[![CI](https://github.com/matthiaskloft/bayesflow-hpo/actions/workflows/ci.yml/badge.svg)](https://github.com/matthiaskloft/bayesflow-hpo/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/matthiaskloft/bayesflow-hpo/branch/main/graph/badge.svg)](https://codecov.io/gh/matthiaskloft/bayesflow-hpo)
+
 Generic hyperparameter optimization for BayesFlow neural posterior estimation (NPE).
 
 ## Features
