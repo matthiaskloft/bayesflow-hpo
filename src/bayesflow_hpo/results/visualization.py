@@ -85,7 +85,13 @@ def plot_param_importance(
         _, ax = plt.subplots(figsize=(8, 6))
 
     try:
-        importance = optuna.importance.get_param_importances(study)
+        # For multi-objective studies, target the first objective explicitly.
+        target = None
+        if len(study.directions) > 1:
+            target = lambda t: t.values[0] if t.values else float("inf")
+        importance = optuna.importance.get_param_importances(
+            study, target=target,
+        )
     except Exception:
         ax.text(
             0.5,

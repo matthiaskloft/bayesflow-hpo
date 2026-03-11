@@ -55,6 +55,11 @@ def normalize_param_count(
     Uses ``log10(count / min) / log10(max / min)`` so that *min_count*
     maps to 0.0 and *max_count* maps to 1.0.
 
+    When ``max_count`` is below the default ``MAX_PARAM_COUNT`` and
+    ``min_count`` is still at the default, the lower bound is
+    automatically tightened to ``max_count / 100`` so the normalized
+    values spread across the full [0, 1] range.
+
     Parameters
     ----------
     param_count
@@ -64,6 +69,10 @@ def normalize_param_count(
     max_count
         Upper reference (maps to 1.0).  Default ``1_000_000``.
     """
+    # Auto-tighten min_count when user specified a smaller max_count
+    # but left min_count at its default.
+    if min_count == MIN_PARAM_COUNT and max_count < MAX_PARAM_COUNT:
+        min_count = max(1, max_count // 100)
     if param_count <= 0:
         return 1.0  # worst score — signals broken or unbuilt model
     if min_count <= 0:
