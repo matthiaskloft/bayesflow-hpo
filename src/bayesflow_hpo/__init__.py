@@ -15,6 +15,7 @@ from bayesflow_hpo.builders import (
     build_workflow,
 )
 from bayesflow_hpo.objectives import (
+    compute_inference_time_ratio,
     denormalize_param_count,
     extract_multi_objective_values,
     extract_objective_values,
@@ -106,6 +107,7 @@ __all__ = [
     "build_summary_network",
     "build_workflow",
     # Objectives
+    "compute_inference_time_ratio",
     "denormalize_param_count",
     "extract_multi_objective_values",
     "extract_objective_values",

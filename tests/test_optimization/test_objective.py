@@ -2,7 +2,7 @@
 
 import pytest
 
-from bayesflow_hpo.objectives import FAILED_TRIAL_CAL_ERROR, FAILED_TRIAL_PARAM_SCORE
+from bayesflow_hpo.objectives import FAILED_TRIAL_CAL_ERROR, FAILED_TRIAL_COST
 from bayesflow_hpo.optimization.objective import GenericObjective, ObjectiveConfig
 
 
@@ -88,8 +88,8 @@ def test_objective_training_failure_sets_user_attr_and_penalty(monkeypatch):
     trial = _FakeTrial()
     values = objective(trial)
 
-    # Default penalty: (FAILED_TRIAL_CAL_ERROR, FAILED_TRIAL_PARAM_SCORE)
-    assert values == (FAILED_TRIAL_CAL_ERROR, FAILED_TRIAL_PARAM_SCORE)
+    # Default penalty: (FAILED_TRIAL_CAL_ERROR, FAILED_TRIAL_COST)
+    assert values == (FAILED_TRIAL_CAL_ERROR, FAILED_TRIAL_COST)
     assert "training_error" in trial.user_attrs
     assert "compile" in trial.user_attrs["training_error"]
 
@@ -138,7 +138,7 @@ def test_objective_rejects_trial_exceeding_param_budget(monkeypatch):
     trial = _FakeTrial()
     values = objective(trial)
 
-    assert values == (FAILED_TRIAL_CAL_ERROR, FAILED_TRIAL_PARAM_SCORE)
+    assert values == (FAILED_TRIAL_CAL_ERROR, FAILED_TRIAL_COST)
     assert trial.user_attrs["rejected_reason"] == "param_budget"
     assert trial.user_attrs["param_count"] == 200_000
 
@@ -310,7 +310,7 @@ def test_objective_rejects_trial_when_probe_fails(monkeypatch):
     assert len(train_called) == 0
     assert trial.user_attrs["rejected_reason"] == "param_probe_failed"
     assert "shape mismatch" in trial.user_attrs["param_probe_error"]
-    assert values == (FAILED_TRIAL_CAL_ERROR, FAILED_TRIAL_PARAM_SCORE)
+    assert values == (FAILED_TRIAL_CAL_ERROR, FAILED_TRIAL_COST)
 
 
 def test_objective_reraises_memory_error_from_probe(monkeypatch):
@@ -369,6 +369,20 @@ def test_objective_config_rejects_invalid_mode():
         )
 
 
+def test_objective_config_rejects_invalid_cost_metric():
+    """ObjectiveConfig eagerly validates cost_metric."""
+    with pytest.raises(ValueError, match="Unknown cost_metric"):
+        ObjectiveConfig(
+            simulator=object(),
+            adapter=object(),
+            search_space=_FakeSearchSpace(),
+            epochs=1,
+            batches_per_epoch=1,
+            validation_data=None,
+            cost_metric="unknown",
+        )
+
+
 def test_n_objectives_mean_mode_with_multiple_metrics():
     """Mean mode with objective_metrics still returns 2 objectives."""
     objective = GenericObjective(
@@ -384,7 +398,7 @@ def test_n_objectives_mean_mode_with_multiple_metrics():
         )
     )
     assert objective.n_objectives == 2
-    assert objective._penalty() == (FAILED_TRIAL_CAL_ERROR, FAILED_TRIAL_PARAM_SCORE)
+    assert objective._penalty() == (FAILED_TRIAL_CAL_ERROR, FAILED_TRIAL_COST)
 
 
 def test_objective_multi_metric_penalty_shape(monkeypatch):
@@ -440,5 +454,5 @@ def test_objective_multi_metric_penalty_shape(monkeypatch):
     assert values == (
         FAILED_TRIAL_CAL_ERROR,
         FAILED_TRIAL_CAL_ERROR,
-        FAILED_TRIAL_PARAM_SCORE,
+        FAILED_TRIAL_COST,
     )

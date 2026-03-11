@@ -1,4 +1,4 @@
-"""Objective helpers and parameter normalization."""
+"""Objective helpers and inference-time cost normalization."""
 
 from __future__ import annotations
 
@@ -12,16 +12,17 @@ logger = logging.getLogger(__name__)
 
 KERAS_AVAILABLE = importlib.util.find_spec("keras") is not None
 
-# Default budget boundaries for log-linear normalization.
+# Default budget boundaries for parameter-count rejection gate.
 MIN_PARAM_COUNT = 1_000
 MAX_PARAM_COUNT = 1_000_000
 
 # Penalty values returned for failed / budget-rejected trials.
-# FAILED_TRIAL_PARAM_SCORE must be strictly > 1.0 so that downstream
-# filters (``< FAILED_TRIAL_PARAM_SCORE``) don't exclude legitimately
-# trained models whose param count equals max_param_count (score 1.0).
 FAILED_TRIAL_CAL_ERROR = 1.0
-FAILED_TRIAL_PARAM_SCORE = 1.01
+# Cost penalty for failed trials.  Must be large enough to dominate
+# any legitimate cost score so the sampler avoids these regions.
+# When sim_time_per_sim is unavailable, the fallback is raw inference
+# seconds, which can be in the hundreds — 1e6 safely dominates.
+FAILED_TRIAL_COST = 1e6
 
 
 def get_param_count(model: Any) -> int:
@@ -108,25 +109,50 @@ def _metric_to_minimize(key: str, value: float) -> float:
     return value
 
 
+def compute_inference_time_ratio(
+    inference_time: float,
+    sim_time_per_sim: float | None,
+    n_sims: int,
+) -> float:
+    """Compute the inference-to-simulation time ratio.
+
+    Returns ``inference_time / (sim_time_per_sim * n_sims)``.  When
+    simulation timing is unavailable, falls back to raw inference
+    seconds so the objective is still meaningful (just not normalized).
+
+    Parameters
+    ----------
+    inference_time
+        Total wall-clock inference seconds across all validation sims.
+    sim_time_per_sim
+        Average seconds to simulate one observation (from
+        :class:`~bayesflow_hpo.validation.data.ValidationDataset`).
+    n_sims
+        Total number of simulations that were inferred on.
+    """
+    if sim_time_per_sim is not None and sim_time_per_sim > 0:
+        total_sim_time = sim_time_per_sim * max(n_sims, 1)
+        return inference_time / total_sim_time
+    # Fallback: raw seconds (still minimize-is-better).
+    return inference_time
+
+
 def extract_objective_values(
     metrics: dict[str, Any],
-    param_count: int,
+    cost_score: float,
     objective_metric: str = "calibration_error",
-    min_param_count: int = MIN_PARAM_COUNT,
-    max_param_count: int = MAX_PARAM_COUNT,
 ) -> tuple[float, float]:
-    """Extract ``(objective_value, normalized_param_score)``.
+    """Extract ``(objective_value, cost_score)``.
 
     Parameters
     ----------
     metrics
         Nested dict with at least ``{"summary": {objective_metric: value}}``.
-    param_count
-        Raw trainable parameter count.
+    cost_score
+        Pre-computed cost objective (minimize-is-better).  Typically
+        ``inference_time_ratio`` or ``normalized_param_count``.
     objective_metric
         Key to look up inside the summary dict.
-    min_param_count, max_param_count
-        Boundaries for :func:`normalize_param_count`.
     """
     summary = metrics.get("summary", metrics)
     if objective_metric not in summary:
@@ -143,21 +169,14 @@ def extract_objective_values(
         )
     )
     objective_value = _metric_to_minimize(objective_metric, raw_value)
-    param_score = normalize_param_count(
-        param_count,
-        min_count=min_param_count,
-        max_count=max_param_count,
-    )
-    return objective_value, param_score
+    return objective_value, cost_score
 
 
 def extract_multi_objective_values(
     metrics: dict[str, Any],
-    param_count: int,
+    cost_score: float,
     objective_metrics: list[str],
     objective_mode: str = "mean",
-    min_param_count: int = MIN_PARAM_COUNT,
-    max_param_count: int = MAX_PARAM_COUNT,
 ) -> tuple[float, ...]:
     """Extract objective values for multi-metric optimization.
 
@@ -165,16 +184,15 @@ def extract_multi_objective_values(
     ----------
     metrics
         Nested dict with at least ``{"summary": {...}}``.
-    param_count
-        Raw trainable parameter count.
+    cost_score
+        Pre-computed cost objective (minimize-is-better).  Typically
+        ``inference_time_ratio`` or ``normalized_param_count``.
     objective_metrics
         List of metric keys to optimize.
     objective_mode
-        ``"mean"`` — return ``(mean_of_metrics, param_score)`` (2 values).
-        ``"pareto"`` — return ``(*metric_values, param_score)``
-        (one value per metric + param_score).
-    min_param_count, max_param_count
-        Boundaries for :func:`normalize_param_count`.
+        ``"mean"`` — return ``(mean_of_metrics, cost_score)`` (2 values).
+        ``"pareto"`` — return ``(*metric_values, cost_score)``
+        (one value per metric + cost).
     """
     if objective_mode not in ("mean", "pareto"):
         raise ValueError(
@@ -183,11 +201,6 @@ def extract_multi_objective_values(
         )
 
     summary = metrics.get("summary", metrics)
-    param_score = normalize_param_count(
-        param_count,
-        min_count=min_param_count,
-        max_count=max_param_count,
-    )
 
     raw_values: list[float] = []
     for key in objective_metrics:
@@ -204,8 +217,8 @@ def extract_multi_objective_values(
         raw_values.append(_metric_to_minimize(key, val))
 
     if objective_mode == "pareto":
-        return tuple(raw_values) + (param_score,)
+        return tuple(raw_values) + (cost_score,)
 
     # "mean" mode — arithmetic mean of all metric values
     mean_val = float(np.mean(raw_values))
-    return (mean_val, param_score)
+    return (mean_val, cost_score)
