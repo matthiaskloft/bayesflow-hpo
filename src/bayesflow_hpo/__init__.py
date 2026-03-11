@@ -23,8 +23,8 @@ from bayesflow_hpo.objectives import (
     normalize_param_count,
 )
 from bayesflow_hpo.optimization import (
-    CheckpointPool,
     DEFAULT_STORAGE,
+    CheckpointPool,
     GenericObjective,
     MovingAverageEarlyStopping,
     ObjectiveConfig,
