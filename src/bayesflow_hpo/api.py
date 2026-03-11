@@ -6,14 +6,16 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
-logger = logging.getLogger(__name__)
-
 import bayesflow as bf
 import optuna
 
 from bayesflow_hpo.optimization.checkpoint_pool import CheckpointPool
 from bayesflow_hpo.optimization.objective import GenericObjective, ObjectiveConfig
-from bayesflow_hpo.optimization.study import DEFAULT_STORAGE, create_study, optimize_until
+from bayesflow_hpo.optimization.study import (
+    DEFAULT_STORAGE,
+    create_study,
+    optimize_until,
+)
 from bayesflow_hpo.search_spaces.composite import (
     CompositeSearchSpace,
     NetworkSelectionSpace,
@@ -24,7 +26,12 @@ from bayesflow_hpo.search_spaces.inference.flow_matching import FlowMatchingSpac
 from bayesflow_hpo.search_spaces.summary.deep_set import DeepSetSpace
 from bayesflow_hpo.search_spaces.summary.set_transformer import SetTransformerSpace
 from bayesflow_hpo.search_spaces.training import TrainingSpace
-from bayesflow_hpo.validation.data import ValidationDataset, generate_validation_dataset
+from bayesflow_hpo.validation.data import (
+    ValidationDataset,
+    generate_validation_dataset,
+)
+
+logger = logging.getLogger(__name__)
 
 
 def optimize(
@@ -47,6 +54,7 @@ def optimize(
     objective_metric: str = "calibration_error",
     objective_metrics: list[str] | None = None,
     objective_mode: str = "mean",
+    cost_metric: str = "inference_time",
     train_fn: Callable[[bf.BasicWorkflow, dict, list], None] | None = None,
     storage: str | None = DEFAULT_STORAGE,
     study_name: str = "bayesflow_hpo",
@@ -127,9 +135,13 @@ def optimize(
         Example: ``["calibration_error", "nrmse"]``.
     objective_mode
         ``"mean"`` (default) — arithmetic mean of the listed metrics
-        forms one scalar; study has 2 directions (mean + param_count).
+        forms one scalar; study has 2 directions (mean + cost).
         ``"pareto"`` — each metric is its own objective; study has
         ``len(objective_metrics) + 1`` directions.
+    cost_metric
+        Which cost objective to use as the last Optuna direction.
+        ``"inference_time"`` (default) — inference-to-simulation time
+        ratio.  ``"param_count"`` — normalized parameter count.
     train_fn
         Optional custom training function
         ``(workflow, params, callbacks) -> None``.  By default uses
@@ -208,6 +220,7 @@ def optimize(
             objective_metric=objective_metric,
             objective_metrics=objective_metrics,
             objective_mode=objective_mode,
+            cost_metric=cost_metric,
             train_fn=train_fn,
             checkpoint_pool=checkpoint_pool,
         )
@@ -227,12 +240,13 @@ def optimize(
             f"provide exactly {n_obj} directions."
         )
 
+    cost_label = cost_metric  # "inference_time" or "param_count"
     if objective_metrics and objective_mode == "pareto":
-        metric_names = list(objective_metrics) + ["param_count"]
+        metric_names = list(objective_metrics) + [cost_label]
     elif objective_metrics:
-        metric_names = ["mean(" + "+".join(objective_metrics) + ")", "param_count"]
+        metric_names = ["mean(" + "+".join(objective_metrics) + ")", cost_label]
     else:
-        metric_names = [objective_metric, "param_count"]
+        metric_names = [objective_metric, cost_label]
 
     if not resume and storage is not None:
         try:

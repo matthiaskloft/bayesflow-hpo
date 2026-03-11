@@ -14,7 +14,8 @@ class OptunaReportCallback(Callback):
 
     This callback records the training loss to the Optuna trial's
     intermediate values.  It does **not** trigger pruning — pruning is
-    handled by :class:`~bayesflow_hpo.optimization.validation_callback.PeriodicValidationCallback`
+    handled by
+    :class:`~bayesflow_hpo.optimization.validation_callback.PeriodicValidationCallback`
     which uses validation metrics that are comparable across network types.
     """
 

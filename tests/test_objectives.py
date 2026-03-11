@@ -4,9 +4,10 @@ import numpy as np
 import pytest
 
 from bayesflow_hpo.objectives import (
-    MIN_PARAM_COUNT,
     MAX_PARAM_COUNT,
+    MIN_PARAM_COUNT,
     _metric_to_minimize,
+    compute_inference_time_ratio,
     extract_multi_objective_values,
     extract_objective_values,
     normalize_param_count,
@@ -31,13 +32,13 @@ def test_extract_multi_mean_mode():
     }
     values = extract_multi_objective_values(
         metrics,
-        param_count=50_000,
+        cost_score=0.5,
         objective_metrics=["calibration_error", "nrmse"],
         objective_mode="mean",
     )
     assert len(values) == 2
     assert np.isclose(values[0], np.mean([0.04, 0.10]))
-    assert 0.0 < values[1] < 1.0  # param_score
+    assert values[1] == 0.5  # cost_score passed through
 
 
 def test_extract_multi_pareto_mode():
@@ -49,14 +50,14 @@ def test_extract_multi_pareto_mode():
     }
     values = extract_multi_objective_values(
         metrics,
-        param_count=50_000,
+        cost_score=0.5,
         objective_metrics=["calibration_error", "nrmse"],
         objective_mode="pareto",
     )
     assert len(values) == 3
     assert values[0] == 0.04  # calibration_error
     assert values[1] == 0.10  # nrmse
-    assert 0.0 < values[2] < 1.0  # param_score
+    assert values[2] == 0.5  # cost_score passed through
 
 
 def test_extract_multi_with_correlation():
@@ -70,7 +71,7 @@ def test_extract_multi_with_correlation():
     }
     values = extract_multi_objective_values(
         metrics,
-        param_count=50_000,
+        cost_score=0.5,
         objective_metrics=["calibration_error", "nrmse", "correlation"],
         objective_mode="pareto",
     )
@@ -85,7 +86,7 @@ def test_extract_multi_missing_metric_returns_worst():
     metrics = {"summary": {"nrmse": 0.1}}
     values = extract_multi_objective_values(
         metrics,
-        param_count=50_000,
+        cost_score=0.5,
         objective_metrics=["nrmse", "nonexistent_key"],
         objective_mode="pareto",
     )
@@ -97,7 +98,7 @@ def test_extract_multi_missing_correlation_returns_worst():
     metrics = {"summary": {"calibration_error": 0.05}}
     values = extract_multi_objective_values(
         metrics,
-        param_count=50_000,
+        cost_score=0.5,
         objective_metrics=["calibration_error", "correlation"],
         objective_mode="pareto",
     )
@@ -110,7 +111,7 @@ def test_extract_legacy_applies_metric_to_minimize():
     metrics = {"summary": {"correlation": 0.9}}
     obj_val, _ = extract_objective_values(
         metrics,
-        param_count=50_000,
+        cost_score=0.5,
         objective_metric="correlation",
     )
     assert np.isclose(obj_val, 0.1)  # 1 - 0.9
@@ -121,7 +122,7 @@ def test_extract_legacy_lower_is_better_unchanged():
     metrics = {"summary": {"calibration_error": 0.05}}
     obj_val, _ = extract_objective_values(
         metrics,
-        param_count=50_000,
+        cost_score=0.5,
         objective_metric="calibration_error",
     )
     assert obj_val == 0.05
@@ -132,7 +133,7 @@ def test_extract_multi_rejects_unknown_mode():
     with pytest.raises(ValueError, match="Unknown objective_mode"):
         extract_multi_objective_values(
             metrics,
-            param_count=50_000,
+            cost_score=0.5,
             objective_metrics=["calibration_error"],
             objective_mode="weighted",
         )
@@ -185,3 +186,37 @@ def test_normalize_explicit_min_skips_auto_tighten():
     # min=500 is not the default 1000, so no auto-tightening
     score = normalize_param_count(500, min_count=500, max_count=100_000)
     assert score == 0.0  # at the lower bound
+
+
+# --- compute_inference_time_ratio tests ---
+
+
+def test_inference_time_ratio_normal():
+    """Ratio = inference_time / (sim_time_per_sim * n_sims)."""
+    ratio = compute_inference_time_ratio(10.0, sim_time_per_sim=0.05, n_sims=200)
+    assert np.isclose(ratio, 1.0)  # 10 / (0.05 * 200) = 1.0
+
+
+def test_inference_time_ratio_fast_inference():
+    """Inference faster than simulation yields ratio < 1."""
+    ratio = compute_inference_time_ratio(2.0, sim_time_per_sim=0.05, n_sims=200)
+    assert ratio < 1.0
+    assert np.isclose(ratio, 0.2)
+
+
+def test_inference_time_ratio_fallback_when_sim_time_none():
+    """Falls back to raw inference seconds when sim_time_per_sim is None."""
+    ratio = compute_inference_time_ratio(5.5, sim_time_per_sim=None, n_sims=200)
+    assert ratio == 5.5
+
+
+def test_inference_time_ratio_fallback_when_sim_time_zero():
+    """Falls back to raw inference seconds when sim_time_per_sim is 0."""
+    ratio = compute_inference_time_ratio(3.0, sim_time_per_sim=0.0, n_sims=200)
+    assert ratio == 3.0
+
+
+def test_inference_time_ratio_n_sims_zero():
+    """n_sims=0 uses max(0, 1)=1 to avoid division by zero."""
+    ratio = compute_inference_time_ratio(1.0, sim_time_per_sim=0.5, n_sims=0)
+    assert np.isclose(ratio, 2.0)  # 1.0 / (0.5 * 1)

@@ -1,6 +1,5 @@
 """Tests for optimization callbacks."""
 
-from types import SimpleNamespace
 
 from bayesflow_hpo.optimization.callbacks import OptunaReportCallback
 

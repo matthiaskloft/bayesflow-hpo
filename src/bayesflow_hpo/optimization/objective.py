@@ -14,11 +14,13 @@ import optuna
 from bayesflow_hpo.builders.workflow import WorkflowBuildConfig, build_workflow
 from bayesflow_hpo.objectives import (
     FAILED_TRIAL_CAL_ERROR,
-    FAILED_TRIAL_PARAM_SCORE,
+    FAILED_TRIAL_COST,
     MAX_PARAM_COUNT,
+    compute_inference_time_ratio,
     extract_multi_objective_values,
     extract_objective_values,
     get_param_count,
+    normalize_param_count,
 )
 from bayesflow_hpo.optimization.callbacks import (
     MovingAverageEarlyStopping,
@@ -90,10 +92,16 @@ class ObjectiveConfig:
     objective_mode
         ``"mean"`` (default) — arithmetic mean of the listed metrics
         forms a single scalar; the objective returns 2 values
-        ``(mean, param_score)``.
+        ``(mean, cost_score)``.
         ``"pareto"`` — each metric becomes its own Optuna objective;
         returns ``len(objective_metrics) + 1`` values
-        (one per metric + param_score).
+        (one per metric + cost_score).
+    cost_metric
+        Which cost objective to use as the last Optuna objective.
+        ``"inference_time"`` (default) — inference-to-simulation time
+        ratio measured during validation.
+        ``"param_count"`` — normalized parameter count (log-linear
+        scaling).
     checkpoint_pool
         Optional :class:`CheckpointPool` to persist the best trial
         weights.  When ``None`` a default pool of size 5 is created.
@@ -124,6 +132,7 @@ class ObjectiveConfig:
     objective_metric: str = "calibration_error"
     objective_metrics: list[str] | None = None
     objective_mode: str = "mean"
+    cost_metric: str = "inference_time"
     checkpoint_pool: CheckpointPool | None = None
     train_fn: Callable[[bf.BasicWorkflow, dict, list], None] | None = None
 
@@ -132,6 +141,11 @@ class ObjectiveConfig:
             raise ValueError(
                 f"Unknown objective_mode: {self.objective_mode!r}. "
                 f"Expected 'mean' or 'pareto'."
+            )
+        if self.cost_metric not in ("inference_time", "param_count"):
+            raise ValueError(
+                f"Unknown cost_metric: {self.cost_metric!r}. "
+                f"Expected 'inference_time' or 'param_count'."
             )
 
 
@@ -182,17 +196,24 @@ def _log_trial_summary(
 
 
 class GenericObjective:
-    """Optuna objective returning a minimize-all tuple of metric and parameter scores.
+    """Optuna objective returning a minimize-all tuple of metric and cost scores.
 
     Each call samples hyperparameters, builds the model, trains it,
     validates, and returns an objective tuple.  Failed, pruned, or
     budget-rejected trials return penalty values.
 
+    The last objective value is the **cost score**, controlled by
+    ``config.cost_metric``:
+
+    - ``"inference_time"`` (default) — ratio of inference time to
+      simulation time, measured during validation.
+    - ``"param_count"`` — normalized parameter count (log-linear).
+
     When ``config.objective_metrics`` is set, the return shape depends
     on ``config.objective_mode``:
 
-    - ``"mean"`` → ``(mean_of_metrics, param_score)``
-    - ``"pareto"`` → ``(*metric_values, param_score)``
+    - ``"mean"`` → ``(mean_of_metrics, cost_score)``
+    - ``"pareto"`` → ``(*metric_values, cost_score)``
     """
 
     def __init__(self, config: ObjectiveConfig):
@@ -222,26 +243,28 @@ class GenericObjective:
         """Number of objective values returned per trial."""
         if self.config.objective_metrics:
             if self.config.objective_mode == "pareto":
-                return len(self.config.objective_metrics) + 1  # metrics + param_score
-            return 2  # mean + param_score
-        return 2  # legacy: objective_metric + param_score
+                return len(self.config.objective_metrics) + 1  # metrics + cost
+            return 2  # mean + cost
+        return 2  # legacy: objective_metric + cost
 
     def _penalty(self) -> tuple[float, ...]:
         """Return penalty values matching the expected objective shape."""
         n = self.n_objectives
         if n == 2:
-            return (FAILED_TRIAL_CAL_ERROR, FAILED_TRIAL_PARAM_SCORE)
-        # n > 2: penalty for each metric dimension + param_score
-        return tuple([FAILED_TRIAL_CAL_ERROR] * (n - 1)) + (FAILED_TRIAL_PARAM_SCORE,)
+            return (FAILED_TRIAL_CAL_ERROR, FAILED_TRIAL_COST)
+        # n > 2: penalty for each metric dimension + cost
+        return tuple([FAILED_TRIAL_CAL_ERROR] * (n - 1)) + (FAILED_TRIAL_COST,)
 
     def __call__(self, trial: optuna.Trial) -> tuple[float, ...]:
         params = self.config.search_space.sample(trial)
 
         # Inject actual model dimensions for memory estimation.
         if "n_params" not in params:
-            params["n_params"] = len(self.config.param_keys) if self.config.param_keys else 1
+            n_p = len(self.config.param_keys) if self.config.param_keys else 1
+            params["n_params"] = n_p
         if "n_conditions" not in params:
-            params["n_conditions"] = len(self.config.inference_conditions) if self.config.inference_conditions else 0
+            conds = self.config.inference_conditions
+            params["n_conditions"] = len(conds) if conds else 0
 
         # --- Budget pre-check (memory) ---
         estimated_memory = estimate_peak_memory_mb(params)
@@ -368,6 +391,7 @@ class GenericObjective:
         trial.set_user_attr("training_time_s", round(training_time, 2))
 
         # --- Final validation ---
+        inference_time = 0.0
         try:
             if self.config.validation_data is not None:
                 from bayesflow_hpo.validation.pipeline import run_validation_pipeline
@@ -380,11 +404,11 @@ class GenericObjective:
                 )
                 # Pass the full summary so multi-metric extraction works.
                 metrics = {"summary": dict(validation_result.summary)}
+                inference_time = validation_result.timing.get("inference", 0.0)
 
                 # Store validation timing and summary metrics as trial attrs.
                 trial.set_user_attr(
-                    "inference_time_s",
-                    round(validation_result.timing.get("inference", 0.0), 2),
+                    "inference_time_s", round(inference_time, 2),
                 )
                 for key, val in validation_result.summary.items():
                     trial.set_user_attr(key, round(float(val), 6))
@@ -422,23 +446,42 @@ class GenericObjective:
             param_count = get_param_count(workflow.approximator)
         except (TypeError, ValueError) as exc:
             logger.warning("Trial %d: could not count params: %s", trial.number, exc)
-            param_count = -1  # normalize_param_count maps to 1.0 (worst)
+            param_count = -1
         trial.set_user_attr("param_count", param_count)
+
+        # --- Cost score ---
+        if self.config.cost_metric == "inference_time":
+            vd = self.config.validation_data
+            n_sims = sum(
+                len(next(iter(batch.values()))) if batch else 0
+                for batch in vd.simulations
+            ) if vd is not None else 0
+            cost_score = compute_inference_time_ratio(
+                inference_time,
+                sim_time_per_sim=vd.sim_time_per_sim if vd is not None else None,
+                n_sims=n_sims,
+            )
+            trial.set_user_attr(
+                "inference_time_ratio", round(cost_score, 6),
+            )
+        else:
+            cost_score = normalize_param_count(
+                param_count,
+                max_count=self.config.max_param_count,
+            )
 
         if self.config.objective_metrics:
             values = extract_multi_objective_values(
                 metrics,
-                param_count,
+                cost_score,
                 objective_metrics=self.config.objective_metrics,
                 objective_mode=self.config.objective_mode,
-                max_param_count=self.config.max_param_count,
             )
         else:
             values = extract_objective_values(
                 metrics,
-                param_count,
+                cost_score,
                 objective_metric=self.config.objective_metric,
-                max_param_count=self.config.max_param_count,
             )
 
         # --- Checkpoint pool ---

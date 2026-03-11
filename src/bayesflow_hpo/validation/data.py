@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import itertools
 import json
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -13,13 +14,31 @@ import numpy as np
 
 @dataclass(frozen=True)
 class ValidationDataset:
-    """Immutable fixed dataset reused across all HPO trials."""
+    """Immutable fixed dataset reused across all HPO trials.
+
+    Parameters
+    ----------
+    simulations
+        One dict per condition, mapping variable names to arrays.
+    condition_labels
+        One dict per condition with the condition variable values.
+    param_keys, data_keys
+        Names of parameter / observable variables.
+    seed
+        RNG seed used for generation.
+    sim_time_per_sim
+        Average wall-clock seconds to simulate a single observation,
+        measured across all conditions during dataset generation.
+        ``None`` when timing is unavailable (e.g. loaded from disk
+        without the metadata field).
+    """
 
     simulations: list[dict[str, np.ndarray]]
     condition_labels: list[dict[str, float | int]]
     param_keys: list[str]
     data_keys: list[str]
     seed: int
+    sim_time_per_sim: float | None = None
 
 
 def generate_validation_dataset(
@@ -30,18 +49,27 @@ def generate_validation_dataset(
     sims_per_condition: int = 200,
     seed: int = 42,
 ) -> ValidationDataset:
-    """Generate a fixed validation dataset from simulator + condition grid."""
+    """Generate a fixed validation dataset from simulator + condition grid.
+
+    Every batch is timed so that ``sim_time_per_sim`` reflects the
+    average wall-clock cost of a single simulation across all
+    conditions.
+    """
     rng = np.random.default_rng(seed)
 
     if condition_grid is None:
         batch_seed = int(rng.integers(0, 2**31))
+        t0 = time.perf_counter()
         sims = simulator.sample(sims_per_condition, seed=batch_seed)
+        elapsed = time.perf_counter() - t0
+        sim_time_per_sim = elapsed / max(sims_per_condition, 1)
         return ValidationDataset(
             simulations=[sims],
             condition_labels=[{}],
             param_keys=param_keys,
             data_keys=data_keys,
             seed=seed,
+            sim_time_per_sim=sim_time_per_sim,
         )
 
     keys = list(condition_grid.keys())
@@ -50,15 +78,22 @@ def generate_validation_dataset(
 
     simulations: list[dict[str, np.ndarray]] = []
     condition_labels: list[dict[str, float | int]] = []
+    total_sim_time = 0.0
+    total_sims = 0
 
     for point in grid_points:
         condition = dict(zip(keys, point, strict=False))
         batch_seed = int(rng.integers(0, 2**31))
+        t0 = time.perf_counter()
         sims = simulator.sample(
             sims_per_condition, conditions=condition, seed=batch_seed,
         )
+        total_sim_time += time.perf_counter() - t0
+        total_sims += sims_per_condition
         simulations.append(sims)
         condition_labels.append(condition)
+
+    sim_time_per_sim = total_sim_time / max(total_sims, 1)
 
     return ValidationDataset(
         simulations=simulations,
@@ -66,6 +101,7 @@ def generate_validation_dataset(
         param_keys=param_keys,
         data_keys=data_keys,
         seed=seed,
+        sim_time_per_sim=sim_time_per_sim,
     )
 
 
@@ -74,13 +110,15 @@ def save_validation_dataset(dataset: ValidationDataset, path: str | Path) -> Non
     out_dir = Path(path)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    metadata = {
+    metadata: dict[str, Any] = {
         "condition_labels": dataset.condition_labels,
         "param_keys": dataset.param_keys,
         "data_keys": dataset.data_keys,
         "seed": dataset.seed,
         "n_batches": len(dataset.simulations),
     }
+    if dataset.sim_time_per_sim is not None:
+        metadata["sim_time_per_sim"] = dataset.sim_time_per_sim
     meta_text = json.dumps(metadata, indent=2)
     (out_dir / "metadata.json").write_text(meta_text, encoding="utf-8")
 
@@ -186,4 +224,5 @@ def load_validation_dataset(path: str | Path) -> ValidationDataset:
         param_keys=list(metadata["param_keys"]),
         data_keys=list(metadata["data_keys"]),
         seed=int(metadata["seed"]),
+        sim_time_per_sim=metadata.get("sim_time_per_sim"),
     )

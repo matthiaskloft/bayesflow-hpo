@@ -41,6 +41,7 @@ DEFAULT_RESULT_ATTRS = [
     "param_count",
     "training_time_s",
     "inference_time_s",
+    "inference_time_ratio",
     "calibration_error",
     "mean_cal_error",
     "nrmse",
@@ -184,6 +185,7 @@ def summarize_study(
         attr_display = [
             ("training_time_s", "Training time (s)"),
             ("inference_time_s", "Inference time (s)"),
+            ("inference_time_ratio", "Inference/sim ratio"),
             ("nrmse", "NRMSE"),
             ("correlation", "Correlation"),
             ("contraction", "Contraction"),

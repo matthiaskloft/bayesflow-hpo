@@ -79,7 +79,8 @@ def _estimate_summary_params(params: dict[str, Any]) -> tuple[int, int]:
     summary_dim = _safe_int(params.get("ds_summary_dim"), 8)
     deepset_width = _safe_int(params.get("ds_width"), 64)
     deepset_depth = _safe_int(params.get("ds_depth"), 2)
-    # Inner MLP: obs_dim → width (depth hidden layers) + outer MLP: width → summary_dim (depth hidden layers).
+    # Inner MLP: obs_dim → width (depth hidden layers)
+    # + outer MLP: width → summary_dim (depth hidden layers).
     # Use obs_dim=1 as conservative lower bound for the input embedding.
     obs_dim = 1
     inner = _mlp_block_params(obs_dim, deepset_width, deepset_depth, deepset_width)

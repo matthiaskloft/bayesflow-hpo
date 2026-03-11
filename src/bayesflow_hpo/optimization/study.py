@@ -28,13 +28,13 @@ def _budget_constraints_func(trial: optuna.trial.FrozenTrial) -> list[float]:
 
 
 def _mean_ranking_key(trial: optuna.trial.FrozenTrial) -> float:
-    """Rank by the mean of objective values (excluding param_score).
+    """Rank by the mean of objective values (excluding cost score).
 
     Falls back to the first objective value when multi-objective values
     are not available.
     """
     if trial.values and len(trial.values) > 1:
-        # All values except the last (param_score) — lower is better.
+        # All values except the last (cost score) — lower is better.
         metric_values = trial.values[:-1]
         return float(np.mean(metric_values))
     if trial.values:
@@ -151,7 +151,7 @@ def warm_start_study(
     """Seed *target_study* with best completed trials from *source_study*.
 
     Trials are ranked by the arithmetic mean of their objective values
-    (excluding param_score), falling back to the first objective when
+    (excluding cost score), falling back to the first objective when
     only a single value is available.
 
     Parameters
