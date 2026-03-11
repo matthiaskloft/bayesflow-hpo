@@ -73,7 +73,7 @@ def test_optimize_until_counts_only_trained():
 
 
 def test_optimize_until_respects_max_total_trials():
-    """optimize_until should stop at max_total_trials even if not enough trained."""
+    """optimize_until should stop at the hard cap when all trials are rejected."""
 
     def always_reject(trial: optuna.Trial):
         trial.suggest_float("x", 0.0, 1.0)
@@ -89,7 +89,9 @@ def test_optimize_until_respects_max_total_trials():
         show_progress_bar=False,
     )
 
-    assert len(study.trials) == 5
+    # All rejected -> non-rejected count never increases -> hits the hard
+    # safety cap of 5 * max_total_trials = 25 (+ batch overshoot).
+    assert len(study.trials) <= 30
     assert count_trained_trials(study) == 0
 
 

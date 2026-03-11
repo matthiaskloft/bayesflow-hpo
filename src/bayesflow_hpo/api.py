@@ -107,7 +107,7 @@ def optimize(
     batches_per_epoch
         Number of online simulation batches per epoch (default 50).
     max_param_count
-        Trials with estimated parameter count above this value are
+        Trials with actual parameter count above this value are
         rejected before training (default 1 000 000).
     max_memory_mb
         Optional peak-memory budget in MB.  Disabled by default.

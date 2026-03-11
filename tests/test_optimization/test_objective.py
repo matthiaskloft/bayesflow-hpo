@@ -1,4 +1,4 @@
-"""Tests for objective training failure handling."""
+"""Tests for objective training failure handling and budget enforcement."""
 
 import pytest
 
@@ -29,11 +29,20 @@ class _FakeSearchSpace:
         return {"initial_lr": 1e-3}
 
 
+class _FakeApproximator:
+    """Approximator stub that reports a configurable param count."""
+
+    def __init__(self, param_count: int):
+        self._param_count = param_count
+
+    def build_from_data(self, data):
+        pass
+
+    def count_params(self):
+        return self._param_count
+
+
 def test_objective_training_failure_sets_user_attr_and_penalty(monkeypatch):
-    monkeypatch.setattr(
-        "bayesflow_hpo.optimization.objective.estimate_param_count",
-        lambda params: 10,
-    )
     monkeypatch.setattr(
         "bayesflow_hpo.optimization.objective.estimate_peak_memory_mb",
         lambda params: 1.0,
@@ -71,6 +80,112 @@ def test_objective_training_failure_sets_user_attr_and_penalty(monkeypatch):
     assert "compile" in trial.user_attrs["training_error"]
 
 
+def test_objective_rejects_trial_exceeding_param_budget(monkeypatch):
+    """Exact param count check rejects trials over max_param_count."""
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.estimate_peak_memory_mb",
+        lambda params: 1.0,
+    )
+
+    fake_approx = _FakeApproximator(param_count=200_000)
+
+    class _FakeWorkflow:
+        approximator = fake_approx
+
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.build_workflow",
+        lambda **kwargs: _FakeWorkflow(),
+    )
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.cleanup_trial",
+        lambda: None,
+    )
+
+    class _FakeSimulator:
+        def sample(self, shape):
+            return {}
+
+    class _FakeAdapter:
+        def __call__(self, data):
+            return data
+
+    objective = GenericObjective(
+        ObjectiveConfig(
+            simulator=_FakeSimulator(),
+            adapter=_FakeAdapter(),
+            search_space=_FakeSearchSpace(),
+            epochs=1,
+            batches_per_epoch=1,
+            validation_data=None,
+            max_param_count=100_000,
+        )
+    )
+
+    trial = _FakeTrial()
+    values = objective(trial)
+
+    assert values == (FAILED_TRIAL_CAL_ERROR, FAILED_TRIAL_PARAM_SCORE)
+    assert trial.user_attrs["rejected_reason"] == "param_budget"
+    assert trial.user_attrs["param_count"] == 200_000
+
+
+def test_objective_allows_trial_within_param_budget(monkeypatch):
+    """Trials within budget pass the exact check and proceed to training."""
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.estimate_peak_memory_mb",
+        lambda params: 1.0,
+    )
+
+    fake_approx = _FakeApproximator(param_count=50_000)
+
+    class _FakeWorkflow:
+        approximator = fake_approx
+
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.build_workflow",
+        lambda **kwargs: _FakeWorkflow(),
+    )
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.cleanup_trial",
+        lambda: None,
+    )
+
+    class _FakeSimulator:
+        def sample(self, shape):
+            return {}
+
+    class _FakeAdapter:
+        def __call__(self, data):
+            return data
+
+    train_called = []
+
+    def _track_training(workflow, params, callbacks):
+        train_called.append(True)
+        raise RuntimeError("stop after confirming training was reached")
+
+    objective = GenericObjective(
+        ObjectiveConfig(
+            simulator=_FakeSimulator(),
+            adapter=_FakeAdapter(),
+            search_space=_FakeSearchSpace(),
+            epochs=1,
+            batches_per_epoch=1,
+            validation_data=None,
+            max_param_count=100_000,
+            train_fn=_track_training,
+        )
+    )
+
+    trial = _FakeTrial()
+    objective(trial)
+
+    # Training was reached (not rejected by budget).
+    assert len(train_called) == 1
+    assert "rejected_reason" not in trial.user_attrs
+    assert trial.user_attrs["param_count"] == 50_000
+
+
 def test_objective_config_rejects_invalid_mode():
     """ObjectiveConfig eagerly validates objective_mode."""
     with pytest.raises(ValueError, match="Unknown objective_mode"):
@@ -105,10 +220,6 @@ def test_n_objectives_mean_mode_with_multiple_metrics():
 
 def test_objective_multi_metric_penalty_shape(monkeypatch):
     """Pareto mode with 2 metrics should return 3 penalty values."""
-    monkeypatch.setattr(
-        "bayesflow_hpo.optimization.objective.estimate_param_count",
-        lambda params: 10,
-    )
     monkeypatch.setattr(
         "bayesflow_hpo.optimization.objective.estimate_peak_memory_mb",
         lambda params: 1.0,
