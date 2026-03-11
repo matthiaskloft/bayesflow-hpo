@@ -7,25 +7,23 @@ Generic hyperparameter optimization for BayesFlow neural posterior estimation (N
 
 ## Features
 
-- Declarative search spaces for BayesFlow inference + summary networks
-- Optuna multi-objective optimization (`calibration_error`, `param_score`)
-- Fixed validation dataset generation and serialization
-- Per-parameter validation metrics with aggregated calibration summaries
-- Memory budget pre-check (`max_memory_mb`) to avoid likely OOM trials
-- Custom network registration API for user-defined search spaces
-- Warm-start study seeding from prior Optuna studies
-- Generic objective and study helpers
-- Pareto/front extraction and plotting helpers
+- **Declarative search spaces** for 5 inference networks (CouplingFlow, FlowMatching, Diffusion, Consistency, StableConsistency) and 5 summary networks (DeepSet, SetTransformer, FusionTransformer, TimeSeriesNetwork, TimeSeriesTransformer)
+- **Multi-metric objectives** — single metric, arithmetic mean, or full Pareto-front mode (`objective_mode="mean"` | `"pareto"`)
+- **13+ built-in validation metrics** — calibration error, NRMSE, correlation, coverage, SBC, bias, MAE, and more, with a `register_metric()` API for custom metrics
+- **Fixed validation datasets** — generate, save, and reload condition-grid validation data for reproducible trial comparison
+- **Parameter & memory budgets** — `max_param_count` and `max_memory_mb` pre-checks to reject infeasible trials before training
+- **Intermediate pruning** — periodic validation during training for early stopping of unpromising trials
+- **Custom network registration** — plug in user-defined inference/summary networks with their own search spaces
+- **Warm-start study seeding** from prior Optuna studies
+- **Workflow persistence** — save/load trained models with full study metadata
+- **Pareto-front extraction and plotting helpers**
 
-## Advanced examples
-
-- `examples/optuna_dashboard.md`
-
-## Runnable notebooks
+## Examples
 
 - `examples/quickstart.ipynb` — minimal end-to-end BayesFlow HPO run
 - `examples/custom_summary_network.ipynb` — custom summary-space registration + HPO
 - `examples/multi_objective.ipynb` — two-objective optimization + warm start
+- `examples/optuna_dashboard.md` — Optuna dashboard integration guide
 
 ## Quick start
 
