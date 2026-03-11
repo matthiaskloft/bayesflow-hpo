@@ -48,6 +48,8 @@ def optimize(
     max_total_trials: int | None = None,
     epochs: int = 200,
     batches_per_epoch: int = 50,
+    early_stopping_patience: int = 5,
+    early_stopping_window: int = 7,
     max_param_count: int = 1_000_000,
     max_memory_mb: float | None = None,
     metrics: list[str] | None = None,
@@ -120,6 +122,10 @@ def optimize(
         halts training before reaching the limit.
     batches_per_epoch
         Number of online simulation batches per epoch (default 50).
+    early_stopping_patience
+        Moving-average patience epochs for early stopping (default 5).
+    early_stopping_window
+        Moving-average window size for early stopping (default 7).
     max_param_count
         Trials with actual parameter count above this value are
         rejected before training (default 1 000 000).
@@ -245,6 +251,8 @@ def optimize(
             data_keys=data_keys,
             epochs=epochs,
             batches_per_epoch=batches_per_epoch,
+            early_stopping_patience=early_stopping_patience,
+            early_stopping_window=early_stopping_window,
             max_param_count=max_param_count,
             max_memory_mb=max_memory_mb,
             metrics=metrics,
