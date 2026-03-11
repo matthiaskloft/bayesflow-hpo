@@ -37,8 +37,8 @@ logger = logging.getLogger(__name__)
 def optimize(
     simulator: bf.simulators.Simulator,
     adapter: bf.adapters.Adapter,
-    param_keys: list[str],
-    data_keys: list[str],
+    param_keys: list[str] | None = None,
+    data_keys: list[str] | None = None,
     validation_data: ValidationDataset | None = None,
     validation_conditions: dict[str, list[Any]] | None = None,
     sims_per_condition: int = 200,
@@ -80,9 +80,15 @@ def optimize(
     adapter
         BayesFlow adapter for data preprocessing.
     param_keys
-        Names of the parameters to infer.
+        Names of the parameters to infer.  Optional when
+        ``validation_data`` is provided; inferred from the dataset in
+        that case.  Must match ``validation_data.param_keys`` if both
+        are given.
     data_keys
-        Names of the data/observable variables.
+        Names of the data/observable variables.  Optional when
+        ``validation_data`` is provided; inferred from the dataset in
+        that case.  Must match ``validation_data.data_keys`` if both
+        are given.
     validation_data
         Pre-generated :class:`ValidationDataset`.  When ``None`` and
         ``validation_conditions`` is provided, data is generated
@@ -177,6 +183,31 @@ def optimize(
     optuna.Study
         The optimized Optuna study.
     """
+    if validation_data is not None:
+        if param_keys is None:
+            param_keys = validation_data.param_keys
+        elif param_keys != validation_data.param_keys:
+            raise ValueError(
+                f"param_keys mismatch: got {param_keys}, "
+                f"dataset has {validation_data.param_keys}"
+            )
+        if data_keys is None:
+            data_keys = validation_data.data_keys
+        elif data_keys != validation_data.data_keys:
+            raise ValueError(
+                f"data_keys mismatch: got {data_keys}, "
+                f"dataset has {validation_data.data_keys}"
+            )
+    else:
+        if param_keys is None:
+            raise TypeError(
+                "param_keys is required when validation_data is not provided"
+            )
+        if data_keys is None:
+            raise TypeError(
+                "data_keys is required when validation_data is not provided"
+            )
+
     if search_space is None:
         search_space = CompositeSearchSpace(
             inference_space=NetworkSelectionSpace(
