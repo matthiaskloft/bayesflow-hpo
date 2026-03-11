@@ -285,8 +285,39 @@ class GenericObjective:
             config=WorkflowBuildConfig(
                 inference_conditions=self.config.inference_conditions,
                 batches_per_epoch=self.config.batches_per_epoch,
+                epochs=self.config.epochs,
             ),
         )
+
+        # --- Exact param count check (post-build, pre-train) ---
+        approximator = getattr(workflow, "approximator", workflow)
+        try:
+            # Trigger Keras lazy weight initialization with a tiny batch.
+            dummy = self.config.simulator.sample((2,))
+            adapted = self.config.adapter(dummy)
+            approximator.compute_loss(adapted)
+            param_count_actual = get_param_count(approximator)
+            trial.set_user_attr("param_count_pre_train", int(param_count_actual))
+            if param_count_actual > self.config.max_param_count:
+                trial.set_user_attr("rejected_reason", "param_budget_exact")
+                logger.info(
+                    "Trial #%d rejected: actual %d params > budget %d "
+                    "(heuristic estimated %d)",
+                    trial.number, param_count_actual,
+                    self.config.max_param_count, estimated,
+                )
+                cleanup_trial()
+                return self._penalty()
+        except MemoryError:
+            raise  # never swallow OOM
+        except Exception as exc:
+            # If the probe fails (e.g. mock objects in tests, unusual model
+            # topology), log and continue to training — the heuristic
+            # already passed, so it's worth a try.
+            logger.debug(
+                "Trial #%d: pre-train param count probe failed: %s",
+                trial.number, exc,
+            )
 
         # --- Callbacks ---
         callbacks: list[Any] = [
@@ -305,7 +336,6 @@ class GenericObjective:
                 PeriodicValidationCallback,
             )
 
-            approximator = getattr(workflow, "approximator", workflow)
             callbacks.append(
                 PeriodicValidationCallback(
                     trial=trial,

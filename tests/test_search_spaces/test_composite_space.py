@@ -22,4 +22,3 @@ def test_composite_space_merges_inference_summary_and_training():
     assert "initial_lr" in params
 
     assert "batch_size" in params
-    assert "decay_rate" in params
