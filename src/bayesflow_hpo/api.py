@@ -6,14 +6,16 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
-logger = logging.getLogger(__name__)
-
 import bayesflow as bf
 import optuna
 
 from bayesflow_hpo.optimization.checkpoint_pool import CheckpointPool
 from bayesflow_hpo.optimization.objective import GenericObjective, ObjectiveConfig
-from bayesflow_hpo.optimization.study import DEFAULT_STORAGE, create_study, optimize_until
+from bayesflow_hpo.optimization.study import (
+    DEFAULT_STORAGE,
+    create_study,
+    optimize_until,
+)
 from bayesflow_hpo.search_spaces.composite import (
     CompositeSearchSpace,
     NetworkSelectionSpace,
@@ -24,7 +26,12 @@ from bayesflow_hpo.search_spaces.inference.flow_matching import FlowMatchingSpac
 from bayesflow_hpo.search_spaces.summary.deep_set import DeepSetSpace
 from bayesflow_hpo.search_spaces.summary.set_transformer import SetTransformerSpace
 from bayesflow_hpo.search_spaces.training import TrainingSpace
-from bayesflow_hpo.validation.data import ValidationDataset, generate_validation_dataset
+from bayesflow_hpo.validation.data import (
+    ValidationDataset,
+    generate_validation_dataset,
+)
+
+logger = logging.getLogger(__name__)
 
 
 def optimize(

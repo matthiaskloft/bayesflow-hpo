@@ -5,7 +5,11 @@ from bayesflow_hpo.results.export import (
     load_workflow_with_metadata,
     save_workflow_with_metadata,
 )
-from bayesflow_hpo.results.extraction import get_pareto_trials, summarize_study, trials_to_dataframe
+from bayesflow_hpo.results.extraction import (
+    get_pareto_trials,
+    summarize_study,
+    trials_to_dataframe,
+)
 from bayesflow_hpo.results.visualization import (
     plot_metric_panels,
     plot_metric_scatter,

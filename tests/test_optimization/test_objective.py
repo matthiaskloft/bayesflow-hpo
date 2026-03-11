@@ -264,7 +264,7 @@ def test_objective_rejects_trial_when_probe_fails(monkeypatch):
     )
 
     class _FakeWorkflow:
-        class approximator:
+        class approximator:  # noqa: N801
             @staticmethod
             def build_from_data(data):
                 raise RuntimeError("shape mismatch during probe")
@@ -321,7 +321,7 @@ def test_objective_reraises_memory_error_from_probe(monkeypatch):
     )
 
     class _FakeWorkflow:
-        class approximator:
+        class approximator:  # noqa: N801
             @staticmethod
             def build_from_data(data):
                 raise MemoryError("CUDA OOM")

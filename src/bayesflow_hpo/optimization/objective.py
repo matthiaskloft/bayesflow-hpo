@@ -260,9 +260,11 @@ class GenericObjective:
 
         # Inject actual model dimensions for memory estimation.
         if "n_params" not in params:
-            params["n_params"] = len(self.config.param_keys) if self.config.param_keys else 1
+            n_p = len(self.config.param_keys) if self.config.param_keys else 1
+            params["n_params"] = n_p
         if "n_conditions" not in params:
-            params["n_conditions"] = len(self.config.inference_conditions) if self.config.inference_conditions else 0
+            conds = self.config.inference_conditions
+            params["n_conditions"] = len(conds) if conds else 0
 
         # --- Budget pre-check (memory) ---
         estimated_memory = estimate_peak_memory_mb(params)

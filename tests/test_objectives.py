@@ -4,8 +4,8 @@ import numpy as np
 import pytest
 
 from bayesflow_hpo.objectives import (
-    MIN_PARAM_COUNT,
     MAX_PARAM_COUNT,
+    MIN_PARAM_COUNT,
     _metric_to_minimize,
     compute_inference_time_ratio,
     extract_multi_objective_values,
