@@ -10,10 +10,8 @@ import bayesflow as bf
 from bayesflow_hpo.search_spaces.base import (
     BaseSearchSpace,
     CategoricalDimension,
-    Dimension,
     FloatDimension,
     IntDimension,
-    validate_required_params,
 )
 
 
@@ -21,24 +19,31 @@ from bayesflow_hpo.search_spaces.base import (
 class FlowMatchingSpace(BaseSearchSpace):
     """Search space for `bf.networks.FlowMatching`.
 
-    Default ranges
-    --------------
+    Default dimensions
+    ------------------
     fm_subnet_width : int
         MLP width (32--256, step 32).
     fm_subnet_depth : int
         MLP depth (1--4).
     fm_dropout : float
         Dropout rate (0.0--0.2).
-    fm_activation : str
-        **Optional** (off by default). Falls back to BayesFlow's TimeMLP
-        default ``"mish"``.
 
     Optional dimensions (enabled via ``include_optional=True``)
     -----------------------------------------------------------
-    fm_use_ot, fm_time_alpha.
+    fm_activation : str
+        Subnet activation function. Defaults to ``"mish"`` when omitted.
+    fm_use_ot : bool
+        Whether to use optimal transport for improved training stability.
+        Increases training time (~2.5x) but may speed up inference.
+    fm_time_alpha : float
+        Power-law exponent for the time distribution during training.
+        Controls sampling bias: ``p(t) ∝ t^(1/(1+α))``. Default
+        ``α=0`` corresponds to uniform sampling.
+    fm_time_resolution : int
+        Number of fixed ODE solver steps used at inference time (50--300,
+        step 50). Higher values improve quality at the cost of slower
+        inference. When omitted, BayesFlow uses adaptive stepping.
     """
-
-    include_optional: bool = False
 
     subnet_width: IntDimension = field(
         default_factory=lambda: IntDimension(
@@ -67,37 +72,29 @@ class FlowMatchingSpace(BaseSearchSpace):
             "fm_time_alpha", low=0.0, high=2.0, enabled=False
         )
     )
-
-    @property
-    def dimensions(self) -> list[Dimension]:
-        return [
-            self.subnet_width,
-            self.subnet_depth,
-            self.dropout,
-            self.activation,
-            self.use_optimal_transport,
-            self.time_alpha,
-        ]
-
-    def sample(self, trial: Any) -> dict[str, Any]:
-        return BaseSearchSpace.sample(self, trial)
+    time_resolution: IntDimension = field(
+        default_factory=lambda: IntDimension(
+            "fm_time_resolution", low=50, high=300, step=50, enabled=False
+        )
+    )
 
     def build(self, params: dict[str, Any]) -> bf.networks.FlowMatching:
-        validate_required_params(
-            params,
-            ["fm_subnet_width", "fm_subnet_depth", "fm_dropout"],
-            "FlowMatchingSpace.build",
-        )
+        self._validate(params)
 
         width = int(params["fm_subnet_width"])
         depth = int(params["fm_subnet_depth"])
-        return bf.networks.FlowMatching(
-            use_optimal_transport=bool(params.get("fm_use_ot", False)),
-            time_power_law_alpha=float(params.get("fm_time_alpha", 0.0)),
-            loss_fn="mse",
-            subnet_kwargs={
+
+        kwargs: dict[str, Any] = {
+            "use_optimal_transport": bool(params.get("fm_use_ot", False)),
+            "time_power_law_alpha": float(params.get("fm_time_alpha", 0.0)),
+            "loss_fn": "mse",
+            "subnet_kwargs": {
                 "widths": tuple([width] * depth),
                 "activation": params.get("fm_activation", "mish"),
                 "dropout": float(params["fm_dropout"]),
             },
-        )
+        }
+        if "fm_time_resolution" in params:
+            kwargs["integrate_kwargs"] = {"steps": int(params["fm_time_resolution"])}
+
+        return bf.networks.FlowMatching(**kwargs)

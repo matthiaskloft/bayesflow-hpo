@@ -10,18 +10,38 @@ import bayesflow as bf
 from bayesflow_hpo.search_spaces.base import (
     BaseSearchSpace,
     CategoricalDimension,
-    Dimension,
     FloatDimension,
     IntDimension,
-    validate_required_params,
 )
 
 
 @dataclass
 class SetTransformerSpace(BaseSearchSpace):
-    """Search space for `bf.networks.SetTransformer`."""
+    """Search space for `bf.networks.SetTransformer`.
 
-    include_optional: bool = False
+    Default dimensions
+    ------------------
+    st_summary_dim : int
+        Output summary dimensionality (8--64, step 8).
+    st_embed_dim : int
+        Embedding width (32--256, step 32).
+    st_num_heads : int
+        Number of attention heads (1, 2, 4, or 8).
+    st_num_layers : int
+        Number of transformer layers (1--4).
+    st_dropout : float
+        Dropout rate (0.0--0.3).
+
+    Optional dimensions (enabled via ``include_optional=True``)
+    -----------------------------------------------------------
+    st_mlp_width : int
+        Feed-forward MLP width (64--512, step 64). Defaults to
+        ``2 * embed_dim``.
+    st_mlp_depth : int
+        Feed-forward MLP depth (1--4). Defaults to 2.
+    st_num_inducing : int
+        Number of inducing points for ISAB (8--64, step 8).
+    """
 
     summary_dim: IntDimension = field(
         default_factory=lambda: IntDimension("st_summary_dim", low=8, high=64, step=8)
@@ -57,34 +77,8 @@ class SetTransformerSpace(BaseSearchSpace):
         )
     )
 
-    @property
-    def dimensions(self) -> list[Dimension]:
-        return [
-            self.summary_dim,
-            self.embed_dim,
-            self.num_heads,
-            self.num_layers,
-            self.dropout,
-            self.mlp_width,
-            self.mlp_depth,
-            self.num_inducing,
-        ]
-
-    def sample(self, trial: Any) -> dict[str, Any]:
-        return BaseSearchSpace.sample(self, trial)
-
     def build(self, params: dict[str, Any]) -> bf.networks.SetTransformer:
-        validate_required_params(
-            params,
-            [
-                "st_summary_dim",
-                "st_embed_dim",
-                "st_num_heads",
-                "st_num_layers",
-                "st_dropout",
-            ],
-            "SetTransformerSpace.build",
-        )
+        self._validate(params)
 
         num_layers = int(params["st_num_layers"])
         embed_dim = int(params["st_embed_dim"])

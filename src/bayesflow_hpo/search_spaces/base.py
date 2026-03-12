@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from typing import Any, Protocol
 
 
@@ -41,6 +41,8 @@ class CategoricalDimension:
 
 Dimension = IntDimension | FloatDimension | CategoricalDimension
 
+_DIMENSION_TYPES = (IntDimension, FloatDimension, CategoricalDimension)
+
 
 class SearchSpace(Protocol):
     """Protocol for network-specific search spaces."""
@@ -56,15 +58,46 @@ class SearchSpace(Protocol):
         """Build the corresponding network from sampled params."""
 
 
+@dataclass
 class BaseSearchSpace:
-    """Base class with automatic `trial.suggest_*` dispatch."""
+    """Base class with automatic ``dimensions``, ``sample``, and validation.
 
-    def __init__(self, include_optional: bool = False):
-        self.include_optional = include_optional
+    Subclasses declare hyperparameters as dataclass fields of type
+    :class:`IntDimension`, :class:`FloatDimension`, or
+    :class:`CategoricalDimension`.  The ``dimensions`` property, ``sample``
+    method, and ``_validate`` helper are derived automatically — subclasses
+    only need to implement ``build``.
+
+    Dimensions with ``enabled=False`` are *optional*: they are only sampled
+    when ``include_optional=True``.
+    """
+
+    include_optional: bool = False
 
     @property
     def dimensions(self) -> list[Dimension]:
-        raise NotImplementedError
+        try:
+            all_fields = fields(self)
+        except TypeError:
+            raise TypeError(
+                f"{type(self).__name__} must be decorated with @dataclass "
+                f"to use BaseSearchSpace's automatic dimension discovery."
+            ) from None
+        return [
+            getattr(self, f.name)
+            for f in all_fields
+            if isinstance(getattr(self, f.name), _DIMENSION_TYPES)
+        ]
+
+    def _validate(self, params: dict[str, Any]) -> None:
+        """Raise ``ValueError`` if any required dimension key is missing."""
+        required = [d.name for d in self.dimensions if d.enabled]
+        missing = [k for k in required if k not in params]
+        if missing:
+            raise ValueError(
+                f"{type(self).__name__}.build missing required parameters: "
+                f"{', '.join(sorted(missing))}"
+            )
 
     def sample(self, trial: Any) -> dict[str, Any]:
         params: dict[str, Any] = {}
@@ -94,17 +127,3 @@ class BaseSearchSpace:
                 raise TypeError(f"Unsupported dimension type: {type(dim)!r}")
 
         return params
-
-
-def validate_required_params(
-    params: dict[str, Any],
-    required_keys: list[str],
-    context: str,
-) -> None:
-    """Validate that all required parameter keys are present."""
-    missing = [key for key in required_keys if key not in params]
-    if missing:
-        missing_display = ", ".join(sorted(missing))
-        raise ValueError(
-            f"Missing required parameters for {context}: {missing_display}"
-        )

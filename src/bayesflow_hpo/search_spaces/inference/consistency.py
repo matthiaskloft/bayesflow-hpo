@@ -9,10 +9,8 @@ import bayesflow as bf
 
 from bayesflow_hpo.search_spaces.base import (
     BaseSearchSpace,
-    Dimension,
     FloatDimension,
     IntDimension,
-    validate_required_params,
 )
 
 
@@ -29,9 +27,28 @@ def _compute_total_steps(params: dict[str, Any]) -> int:
 
 @dataclass
 class ConsistencyModelSpace(BaseSearchSpace):
-    """Search space for `bf.networks.ConsistencyModel`."""
+    """Search space for `bf.networks.ConsistencyModel`.
 
-    include_optional: bool = False
+    Default dimensions
+    ------------------
+    cm_subnet_width : int
+        MLP width (32--256, step 32).
+    cm_subnet_depth : int
+        MLP depth (1--4).
+    cm_dropout : float
+        Dropout rate (0.0--0.2).
+
+    Optional dimensions (enabled via ``include_optional=True``)
+    -----------------------------------------------------------
+    cm_max_time : int
+        Maximum diffusion time (50--500).
+    cm_sigma2 : float
+        Noise variance (0.1--2.0).
+    cm_s0 : int
+        Initial schedule discretisation (2--30).
+    cm_s1 : int
+        Final schedule discretisation (20--100).
+    """
 
     subnet_width: IntDimension = field(
         default_factory=lambda: IntDimension(
@@ -62,27 +79,8 @@ class ConsistencyModelSpace(BaseSearchSpace):
         default_factory=lambda: IntDimension("cm_s1", low=20, high=100, enabled=False)
     )
 
-    @property
-    def dimensions(self) -> list[Dimension]:
-        return [
-            self.subnet_width,
-            self.subnet_depth,
-            self.dropout,
-            self.max_time,
-            self.sigma2,
-            self.s0,
-            self.s1,
-        ]
-
-    def sample(self, trial: Any) -> dict[str, Any]:
-        return BaseSearchSpace.sample(self, trial)
-
     def build(self, params: dict[str, Any]) -> bf.networks.ConsistencyModel:
-        validate_required_params(
-            params,
-            ["cm_subnet_width", "cm_subnet_depth", "cm_dropout"],
-            "ConsistencyModelSpace.build",
-        )
+        self._validate(params)
 
         width = int(params["cm_subnet_width"])
         depth = int(params["cm_subnet_depth"])
