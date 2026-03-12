@@ -6,45 +6,10 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
+from conftest import FakeBroadcast, FakeConcatenate, FakeRename, make_adapter
 
 from bayesflow_hpo.api import infer_keys_from_adapter, optimize
 from bayesflow_hpo.validation.data import ValidationDataset
-
-# ---------------------------------------------------------------------------
-# Helpers: lightweight transform stubs
-# ---------------------------------------------------------------------------
-
-
-class _FakeRename:
-    """Mimics bayesflow Rename transform."""
-
-    def __init__(self, from_key: str, to_key: str):
-        self.from_key = from_key
-        self.to_key = to_key
-
-
-class _FakeConcatenate:
-    """Mimics bayesflow Concatenate transform."""
-
-    def __init__(self, keys: list[str], into: str):
-        self.keys = list(keys)
-        self.into = into
-
-
-class _FakeBroadcast:
-    """Mimics bayesflow Broadcast transform (no canonical target)."""
-
-    def __init__(self, keys: list[str], to: str):
-        self.keys = list(keys)
-        self.to = to
-
-
-def _make_adapter(transforms):
-    """Return a mock adapter with a transforms list."""
-    adapter = MagicMock()
-    adapter.transforms = transforms
-    return adapter
-
 
 # ---------------------------------------------------------------------------
 # infer_keys_from_adapter: unit tests
@@ -53,7 +18,7 @@ def _make_adapter(transforms):
 
 class TestInferKeysFromAdapter:
     def test_empty_adapter(self):
-        adapter = _make_adapter([])
+        adapter = make_adapter([])
         result = infer_keys_from_adapter(adapter)
         assert result == {
             "param_keys": None,
@@ -62,9 +27,9 @@ class TestInferKeysFromAdapter:
         }
 
     def test_rename_inference_variables(self):
-        adapter = _make_adapter(
+        adapter = make_adapter(
             [
-                _FakeRename("theta", "inference_variables"),
+                FakeRename("theta", "inference_variables"),
             ]
         )
         result = infer_keys_from_adapter(adapter)
@@ -73,11 +38,11 @@ class TestInferKeysFromAdapter:
         assert result["inference_conditions"] is None
 
     def test_rename_all_canonical_keys(self):
-        adapter = _make_adapter(
+        adapter = make_adapter(
             [
-                _FakeRename("theta", "inference_variables"),
-                _FakeRename("x", "summary_variables"),
-                _FakeRename("N", "inference_conditions"),
+                FakeRename("theta", "inference_variables"),
+                FakeRename("x", "summary_variables"),
+                FakeRename("N", "inference_conditions"),
             ]
         )
         result = infer_keys_from_adapter(adapter)
@@ -86,10 +51,10 @@ class TestInferKeysFromAdapter:
         assert result["inference_conditions"] == ["N"]
 
     def test_concatenate_into_inference_variables(self):
-        adapter = _make_adapter(
+        adapter = make_adapter(
             [
-                _FakeConcatenate(["alpha", "beta"], into="inference_variables"),
-                _FakeRename("x", "summary_variables"),
+                FakeConcatenate(["alpha", "beta"], into="inference_variables"),
+                FakeRename("x", "summary_variables"),
             ]
         )
         result = infer_keys_from_adapter(adapter)
@@ -97,11 +62,11 @@ class TestInferKeysFromAdapter:
         assert result["data_keys"] == ["x"]
 
     def test_non_canonical_transforms_ignored(self):
-        adapter = _make_adapter(
+        adapter = make_adapter(
             [
-                _FakeRename("theta", "inference_variables"),
-                _FakeBroadcast(["theta"], to="b_group"),
-                _FakeRename("x", "summary_variables"),
+                FakeRename("theta", "inference_variables"),
+                FakeBroadcast(["theta"], to="b_group"),
+                FakeRename("x", "summary_variables"),
             ]
         )
         result = infer_keys_from_adapter(adapter)
@@ -109,10 +74,10 @@ class TestInferKeysFromAdapter:
         assert result["data_keys"] == ["x"]
 
     def test_multiple_renames_to_same_role(self):
-        adapter = _make_adapter(
+        adapter = make_adapter(
             [
-                _FakeRename("alpha", "inference_variables"),
-                _FakeRename("beta", "inference_variables"),
+                FakeRename("alpha", "inference_variables"),
+                FakeRename("beta", "inference_variables"),
             ]
         )
         result = infer_keys_from_adapter(adapter)
@@ -157,10 +122,10 @@ def _patched_optimize(adapter, **extra_kwargs):
 
 class TestOptimizeDeriveKeys:
     def test_derive_param_and_data_keys_from_adapter(self):
-        adapter = _make_adapter(
+        adapter = make_adapter(
             [
-                _FakeRename("theta", "inference_variables"),
-                _FakeRename("x", "summary_variables"),
+                FakeRename("theta", "inference_variables"),
+                FakeRename("x", "summary_variables"),
             ]
         )
         config = _patched_optimize(adapter)
@@ -168,21 +133,36 @@ class TestOptimizeDeriveKeys:
         assert config.data_keys == ["x"]
 
     def test_derive_inference_conditions_from_adapter(self):
-        adapter = _make_adapter(
+        adapter = make_adapter(
             [
-                _FakeRename("theta", "inference_variables"),
-                _FakeRename("x", "summary_variables"),
-                _FakeRename("N", "inference_conditions"),
+                FakeRename("theta", "inference_variables"),
+                FakeRename("x", "summary_variables"),
+                FakeRename("N", "inference_conditions"),
             ]
         )
         config = _patched_optimize(adapter)
         assert config.inference_conditions == ["N"]
 
-    def test_adapter_keys_match_validation_data(self):
-        adapter = _make_adapter(
+    def test_explicit_keys_override_adapter(self):
+        adapter = make_adapter(
             [
-                _FakeRename("theta", "inference_variables"),
-                _FakeRename("x", "summary_variables"),
+                FakeRename("theta", "inference_variables"),
+                FakeRename("x", "summary_variables"),
+            ]
+        )
+        config = _patched_optimize(
+            adapter,
+            param_keys=["my_param"],
+            data_keys=["my_data"],
+        )
+        assert config.param_keys == ["my_param"]
+        assert config.data_keys == ["my_data"]
+
+    def test_adapter_keys_match_validation_data(self):
+        adapter = make_adapter(
+            [
+                FakeRename("theta", "inference_variables"),
+                FakeRename("x", "summary_variables"),
             ]
         )
         vd = ValidationDataset(
@@ -197,10 +177,10 @@ class TestOptimizeDeriveKeys:
         assert config.data_keys == ["x"]
 
     def test_adapter_keys_mismatch_validation_data_raises(self):
-        adapter = _make_adapter(
+        adapter = make_adapter(
             [
-                _FakeRename("theta", "inference_variables"),
-                _FakeRename("x", "summary_variables"),
+                FakeRename("theta", "inference_variables"),
+                FakeRename("x", "summary_variables"),
             ]
         )
         vd = ValidationDataset(
@@ -214,9 +194,9 @@ class TestOptimizeDeriveKeys:
             _patched_optimize(adapter, validation_data=vd)
 
     def test_no_canonical_keys_no_validation_data_raises(self):
-        adapter = _make_adapter(
+        adapter = make_adapter(
             [
-                _FakeBroadcast(["theta"], to="b_group"),
+                FakeBroadcast(["theta"], to="b_group"),
             ]
         )
         with pytest.raises(TypeError, match="param_keys"):
@@ -224,7 +204,7 @@ class TestOptimizeDeriveKeys:
 
     def test_fallback_to_validation_data_keys(self):
         """When adapter lacks canonical keys, fall back to validation_data."""
-        adapter = _make_adapter([])
+        adapter = make_adapter([])
         vd = ValidationDataset(
             simulations=[{"theta": np.zeros((5, 1)), "x": np.zeros((5, 1))}],
             condition_labels=[{}],
