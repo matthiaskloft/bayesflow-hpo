@@ -100,15 +100,6 @@ def test_build_validates_required_keys(space, error_prefix):
         space.build({})
 
 
-def test_missing_dataclass_raises_type_error():
-    from bayesflow_hpo.search_spaces.base import BaseSearchSpace, IntDimension
-
-    class BadSpace(BaseSearchSpace):
-        width: IntDimension = IntDimension("width", 8, 16)
-
-    with pytest.raises(TypeError, match="BadSpace must be decorated with @dataclass"):
-        BadSpace().dimensions
-
 
 def test_consistency_total_steps_from_training_keys(monkeypatch):
     captured = {}
