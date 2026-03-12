@@ -1,4 +1,9 @@
-"""Dry-run validation to catch shape mismatches early."""
+"""Dry-run validation to catch shape mismatches early.
+
+Runs the full validation pipeline on a tiny slice (2 sims, 10 draws)
+of the first condition.  This catches key mismatches, shape errors,
+and missing data keys *before* starting the expensive HPO loop.
+"""
 
 from __future__ import annotations
 

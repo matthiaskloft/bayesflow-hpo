@@ -1,4 +1,17 @@
-"""Result visualizations for HPO studies."""
+"""Result visualizations for HPO studies.
+
+Matplotlib-based plots for analyzing HPO results:
+
+- **Pareto front**: first objective vs actual parameter count.
+- **Optimization history**: convergence curve with running best.
+- **Metric scatter**: two metrics against each other with 2D Pareto.
+- **Metric panels**: per-metric vs param count subplots.
+- **Parameter importance**: Optuna's fANOVA-based importance ranking.
+
+All plot functions accept an optional ``ax`` parameter for embedding
+in user-created figure layouts and return the axes for further
+customization.
+"""
 
 from __future__ import annotations
 
@@ -19,7 +32,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 def _trained_trials(study: optuna.Study) -> list[optuna.trial.FrozenTrial]:
-    """Return completed, non-rejected trials."""
+    """Return completed, non-rejected trials with valid objective values."""
     return [
         t for t in study.trials
         if t.state == optuna.trial.TrialState.COMPLETE
@@ -34,8 +47,9 @@ def _pareto_front_2d(
 ) -> list[int]:
     """Return indices of non-dominated points (both objectives minimized).
 
-    Sorts by *x* ascending, then sweeps for monotonically decreasing *y*.
-    Points with equal x are resolved by keeping the one with the smallest y.
+    Uses a sweep-line algorithm: sort by *x* ascending, then keep only
+    points with strictly decreasing *y*.  Points with equal *x* are
+    resolved by keeping the one with smallest *y*.  O(n log n) time.
     """
     if not xs:
         return []

@@ -79,11 +79,29 @@ class CouplingFlowSpace(BaseSearchSpace):
     )
 
     def build(self, params: dict[str, Any]) -> bf.networks.CouplingFlow:
+        """Construct a ``bf.networks.CouplingFlow`` from sampled parameters.
+
+        The subnet MLP uses a uniform-width architecture: all hidden
+        layers share ``cf_subnet_width``.  Optional parameters (transform,
+        permutation, actnorm) are only passed when present in *params*,
+        allowing BayesFlow to apply its own defaults.
+
+        Parameters
+        ----------
+        params
+            Hyperparameter dict from :meth:`sample`.
+
+        Returns
+        -------
+        bf.networks.CouplingFlow
+            Configured coupling flow network.
+        """
         self._validate(params)
 
         width = int(params["cf_subnet_width"])
         n_layers = int(params["cf_subnet_depth"])
 
+        # Uniform-width MLP: every hidden layer has the same width.
         subnet_kwargs: dict[str, Any] = {
             "widths": tuple([width] * n_layers),
             "dropout": float(params["cf_dropout"]),
@@ -95,6 +113,7 @@ class CouplingFlowSpace(BaseSearchSpace):
             "depth": int(params["cf_depth"]),
             "subnet_kwargs": subnet_kwargs,
         }
+        # Optional structural choices — omitted keys fall back to BayesFlow defaults.
         if "cf_transform" in params:
             kwargs["transform"] = params["cf_transform"]
         if "cf_permutation" in params:

@@ -78,6 +78,18 @@ class FlowMatchingSpace(BaseSearchSpace):
     )
 
     def build(self, params: dict[str, Any]) -> bf.networks.FlowMatching:
+        """Construct a ``bf.networks.FlowMatching`` from sampled parameters.
+
+        Parameters
+        ----------
+        params
+            Hyperparameter dict from :meth:`sample`.
+
+        Returns
+        -------
+        bf.networks.FlowMatching
+            Configured flow matching network.
+        """
         self._validate(params)
 
         width = int(params["fm_subnet_width"])

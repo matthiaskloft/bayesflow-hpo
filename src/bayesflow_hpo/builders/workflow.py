@@ -1,4 +1,16 @@
-"""Workflow construction helpers."""
+"""Workflow construction helpers.
+
+Builds a ``bf.BasicWorkflow`` for a single HPO trial from the sampled
+hyperparameters.  The default optimizer uses **Adam with CosineDecay**,
+which decays the learning rate from ``initial_lr`` to near-zero over
+the full training budget (``epochs × batches_per_epoch`` steps).
+
+Design decision: CosineDecay is preferred over ExponentialDecay because
+it provides a natural warm-up effect (slow initial decay) followed by
+aggressive annealing, which works well with early stopping — the model
+trains at a reasonable LR during the useful epochs and only decays
+aggressively near the end.
+"""
 
 from __future__ import annotations
 
@@ -10,7 +22,13 @@ import keras
 
 
 def _compile_candidate_for_compat(candidate: Any, optimizer: Any) -> None:
-    """Try common compile signatures without raising on incompatible variants."""
+    """Try common compile signatures without raising on incompatible variants.
+
+    BayesFlow's ``compile()`` signature varies across versions and model
+    types: some accept no args, some take ``optimizer=``, some take a
+    positional optimizer.  This helper tries all three and silently moves
+    on if none match, since compilation is optional for some model types.
+    """
     compile_fn = getattr(candidate, "compile", None)
     if compile_fn is None:
         return

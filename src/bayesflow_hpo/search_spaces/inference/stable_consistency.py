@@ -52,6 +52,18 @@ class StableConsistencyModelSpace(BaseSearchSpace):
     )
 
     def build(self, params: dict[str, Any]) -> bf.networks.StableConsistencyModel:
+        """Construct a ``bf.networks.StableConsistencyModel`` from sampled parameters.
+
+        Parameters
+        ----------
+        params
+            Hyperparameter dict from :meth:`sample`.
+
+        Returns
+        -------
+        bf.networks.StableConsistencyModel
+            Configured stable consistency model.
+        """
         self._validate(params)
 
         width = int(params["scm_subnet_width"])

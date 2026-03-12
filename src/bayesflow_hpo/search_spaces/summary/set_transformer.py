@@ -77,12 +77,29 @@ class SetTransformerSpace(BaseSearchSpace):
     )
 
     def build(self, params: dict[str, Any]) -> bf.networks.SetTransformer:
+        """Construct a ``bf.networks.SetTransformer`` from sampled parameters.
+
+        Uses uniform embed_dim and num_heads across all layers.
+        BayesFlow expects per-layer tuples, so the scalar values are
+        replicated to ``num_layers`` length.
+
+        Parameters
+        ----------
+        params
+            Hyperparameter dict from :meth:`sample`.
+
+        Returns
+        -------
+        bf.networks.SetTransformer
+            Configured set transformer summary network.
+        """
         self._validate(params)
 
         num_layers = int(params["st_num_layers"])
         embed_dim = int(params["st_embed_dim"])
         num_heads = int(params["st_num_heads"])
 
+        # BayesFlow expects per-layer tuples; we replicate uniform values.
         kwargs: dict[str, Any] = {
             "summary_dim": int(params["st_summary_dim"]),
             "embed_dims": tuple([embed_dim] * num_layers),

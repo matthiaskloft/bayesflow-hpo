@@ -1,4 +1,13 @@
-"""Extract tabular/pareto results from Optuna studies."""
+"""Extract tabular/Pareto results from Optuna studies.
+
+Post-optimization analysis: convert completed trials into DataFrames,
+extract Pareto-optimal trials, and generate human-readable summaries.
+
+Design decision: budget-rejected trials are excluded from results by
+default because their penalty objective values are not meaningful for
+analysis.  Set ``trained_only=False`` in :func:`trials_to_dataframe`
+to include them.
+"""
 
 from __future__ import annotations
 
@@ -9,7 +18,7 @@ import pandas as pd
 
 
 def _fmt_param_count(count: int | float) -> str:
-    """Format a raw parameter count as a human-readable string."""
+    """Format a raw parameter count as a human-readable string (e.g. ``"1.5M"``)."""
     count = int(count)
     if count >= 1_000_000:
         return f"{count / 1e6:.2f}M"
@@ -24,7 +33,11 @@ def get_pareto_trials(study: optuna.Study) -> list[optuna.trial.FrozenTrial]:
 
 
 def _objective_column_names(study: optuna.Study) -> list[str]:
-    """Return objective column names, using study.metric_names when set."""
+    """Return objective column names, using ``study.metric_names`` when set.
+
+    Falls back to ``"objective"`` (single) or ``"objective_0"``, … (multi)
+    when metric names are unavailable (Optuna < 4.x or not configured).
+    """
     metric_names: list[str] | None = getattr(study, "metric_names", None) or getattr(
         study, "_metric_names", None
     )

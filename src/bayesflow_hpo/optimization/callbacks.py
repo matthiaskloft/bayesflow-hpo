@@ -1,4 +1,15 @@
-"""Optuna/Keras callback helpers."""
+"""Optuna/Keras callback helpers.
+
+Provides two Keras callbacks used during HPO trials:
+
+- **OptunaReportCallback** — logs training loss to Optuna trial attributes
+  for post-hoc analysis.  Does NOT trigger pruning (that's handled by
+  :class:`~bayesflow_hpo.optimization.validation_callback.PeriodicValidationCallback`).
+
+- **MovingAverageEarlyStopping** — stops training when the moving-average
+  loss plateaus.  More robust than raw-loss early stopping because it
+  smooths epoch-to-epoch noise from online training.
+"""
 
 from __future__ import annotations
 
@@ -31,6 +42,7 @@ class OptunaReportCallback(Callback):
         self.report_frequency = report_frequency
 
     def on_epoch_end(self, epoch: int, logs: Any = None) -> None:
+        """Record loss to trial attributes every ``report_frequency`` epochs."""
         if logs is None or epoch % self.report_frequency != 0:
             return
 
@@ -77,6 +89,12 @@ class MovingAverageEarlyStopping(Callback):
         self.best_weights = None
 
     def on_epoch_end(self, epoch: int, logs: Any = None) -> None:
+        """Update moving average and check for stagnation.
+
+        The moving average is computed over the last ``window`` epochs.
+        If it hasn't improved for ``patience`` consecutive checks, training
+        is stopped and (optionally) the best weights are restored.
+        """
         logs = logs or {}
         value = logs.get(self.monitor)
         if value is None:
@@ -87,6 +105,7 @@ class MovingAverageEarlyStopping(Callback):
             self._losses.pop(0)
 
         moving_avg = float(np.mean(self._losses))
+        # Inject MA into logs so downstream callbacks/loggers can see it.
         logs[f"moving_avg_{self.monitor}"] = moving_avg
 
         if moving_avg < self.best_ma_loss:

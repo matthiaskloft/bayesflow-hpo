@@ -1,4 +1,10 @@
-"""Structured validation result with table display methods."""
+"""Structured validation result with table display methods.
+
+``ValidationResult`` is the return type of :func:`run_validation_pipeline`.
+It stores per-condition metrics, overall summary statistics, and optional
+per-parameter breakdowns for multi-parameter models.  The ``summary``
+dict is the primary interface consumed by the objective function.
+"""
 
 from __future__ import annotations
 

@@ -1,4 +1,19 @@
-"""Objective helpers and inference-time cost normalization."""
+"""Objective helpers and inference-time cost normalization.
+
+Utility functions for mapping raw validation metrics and model costs into
+minimize-is-better objective values for Optuna.
+
+Key concepts:
+
+- **Parameter count normalization**: Maps raw param counts to [0, 1] via
+  log-linear scaling so the Pareto front is meaningful when accuracy
+  metrics are also in [0, 1].
+- **Inference time ratio**: Normalizes inference wall-clock time against
+  simulation cost so that "10x faster than simulation" is comparable
+  across different models and hardware.
+- **Higher-is-better inversion**: Metrics like ``correlation`` are
+  inverted to ``1 - value`` so all objectives can be minimized.
+"""
 
 from __future__ import annotations
 

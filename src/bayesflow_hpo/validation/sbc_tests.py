@@ -1,4 +1,16 @@
-"""SBC rank-uniformity tests."""
+"""SBC (Simulation-Based Calibration) rank-uniformity tests.
+
+SBC checks whether the posterior approximation is well-calibrated by
+verifying that the rank statistics of true values within posterior draws
+are uniformly distributed.  Three tests are provided:
+
+- **KS test**: Kolmogorov-Smirnov test against Uniform(0, 1).
+- **Chi-squared test**: Binned goodness-of-fit against uniform expected
+  counts.  Skipped when bins have fewer than 5 expected observations.
+- **C2ST**: Classifier two-sample test using a random forest to
+  distinguish observed ranks from uniformly-generated ones.  An accuracy
+  near 0.5 indicates calibrated posteriors.
+"""
 
 from __future__ import annotations
 

@@ -70,6 +70,18 @@ class TimeSeriesTransformerSpace(BaseSearchSpace):
     )
 
     def build(self, params: dict[str, Any]) -> bf.networks.TimeSeriesTransformer:
+        """Construct a ``bf.networks.TimeSeriesTransformer`` from sampled parameters.
+
+        Parameters
+        ----------
+        params
+            Hyperparameter dict from :meth:`sample`.
+
+        Returns
+        -------
+        bf.networks.TimeSeriesTransformer
+            Configured time-series transformer summary network.
+        """
         self._validate(params)
 
         num_layers = int(params["tst_num_layers"])

@@ -1,4 +1,20 @@
-"""Validation dataset generation and serialization."""
+"""Validation dataset generation and serialization.
+
+The validation dataset is generated once *before* HPO begins and reused
+across all trials to ensure fair comparison.  This avoids the variance
+from different validation draws contaminating the objective signal.
+
+Key design decisions:
+
+- **Immutable dataclass**: ``ValidationDataset`` is frozen to prevent
+  accidental mutation during trials.
+- **Per-sim timing**: ``sim_time_per_sim`` is measured during generation
+  so the cost objective can normalize inference time against simulation
+  cost (giving a meaningful speedup ratio).
+- **Condition grid**: Cartesian product of condition values, one batch
+  per grid point, to evaluate model performance across the full
+  condition space.
+"""
 
 from __future__ import annotations
 

@@ -1,4 +1,8 @@
-"""Summary network builders."""
+"""Summary network builders.
+
+Thin convenience wrapper that delegates to the search space's ``build()``
+method, returning ``None`` when no summary space is configured.
+"""
 
 from __future__ import annotations
 

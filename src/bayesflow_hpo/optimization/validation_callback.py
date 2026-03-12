@@ -146,6 +146,12 @@ class PeriodicValidationCallback(Callback):
         self._is_multi_objective = len(trial.study.directions) > 1
 
     def on_epoch_end(self, epoch: int, logs: Any = None) -> None:
+        """Run validation and check for pruning at scheduled intervals.
+
+        Skips epochs before ``warmup`` and non-interval epochs.
+        After 3 consecutive validation failures, logs a warning
+        (but does not prune — the trial continues without pruning).
+        """
         if epoch < self.warmup:
             return
         if (epoch - self.warmup) % self.interval != 0:

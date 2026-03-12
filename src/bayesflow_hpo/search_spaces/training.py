@@ -1,4 +1,10 @@
-"""Training hyperparameter search space."""
+"""Training hyperparameter search space.
+
+Separates optimizer/training knobs from network architecture.  The
+:meth:`defaults` method returns fixed values for dimensions that are
+*not* being tuned, ensuring the parameter dict always has a ``batch_size``
+key regardless of ``include_optional``.
+"""
 
 from __future__ import annotations
 
@@ -39,7 +45,12 @@ class TrainingSpace(BaseSearchSpace):
     )
 
     def defaults(self) -> dict[str, Any]:
-        """Defaults when optional dimensions are not tuned."""
+        """Return fixed defaults for optional dimensions that are not tuned.
+
+        These values are applied *before* any actively-tuned parameters,
+        so they act as fallback defaults in the merged parameter dict.
+        When ``include_optional=True``, the tuned value overwrites these.
+        """
         return {
             "batch_size": 256,
         }

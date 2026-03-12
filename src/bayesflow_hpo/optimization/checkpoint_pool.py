@@ -111,6 +111,7 @@ class CheckpointPool:
 
 
 def _safe_rmtree(path: Path) -> None:
+    """Remove a directory tree, suppressing OS errors (e.g. file locks on Windows)."""
     try:
         if path.exists():
             shutil.rmtree(path)

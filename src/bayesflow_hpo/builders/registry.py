@@ -1,4 +1,10 @@
-"""Builder registry for custom network factories."""
+"""Builder registry for custom network factories.
+
+Parallel to the search-space registry, this stores ``params → network``
+callables for custom networks.  When a user registers a custom network,
+they can provide both a search space (defines *what* to tune) and a
+builder (defines *how* to construct the network from sampled params).
+"""
 
 from __future__ import annotations
 

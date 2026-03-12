@@ -1,4 +1,20 @@
-"""Base search-space abstractions and default Optuna sampling."""
+"""Base search-space abstractions and default Optuna sampling.
+
+This module defines the building blocks for hyperparameter search spaces:
+
+- **Dimension dataclasses** (``IntDimension``, ``FloatDimension``,
+  ``CategoricalDimension``) describe individual tunable knobs.
+- **SearchSpace protocol** defines the three-method interface every
+  network search space must satisfy: ``dimensions``, ``sample``, ``build``.
+- **BaseSearchSpace** provides automatic ``dimensions`` discovery,
+  ``sample`` dispatch, and validation from dataclass fields — concrete
+  spaces only need to implement ``build``.
+
+Design decision: dimensions are *declared as dataclass fields* rather than
+returned from a method because this lets users override ranges by simply
+passing new ``IntDimension(...)`` values at construction time, without
+subclassing.
+"""
 
 from __future__ import annotations
 
@@ -9,7 +25,23 @@ from typing import Any, Protocol
 
 @dataclass
 class IntDimension:
-    """Integer hyperparameter dimension."""
+    """Integer hyperparameter dimension.
+
+    Parameters
+    ----------
+    name
+        Optuna parameter name (must be unique within a search space).
+    low, high
+        Inclusive lower and upper bounds.
+    step
+        Optional step size for discrete grids (e.g. ``step=32`` for
+        widths).  When ``None``, any integer in [low, high] is valid.
+    log
+        Sample on a log scale (useful for learning rates or wide ranges).
+    enabled
+        When ``False``, this dimension is only sampled if the parent
+        space has ``include_optional=True``.
+    """
 
     name: str
     low: int
@@ -21,7 +53,19 @@ class IntDimension:
 
 @dataclass
 class FloatDimension:
-    """Float hyperparameter dimension."""
+    """Float hyperparameter dimension.
+
+    Parameters
+    ----------
+    name
+        Optuna parameter name (must be unique within a search space).
+    low, high
+        Inclusive lower and upper bounds.
+    log
+        Sample on a log scale (common for learning rates).
+    enabled
+        When ``False``, only sampled if ``include_optional=True``.
+    """
 
     name: str
     low: float
@@ -32,7 +76,17 @@ class FloatDimension:
 
 @dataclass
 class CategoricalDimension:
-    """Categorical hyperparameter dimension."""
+    """Categorical hyperparameter dimension.
+
+    Parameters
+    ----------
+    name
+        Optuna parameter name (must be unique within a search space).
+    choices
+        Possible values.  Optuna picks uniformly among them.
+    enabled
+        When ``False``, only sampled if ``include_optional=True``.
+    """
 
     name: str
     choices: Sequence[str | int | float | bool | None]
@@ -76,6 +130,13 @@ class BaseSearchSpace:
 
     @property
     def dimensions(self) -> list[Dimension]:
+        """Collect all ``Dimension`` fields from this dataclass instance.
+
+        Iterates over dataclass fields and returns those whose runtime
+        value is an ``IntDimension``, ``FloatDimension``, or
+        ``CategoricalDimension``.  This auto-discovery avoids requiring
+        subclasses to manually list their dimensions.
+        """
         try:
             all_fields = fields(self)
         except TypeError:
@@ -100,6 +161,22 @@ class BaseSearchSpace:
             )
 
     def sample(self, trial: Any) -> dict[str, Any]:
+        """Sample hyperparameters from an Optuna trial.
+
+        Dispatches each dimension to the appropriate
+        ``trial.suggest_*`` method.  Disabled dimensions are skipped
+        unless ``self.include_optional`` is ``True``.
+
+        Parameters
+        ----------
+        trial
+            An ``optuna.Trial`` instance.
+
+        Returns
+        -------
+        dict[str, Any]
+            Mapping from dimension name to sampled value.
+        """
         params: dict[str, Any] = {}
         for dim in self.dimensions:
             if not dim.enabled and not self.include_optional:

@@ -1,4 +1,14 @@
-"""Constraint and budget helpers for trial pre-filtering."""
+"""Constraint and budget helpers for trial pre-filtering.
+
+Provides fast heuristic estimates of parameter count and peak memory
+usage from hyperparameter dicts *before* building the actual model.
+This allows the objective to reject obviously-oversized configs without
+allocating GPU memory.
+
+The heuristics are intentionally conservative (tend to overestimate)
+because a false positive (rejecting a viable config) is much cheaper
+than a false negative (OOM crash mid-training).
+"""
 
 from __future__ import annotations
 
@@ -6,6 +16,7 @@ from typing import Any
 
 
 def _safe_int(value: Any, default: int) -> int:
+    """Convert *value* to int, returning *default* on failure."""
     try:
         return int(value)
     except (TypeError, ValueError):
@@ -13,6 +24,7 @@ def _safe_int(value: Any, default: int) -> int:
 
 
 def _safe_float(value: Any, default: float) -> float:
+    """Convert *value* to float, returning *default* on failure."""
     try:
         return float(value)
     except (TypeError, ValueError):
@@ -25,6 +37,11 @@ def _mlp_block_params(
     depth: int,
     output_dim: int,
 ) -> int:
+    """Estimate trainable parameter count for an MLP block.
+
+    Assumes a standard dense MLP: input → [hidden × depth] → output,
+    counting weights + biases for each layer.
+    """
     if depth <= 0:
         return max(1, input_dim * output_dim + output_dim)
 
@@ -36,6 +53,17 @@ def _mlp_block_params(
 
 
 def _estimate_summary_params(params: dict[str, Any]) -> tuple[int, int]:
+    """Estimate (param_count, summary_dim) for the summary network.
+
+    Dispatches based on which parameter prefix is present in *params*.
+    Falls back to DeepSet estimation if no transformer keys are found.
+
+    Returns
+    -------
+    tuple[int, int]
+        ``(estimated_param_count, summary_dim)`` — the summary_dim is
+        needed downstream to estimate the inference network input size.
+    """
     if "ft_summary_dim" in params:
         summary_dim = _safe_int(params.get("ft_summary_dim"), 16)
         embed_dim = _safe_int(params.get("ft_embed_dim"), 64)
@@ -89,6 +117,16 @@ def _estimate_summary_params(params: dict[str, Any]) -> tuple[int, int]:
 
 
 def _estimate_inference_params(params: dict[str, Any], summary_dim: int) -> int:
+    """Estimate trainable parameter count for the inference network.
+
+    The input dimension is ``summary_dim + n_conditions + latent_dim/2``
+    because BayesFlow splits the latent space for coupling transforms.
+    The output dimension is ``2 * ceil(n_params/2)`` to account for
+    affine transform outputs (scale + shift).
+
+    For CouplingFlow, the estimate accounts for BayesFlow's internal
+    latent-dimension padding (``max(n_params, 2 * depth)``).
+    """
     n_conditions = _safe_int(params.get("n_conditions"), 4)
     n_params = _safe_int(params.get("n_params"), 1)
     input_dim = summary_dim + n_conditions + max(1, n_params // 2)
@@ -137,7 +175,12 @@ def _estimate_inference_params(params: dict[str, Any], summary_dim: int) -> int:
 
 
 def estimate_param_count(params: dict[str, Any]) -> int:
-    """Heuristic parameter estimate from supported search-space keys."""
+    """Heuristic parameter estimate from supported search-space keys.
+
+    Combines summary and inference network estimates.  This is a fast
+    pre-check that avoids building the actual Keras model — the exact
+    count is verified after build in the objective function.
+    """
     summary_params, summary_dim = _estimate_summary_params(params)
     inference_params = _estimate_inference_params(params, summary_dim)
     return max(1, int(summary_params + inference_params))
@@ -150,8 +193,24 @@ def estimate_peak_memory_mb(
 ) -> float:
     """Estimate approximate peak training memory in MB.
 
-    This is a conservative heuristic that combines parameter memory,
-    optimizer state, gradients, and a rough activation budget.
+    This is a conservative heuristic that combines:
+
+    - **Parameter memory** × 4 (weights + gradients + Adam m + Adam v)
+    - **Activation memory** × 3 (forward + backward + workspace)
+
+    The factor of 4 for parameters comes from Adam's two momentum
+    buffers plus the gradient buffer.  The activation estimate uses
+    ``batch_size × (summary_dim + subnet_width) × depth`` as a rough
+    proxy for the largest intermediate tensor.
+
+    Parameters
+    ----------
+    params
+        Hyperparameter dict from the search space.
+    batch_size
+        Override batch size (otherwise read from ``params``).
+    dtype_bytes
+        Bytes per element (default 4 for float32).
     """
     summary_params, summary_dim = _estimate_summary_params(params)
     inference_params = _estimate_inference_params(params, summary_dim)

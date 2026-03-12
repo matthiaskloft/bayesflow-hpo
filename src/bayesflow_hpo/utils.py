@@ -11,7 +11,25 @@ def loguniform_int(
     alpha: float = 1.0,
     rng: np.random.Generator | np.random.RandomState | None = None,
 ) -> int:
-    """Sample an integer from a generalized log-uniform distribution."""
+    """Sample an integer from a generalized log-uniform distribution.
+
+    The standard log-uniform is ``alpha=1``.  ``alpha > 1`` shifts
+    probability mass toward the lower end of the range; ``alpha < 1``
+    shifts it toward the upper end.  The CDF is ``U^(1/alpha)`` where
+    ``U ~ Uniform(0, 1)``.
+
+    Parameters
+    ----------
+    low
+        Inclusive lower bound (must be positive).
+    high
+        Inclusive upper bound.
+    alpha
+        Shape parameter controlling the skew (default 1.0 = standard
+        log-uniform).
+    rng
+        Optional NumPy random generator or RandomState.
+    """
     if low <= 0:
         raise ValueError(f"low must be positive, got {low}")
     if high < low:
@@ -19,6 +37,7 @@ def loguniform_int(
     random = rng if rng is not None else np.random
     log_low = np.log(low)
     log_high = np.log(high)
+    # Power transform of uniform sample controls skew.
     u = random.uniform(0, 1) ** (1.0 / alpha)
     log_val = log_low + u * (log_high - log_low)
     return int(np.round(np.exp(log_val)))
@@ -30,7 +49,22 @@ def loguniform_float(
     alpha: float = 1.0,
     rng: np.random.Generator | np.random.RandomState | None = None,
 ) -> float:
-    """Sample a float from a generalized log-uniform distribution."""
+    """Sample a float from a generalized log-uniform distribution.
+
+    Same distribution as :func:`loguniform_int` but returns a
+    continuous float without rounding.
+
+    Parameters
+    ----------
+    low
+        Inclusive lower bound (must be positive).
+    high
+        Inclusive upper bound.
+    alpha
+        Shape parameter controlling the skew (default 1.0).
+    rng
+        Optional NumPy random generator or RandomState.
+    """
     if low <= 0:
         raise ValueError(f"low must be positive, got {low}")
     if high < low:

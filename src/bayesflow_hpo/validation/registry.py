@@ -71,13 +71,19 @@ def list_metrics() -> list[str]:
 def _reshape_for_bf(
     draws: np.ndarray, true_values: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Reshape (n_sims, n_samples) → BF format (n_sims, n_samples, 1)."""
+    """Reshape validation arrays to BayesFlow diagnostic format.
+
+    BayesFlow diagnostics expect ``(n_sims, n_samples, n_params)`` for
+    estimates and ``(n_sims, n_params)`` for targets.  Since validation
+    runs per-parameter, the last axis is always 1.
+    """
     return draws[:, :, np.newaxis], true_values[:, np.newaxis]
 
 
 def _bf_calibration_error(
     draws: np.ndarray, true_values: np.ndarray,
 ) -> dict[str, float]:
+    """Expected Calibration Error (ECE) via BayesFlow diagnostics."""
     import bayesflow as bf
 
     estimates, targets = _reshape_for_bf(draws, true_values)
@@ -88,6 +94,11 @@ def _bf_calibration_error(
 def _bf_rmse(
     draws: np.ndarray, true_values: np.ndarray,
 ) -> dict[str, float]:
+    """Root Mean Squared Error of posterior means vs true values.
+
+    Uses BayesFlow's ``root_mean_squared_error`` when available,
+    otherwise falls back to a manual NumPy implementation.
+    """
     import bayesflow as bf
 
     rmse_fn = getattr(bf.diagnostics, "root_mean_squared_error", None)
@@ -104,6 +115,11 @@ def _bf_rmse(
 def _bf_nrmse(
     draws: np.ndarray, true_values: np.ndarray,
 ) -> dict[str, float]:
+    """Normalized RMSE (range-normalized) of posterior means.
+
+    Divides RMSE by the range of true values so the metric is
+    comparable across parameters with different scales.
+    """
     import bayesflow as bf
 
     rmse_fn = getattr(bf.diagnostics, "root_mean_squared_error", None)
@@ -122,6 +138,11 @@ def _bf_nrmse(
 def _bf_contraction(
     draws: np.ndarray, true_values: np.ndarray,
 ) -> dict[str, float]:
+    """Posterior contraction: how much the posterior narrows vs the prior.
+
+    Values near 1 indicate strong learning; near 0 indicates the
+    posterior is as wide as the prior.
+    """
     import bayesflow as bf
 
     estimates, targets = _reshape_for_bf(draws, true_values)
@@ -134,6 +155,11 @@ def _bf_contraction(
 def _bf_z_score(
     draws: np.ndarray, true_values: np.ndarray,
 ) -> dict[str, float]:
+    """Posterior z-score: (true - posterior_mean) / posterior_std.
+
+    Returns both the mean z-score (bias indicator) and mean absolute
+    z-score (overall calibration indicator).
+    """
     import bayesflow as bf
 
     estimates, targets = _reshape_for_bf(draws, true_values)
@@ -150,6 +176,7 @@ def _bf_z_score(
 def _bf_log_gamma(
     draws: np.ndarray, true_values: np.ndarray,
 ) -> dict[str, float]:
+    """Log-gamma calibration diagnostic from BayesFlow."""
     import bayesflow as bf
 
     estimates, targets = _reshape_for_bf(draws, true_values)
@@ -167,7 +194,11 @@ def _bf_log_gamma(
 def _sbc_metric(
     draws: np.ndarray, true_values: np.ndarray,
 ) -> dict[str, float]:
-    """SBC rank uniformity tests (KS, chi-squared, C2ST)."""
+    """SBC rank uniformity tests (KS, chi-squared, C2ST).
+
+    Computes rank statistics and delegates to the dedicated SBC test
+    functions in :mod:`bayesflow_hpo.validation.sbc_tests`.
+    """
     from bayesflow_hpo.validation.sbc_tests import (
         compute_sbc_c2st,
         compute_sbc_uniformity_tests,
@@ -184,6 +215,11 @@ def _sbc_metric(
 def _bias_metric(
     draws: np.ndarray, true_values: np.ndarray,
 ) -> dict[str, float]:
+    """Mean signed error (posterior mean − true value).
+
+    Positive bias means the model systematically overestimates;
+    negative means it underestimates.
+    """
     posterior_mean = np.mean(draws, axis=1)
     return {"bias": float(np.mean(posterior_mean - true_values))}
 
@@ -191,6 +227,7 @@ def _bias_metric(
 def _mae_metric(
     draws: np.ndarray, true_values: np.ndarray,
 ) -> dict[str, float]:
+    """Mean Absolute Error of posterior means vs true values."""
     posterior_mean = np.mean(draws, axis=1)
     return {"mae": float(np.mean(np.abs(posterior_mean - true_values)))}
 
@@ -290,6 +327,7 @@ def make_coverage_metric(
 def _coverage_two_sided(
     draws: np.ndarray, true_values: np.ndarray,
 ) -> dict[str, float]:
+    """Two-sided SBC rank coverage at standard credible-interval levels."""
     return make_coverage_metric(side="two-sided")(draws, true_values)
 
 
@@ -298,9 +336,10 @@ def _mean_cal_error(
 ) -> dict[str, float]:
     """SBC rank-based mean absolute coverage error across standard levels.
 
-    Averages |empirical − nominal| at [0.5, 0.8, 0.9, 0.95, 0.99]. This is
-    more comprehensive than ``calibration_error`` (BayesFlow ECE) because it
-    tests the full posterior via SBC ranks at multiple credible-interval levels.
+    Averages ``|empirical − nominal|`` at [0.9, 0.95, 0.975, 0.99].
+    More comprehensive than ``calibration_error`` (BayesFlow ECE) because
+    it tests the full posterior via SBC ranks at multiple credible-interval
+    levels rather than relying on a single ECE summary.
     """
     result = make_coverage_metric(side="two-sided")(draws, true_values)
     return {"mean_cal_error": result["mean_cal_error"]}
@@ -309,6 +348,7 @@ def _mean_cal_error(
 def _coverage_left(
     draws: np.ndarray, true_values: np.ndarray,
 ) -> dict[str, float]:
+    """Left-sided coverage — useful for assessing statistical efficiency."""
     fn = make_coverage_metric(side="left", prefix="left_")
     return fn(draws, true_values)
 
@@ -316,6 +356,7 @@ def _coverage_left(
 def _coverage_right(
     draws: np.ndarray, true_values: np.ndarray,
 ) -> dict[str, float]:
+    """Right-sided coverage — useful for assessing futility/conservatism."""
     fn = make_coverage_metric(side="right", prefix="right_")
     return fn(draws, true_values)
 

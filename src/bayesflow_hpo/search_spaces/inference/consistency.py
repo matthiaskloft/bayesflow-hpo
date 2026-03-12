@@ -15,6 +15,16 @@ from bayesflow_hpo.search_spaces.base import (
 
 
 def _compute_total_steps(params: dict[str, Any]) -> int:
+    """Derive total training steps for the consistency model schedule.
+
+    ConsistencyModel needs ``total_steps`` at construction time to set up
+    its internal discretisation schedule.  This helper resolves the value
+    from multiple possible sources in priority order:
+
+    1. Explicit ``cm_total_steps`` (user override)
+    2. Generic ``total_steps`` from training config
+    3. ``epochs * batches_per_epoch`` (default: 200 * 50 = 10 000)
+    """
     if "cm_total_steps" in params:
         return max(1, int(params["cm_total_steps"]))
     if "total_steps" in params:
@@ -80,6 +90,23 @@ class ConsistencyModelSpace(BaseSearchSpace):
     )
 
     def build(self, params: dict[str, Any]) -> bf.networks.ConsistencyModel:
+        """Construct a ``bf.networks.ConsistencyModel`` from sampled parameters.
+
+        ``total_steps`` is derived automatically from training config
+        (see :func:`_compute_total_steps`) because the consistency model
+        schedule depends on the total training budget.
+
+        Parameters
+        ----------
+        params
+            Hyperparameter dict from :meth:`sample`.  Should also contain
+            ``epochs`` and ``batches_per_epoch`` for step computation.
+
+        Returns
+        -------
+        bf.networks.ConsistencyModel
+            Configured consistency model.
+        """
         self._validate(params)
 
         width = int(params["cm_subnet_width"])

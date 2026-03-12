@@ -72,6 +72,18 @@ class TimeSeriesNetworkSpace(BaseSearchSpace):
     )
 
     def build(self, params: dict[str, Any]) -> bf.networks.TimeSeriesNetwork:
+        """Construct a ``bf.networks.TimeSeriesNetwork`` from sampled parameters.
+
+        Parameters
+        ----------
+        params
+            Hyperparameter dict from :meth:`sample`.
+
+        Returns
+        -------
+        bf.networks.TimeSeriesNetwork
+            Configured time-series summary network.
+        """
         self._validate(params)
 
         kwargs: dict[str, Any] = {

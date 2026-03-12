@@ -1,7 +1,12 @@
 """Metric computation for fixed-validation datasets.
 
-Delegates to the metric registry for actual computation. This module provides
-the per-condition dispatch and cross-condition aggregation logic.
+Delegates to the metric registry for actual computation. This module
+provides:
+
+- **Per-condition dispatch**: runs all registered metrics on a single
+  condition batch and returns a flat dict.
+- **Cross-condition aggregation**: averages numeric metric values across
+  conditions, skipping NaN values and identifier columns.
 """
 
 from __future__ import annotations

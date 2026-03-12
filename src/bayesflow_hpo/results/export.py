@@ -1,4 +1,14 @@
-"""Export and load workflows with metadata sidecars."""
+"""Export and load workflows with metadata sidecars.
+
+Saves the trained approximator as a ``.keras`` model file alongside a
+``.json`` metadata sidecar containing reproducibility information
+(BayesFlow/NumPy versions, training config, validation results).
+
+Design decision: we save the *approximator* (not the full workflow)
+because BayesFlow 2.x persists models via ``keras.saving`` and
+reconstructing a workflow requires the original simulator and adapter,
+which are typically defined in user code rather than serialized.
+"""
 
 from __future__ import annotations
 

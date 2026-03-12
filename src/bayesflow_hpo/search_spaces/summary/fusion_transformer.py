@@ -70,6 +70,18 @@ class FusionTransformerSpace(BaseSearchSpace):
     )
 
     def build(self, params: dict[str, Any]) -> bf.networks.FusionTransformer:
+        """Construct a ``bf.networks.FusionTransformer`` from sampled parameters.
+
+        Parameters
+        ----------
+        params
+            Hyperparameter dict from :meth:`sample`.
+
+        Returns
+        -------
+        bf.networks.FusionTransformer
+            Configured fusion transformer summary network.
+        """
         self._validate(params)
 
         num_layers = int(params["ft_num_layers"])

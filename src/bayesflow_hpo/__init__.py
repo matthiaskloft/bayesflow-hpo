@@ -1,4 +1,26 @@
-"""bayesflow_hpo public API."""
+"""bayesflow_hpo — Generic hyperparameter optimization for BayesFlow 2.x.
+
+This package wraps Optuna multi-objective search with BayesFlow-aware
+search spaces, builders, and validation.  The main entry point is
+:func:`optimize`, which runs a complete HPO loop:
+
+1. Define or auto-create a search space over inference/summary networks
+2. Generate a fixed validation dataset (reused across all trials)
+3. For each trial: sample → build → budget check → train → validate
+4. Return the Optuna study with Pareto-optimal results
+
+Quick start::
+
+    import bayesflow_hpo as hpo
+
+    study = hpo.optimize(
+        simulator=my_simulator,
+        adapter=my_adapter,
+        validation_conditions={"N": [50, 100, 200]},
+        n_trials=50,
+    )
+    print(hpo.summarize_study(study))
+"""
 
 from importlib.metadata import PackageNotFoundError, version
 

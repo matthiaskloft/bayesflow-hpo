@@ -1,4 +1,20 @@
-"""Optuna study creation/resume helpers."""
+"""Optuna study creation, resume, warm-start, and trial-counting helpers.
+
+This module manages the Optuna study lifecycle.  Key design decisions:
+
+- **Budget-aware sampling**: The TPE sampler receives a ``constraints_func``
+  that marks budget-rejected trials as infeasible, teaching it to avoid
+  oversized configurations even during startup.
+
+- **Non-rejected trial counting**: ``optimize_until()`` counts *trained*
+  trials (not including budget-rejected ones) toward ``n_trials``, because
+  budget rejections are essentially free (no GPU time).  A separate hard
+  cap prevents infinite loops when the entire search space is infeasible.
+
+- **Warm-start**: Seeding a new study from a previous one lets the sampler
+  skip the initial random exploration phase, which is valuable when the
+  search space changes slightly between experiments.
+"""
 
 from __future__ import annotations
 
@@ -206,7 +222,7 @@ def count_trained_trials(study: optuna.Study) -> int:
 
 
 def _count_pruned(study: optuna.Study, since_trial: int = 0) -> int:
-    """Count trials pruned by intermediate validation."""
+    """Count trials pruned by intermediate validation since a given trial number."""
     return sum(
         1
         for t in study.trials
@@ -218,7 +234,11 @@ def _count_failure_reasons(
     study: optuna.Study,
     since_trial: int = 0,
 ) -> dict[str, int]:
-    """Count training errors and rejection reasons for recent trials."""
+    """Count training errors and rejection reasons for recent trials.
+
+    Groups identical error messages (truncated to 80 chars) so that
+    the progress log can detect systemic issues vs. random failures.
+    """
     counts: dict[str, int] = {}
     for t in study.trials:
         if t.number < since_trial:
@@ -238,7 +258,11 @@ def _best_objective_so_far(
     study: optuna.Study,
     select_by: int = 0,
 ) -> float | None:
-    """Return the best value for the selected objective across trained trials."""
+    """Return the best value for the selected objective across trained trials.
+
+    Only considers completed, non-rejected trials.  Returns ``None`` if
+    no qualifying trials exist yet.
+    """
     best = None
     for t in study.trials:
         if (

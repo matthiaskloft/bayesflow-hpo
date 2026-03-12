@@ -1,4 +1,13 @@
-"""Inference adapter from approximator to batch posterior samples."""
+"""Inference adapter from approximator to batch posterior samples.
+
+Creates a closure that translates from the validation pipeline's
+``(sim_data, n_samples)`` calling convention to BayesFlow's
+``approximator.sample(conditions=..., num_samples=...)`` API.
+
+For multi-parameter models, posterior draws are concatenated on the
+last axis so that metrics receive a single ``(n_sims, n_samples, n_params)``
+array and can index into individual parameters.
+"""
 
 from __future__ import annotations
 

@@ -1,4 +1,8 @@
-"""Inference network builders."""
+"""Inference network builders.
+
+Thin convenience wrapper that delegates to the search space's ``build()``
+method.  Exists for API symmetry with the summary builder.
+"""
 
 from __future__ import annotations
 

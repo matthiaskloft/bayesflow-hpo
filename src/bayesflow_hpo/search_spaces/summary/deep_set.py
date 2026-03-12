@@ -83,6 +83,22 @@ class DeepSetSpace(BaseSearchSpace):
     )
 
     def build(self, params: dict[str, Any]) -> bf.networks.DeepSet:
+        """Construct a ``bf.networks.DeepSet`` from sampled parameters.
+
+        The MLP architecture uses a uniform ``width`` for all sub-MLPs
+        except ``invariant_outer``, which uses ``(width, summary_dim)``
+        as a bottleneck to match BayesFlow's default architecture.
+
+        Parameters
+        ----------
+        params
+            Hyperparameter dict from :meth:`sample`.
+
+        Returns
+        -------
+        bf.networks.DeepSet
+            Configured DeepSet summary network.
+        """
         self._validate(params)
 
         width = int(params["ds_width"])
@@ -92,6 +108,7 @@ class DeepSetSpace(BaseSearchSpace):
             "depth": int(params["ds_depth"]),
             "mlp_widths_equivariant": (width, width),
             "mlp_widths_invariant_inner": (width, width),
+            # Outer MLP narrows to summary_dim — acts as a bottleneck.
             "mlp_widths_invariant_outer": (width, summary_dim),
             "mlp_widths_invariant_last": (width, width),
             "dropout": float(params["ds_dropout"]),

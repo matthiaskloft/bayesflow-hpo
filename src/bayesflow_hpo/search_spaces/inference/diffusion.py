@@ -67,6 +67,18 @@ class DiffusionModelSpace(BaseSearchSpace):
     )
 
     def build(self, params: dict[str, Any]) -> bf.networks.DiffusionModel:
+        """Construct a ``bf.networks.DiffusionModel`` from sampled parameters.
+
+        Parameters
+        ----------
+        params
+            Hyperparameter dict from :meth:`sample`.
+
+        Returns
+        -------
+        bf.networks.DiffusionModel
+            Configured diffusion model.
+        """
         self._validate(params)
 
         width = int(params["dm_subnet_width"])

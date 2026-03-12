@@ -1,4 +1,14 @@
-"""Registry helpers for search spaces."""
+"""Registry helpers for search spaces.
+
+Provides name→factory mappings so that search spaces can be looked up by
+short string names (e.g. ``"coupling_flow"``, ``"fm"``) instead of
+importing the class directly.  This is used by the high-level ``optimize()``
+API and by downstream packages that configure search spaces via config files.
+
+Each network type has a canonical name (``"coupling_flow"``) and zero or
+more aliases (``"cf"``, ``"couplingflow"``).  Resolution is case-insensitive
+and strip-safe.
+"""
 
 from __future__ import annotations
 
@@ -115,6 +125,11 @@ def list_summary_spaces() -> list[str]:
 
 
 def _resolve_inference_name(name: str) -> str:
+    """Resolve a user-supplied name to a canonical inference space key.
+
+    Checks the factory dict first (exact canonical match), then falls
+    back to the alias dict.  Returns the input unchanged if no match.
+    """
     key = name.lower().strip()
     if key in INFERENCE_SPACE_FACTORIES:
         return key
@@ -122,6 +137,10 @@ def _resolve_inference_name(name: str) -> str:
 
 
 def _resolve_summary_name(name: str) -> str:
+    """Resolve a user-supplied name to a canonical summary space key.
+
+    Same resolution logic as :func:`_resolve_inference_name`.
+    """
     key = name.lower().strip()
     if key in SUMMARY_SPACE_FACTORIES:
         return key

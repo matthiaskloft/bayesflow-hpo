@@ -1,4 +1,26 @@
-"""Generic Optuna objective for BayesFlow HPO."""
+"""Generic Optuna objective for BayesFlow HPO.
+
+This module implements the core trial loop: sample → build → train →
+validate → return objective values.  Each ``__call__`` invocation maps
+one Optuna trial to a minimize-all tuple of metric and cost scores.
+
+Key design decisions:
+
+- **Pre-training budget rejection**: Trials exceeding ``max_param_count``
+  or ``max_memory_mb`` are rejected *before* training to save GPU time.
+  These trials still return penalty values so Optuna records them, but
+  they are flagged via ``rejected_reason`` and excluded from the trained
+  trial count.
+
+- **Two-phase param count check**: First a heuristic estimate (fast, no
+  GPU), then an exact count after lazy Keras weight initialization.
+  This catches both obvious oversized configs and edge cases where the
+  heuristic underestimates.
+
+- **Cost metric flexibility**: The last objective dimension is always a
+  "cost" signal (inference time or param count), decoupled from accuracy
+  metrics.  This lets Optuna explore the accuracy-cost Pareto front.
+"""
 
 from __future__ import annotations
 
@@ -157,7 +179,11 @@ def _default_train_fn(
     epochs: int,
     batches_per_epoch: int,
 ) -> None:
-    """Default training function using fit_online."""
+    """Default training function using ``fit_online``.
+
+    Simulates fresh data each epoch (online training).  Batch size is
+    read from ``params["batch_size"]``, defaulting to 256 if absent.
+    """
     workflow.fit_online(
         epochs=epochs,
         batch_size=int(params.get("batch_size", 256)),
@@ -173,7 +199,11 @@ def _log_trial_summary(
     training_time: float,
     metric_label: str = "obj[0]",
 ) -> None:
-    """Log a concise one-line summary after a trial completes."""
+    """Log a concise one-line summary after a trial completes.
+
+    Includes objective value, param count (formatted as K/M), training
+    time, and optional NRMSE/correlation from trial user attributes.
+    """
     params_label = (
         f"{param_count / 1e6:.2f}M"
         if param_count >= 1e6
@@ -256,6 +286,15 @@ class GenericObjective:
         return tuple([FAILED_TRIAL_CAL_ERROR] * (n - 1)) + (FAILED_TRIAL_COST,)
 
     def __call__(self, trial: optuna.Trial) -> tuple[float, ...]:
+        """Execute one HPO trial: sample → build → budget check → train → validate.
+
+        Returns
+        -------
+        tuple[float, ...]
+            Objective values (all minimize-is-better).  Shape depends on
+            ``objective_mode``: 2 values for ``"mean"``, N+1 for ``"pareto"``.
+            Failed or budget-rejected trials return penalty values.
+        """
         params = self.config.search_space.sample(trial)
 
         # Inject actual model dimensions for memory estimation.
