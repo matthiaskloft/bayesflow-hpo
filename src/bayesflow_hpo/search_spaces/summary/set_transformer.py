@@ -83,17 +83,29 @@ class SetTransformerSpace(BaseSearchSpace):
         num_layers = int(params["st_num_layers"])
         embed_dim = int(params["st_embed_dim"])
         num_heads = int(params["st_num_heads"])
-        mlp_width = int(params.get("st_mlp_width", 2 * embed_dim))
-        mlp_depth = int(params.get("st_mlp_depth", 2))
 
-        return bf.networks.SetTransformer(
-            summary_dim=int(params["st_summary_dim"]),
-            embed_dims=tuple([embed_dim] * num_layers),
-            num_heads=tuple([num_heads] * num_layers),
-            mlp_depths=tuple([mlp_depth] * num_layers),
-            mlp_widths=tuple([mlp_width] * num_layers),
-            dropout=float(params["st_dropout"]),
-            num_inducing_points=(
-                int(params["st_num_inducing"]) if "st_num_inducing" in params else None
-            ),
+        mlp_width = (
+            int(params["st_mlp_width"])
+            if "st_mlp_width" in params
+            else 2 * embed_dim
         )
+        mlp_depth = (
+            int(params["st_mlp_depth"])
+            if "st_mlp_depth" in params
+            else 2
+        )
+
+        kwargs: dict[str, Any] = {
+            "summary_dim": int(params["st_summary_dim"]),
+            "embed_dims": tuple([embed_dim] * num_layers),
+            "num_heads": tuple([num_heads] * num_layers),
+            "mlp_depths": tuple([mlp_depth] * num_layers),
+            "mlp_widths": tuple([mlp_width] * num_layers),
+            "dropout": float(params["st_dropout"]),
+        }
+        if "st_num_inducing" in params:
+            kwargs["num_inducing_points"] = int(
+                params["st_num_inducing"]
+            )
+
+        return bf.networks.SetTransformer(**kwargs)

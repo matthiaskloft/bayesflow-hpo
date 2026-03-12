@@ -76,13 +76,21 @@ class TimeSeriesTransformerSpace(BaseSearchSpace):
         num_layers = int(params["tst_num_layers"])
         embed_dim = int(params["tst_embed_dim"])
         num_heads = int(params["tst_num_heads"])
-        mlp_width = int(params.get("tst_mlp_width", 2 * embed_dim))
 
-        return bf.networks.TimeSeriesTransformer(
-            summary_dim=int(params["tst_summary_dim"]),
-            embed_dims=tuple([embed_dim] * num_layers),
-            num_heads=tuple([num_heads] * num_layers),
-            mlp_widths=tuple([mlp_width] * num_layers),
-            dropout=float(params["tst_dropout"]),
-            time_embedding=params.get("tst_time_embed", "time2vec"),
+        mlp_width = (
+            int(params["tst_mlp_width"])
+            if "tst_mlp_width" in params
+            else 2 * embed_dim
         )
+
+        kwargs: dict[str, Any] = {
+            "summary_dim": int(params["tst_summary_dim"]),
+            "embed_dims": tuple([embed_dim] * num_layers),
+            "num_heads": tuple([num_heads] * num_layers),
+            "mlp_widths": tuple([mlp_width] * num_layers),
+            "dropout": float(params["tst_dropout"]),
+        }
+        if "tst_time_embed" in params:
+            kwargs["time_embedding"] = params["tst_time_embed"]
+
+        return bf.networks.TimeSeriesTransformer(**kwargs)

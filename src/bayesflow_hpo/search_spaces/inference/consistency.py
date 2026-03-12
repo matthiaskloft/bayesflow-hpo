@@ -86,14 +86,20 @@ class ConsistencyModelSpace(BaseSearchSpace):
         depth = int(params["cm_subnet_depth"])
         total_steps = _compute_total_steps(params)
 
-        return bf.networks.ConsistencyModel(
-            total_steps=total_steps,
-            max_time=float(params.get("cm_max_time", 200)),
-            sigma2=float(params.get("cm_sigma2", 1.0)),
-            s0=float(params.get("cm_s0", 10)),
-            s1=float(params.get("cm_s1", 50)),
-            subnet_kwargs={
+        kwargs: dict[str, Any] = {
+            "total_steps": total_steps,
+            "subnet_kwargs": {
                 "widths": tuple([width] * depth),
                 "dropout": float(params["cm_dropout"]),
             },
-        )
+        }
+        if "cm_max_time" in params:
+            kwargs["max_time"] = float(params["cm_max_time"])
+        if "cm_sigma2" in params:
+            kwargs["sigma2"] = float(params["cm_sigma2"])
+        if "cm_s0" in params:
+            kwargs["s0"] = float(params["cm_s0"])
+        if "cm_s1" in params:
+            kwargs["s1"] = float(params["cm_s1"])
+
+        return bf.networks.ConsistencyModel(**kwargs)

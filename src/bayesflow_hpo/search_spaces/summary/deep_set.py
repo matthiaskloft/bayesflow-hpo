@@ -87,16 +87,24 @@ class DeepSetSpace(BaseSearchSpace):
 
         width = int(params["ds_width"])
         summary_dim = int(params["ds_summary_dim"])
-        return bf.networks.DeepSet(
-            summary_dim=summary_dim,
-            depth=int(params["ds_depth"]),
-            mlp_widths_equivariant=(width, width),
-            mlp_widths_invariant_inner=(width, width),
-            mlp_widths_invariant_outer=(width, summary_dim),
-            mlp_widths_invariant_last=(width, width),
-            activation=params.get("ds_activation", "silu"),
-            spectral_normalization=bool(params.get("ds_spectral_norm", False)),
-            inner_pooling=params.get("ds_inner_pooling", "mean"),
-            output_pooling=params.get("ds_output_pooling", "mean"),
-            dropout=float(params["ds_dropout"]),
-        )
+        kwargs: dict[str, Any] = {
+            "summary_dim": summary_dim,
+            "depth": int(params["ds_depth"]),
+            "mlp_widths_equivariant": (width, width),
+            "mlp_widths_invariant_inner": (width, width),
+            "mlp_widths_invariant_outer": (width, summary_dim),
+            "mlp_widths_invariant_last": (width, width),
+            "dropout": float(params["ds_dropout"]),
+        }
+        if "ds_activation" in params:
+            kwargs["activation"] = params["ds_activation"]
+        if "ds_spectral_norm" in params:
+            kwargs["spectral_normalization"] = bool(
+                params["ds_spectral_norm"]
+            )
+        if "ds_inner_pooling" in params:
+            kwargs["inner_pooling"] = params["ds_inner_pooling"]
+        if "ds_output_pooling" in params:
+            kwargs["output_pooling"] = params["ds_output_pooling"]
+
+        return bf.networks.DeepSet(**kwargs)

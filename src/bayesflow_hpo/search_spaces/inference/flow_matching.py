@@ -83,18 +83,26 @@ class FlowMatchingSpace(BaseSearchSpace):
         width = int(params["fm_subnet_width"])
         depth = int(params["fm_subnet_depth"])
 
-        kwargs: dict[str, Any] = {
-            "use_optimal_transport": bool(params.get("fm_use_ot", False)),
-            "time_power_law_alpha": float(params.get("fm_time_alpha", 0.0)),
-            "loss_fn": "mse",
-            "subnet_kwargs": {
-                "widths": tuple([width] * depth),
-                "activation": params.get("fm_activation", "mish"),
-                "dropout": float(params["fm_dropout"]),
-            },
+        subnet_kwargs: dict[str, Any] = {
+            "widths": tuple([width] * depth),
+            "dropout": float(params["fm_dropout"]),
         }
+        if "fm_activation" in params:
+            subnet_kwargs["activation"] = params["fm_activation"]
         if "fm_time_embedding_dim" in params:
-            dim = int(params["fm_time_embedding_dim"])
-            kwargs["subnet_kwargs"]["time_embedding_dim"] = dim
+            subnet_kwargs["time_embedding_dim"] = int(
+                params["fm_time_embedding_dim"]
+            )
+
+        kwargs: dict[str, Any] = {
+            "loss_fn": "mse",
+            "subnet_kwargs": subnet_kwargs,
+        }
+        if "fm_use_ot" in params:
+            kwargs["use_optimal_transport"] = bool(params["fm_use_ot"])
+        if "fm_time_alpha" in params:
+            kwargs["time_power_law_alpha"] = float(
+                params["fm_time_alpha"]
+            )
 
         return bf.networks.FlowMatching(**kwargs)

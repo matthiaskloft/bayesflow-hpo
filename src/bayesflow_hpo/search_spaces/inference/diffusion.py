@@ -71,12 +71,17 @@ class DiffusionModelSpace(BaseSearchSpace):
 
         width = int(params["dm_subnet_width"])
         depth = int(params["dm_subnet_depth"])
-        return bf.networks.DiffusionModel(
-            noise_schedule=params.get("dm_noise_schedule", "edm"),
-            prediction_type=params.get("dm_prediction_type", "F"),
-            subnet_kwargs={
+
+        kwargs: dict[str, Any] = {
+            "subnet_kwargs": {
                 "widths": tuple([width] * depth),
                 "activation": params["dm_activation"],
                 "dropout": float(params["dm_dropout"]),
             },
-        )
+        }
+        if "dm_noise_schedule" in params:
+            kwargs["noise_schedule"] = params["dm_noise_schedule"]
+        if "dm_prediction_type" in params:
+            kwargs["prediction_type"] = params["dm_prediction_type"]
+
+        return bf.networks.DiffusionModel(**kwargs)
