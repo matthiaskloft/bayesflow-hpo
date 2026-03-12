@@ -95,7 +95,6 @@ class FlowMatchingSpace(BaseSearchSpace):
             )
 
         kwargs: dict[str, Any] = {
-            "loss_fn": "mse",
             "subnet_kwargs": subnet_kwargs,
         }
         if "fm_use_ot" in params:
