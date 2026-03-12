@@ -1,4 +1,6 @@
-"""Tests for the high-level optimize() API – key inference and validation."""
+"""Tests for the high-level optimize() API."""
+
+from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
@@ -124,3 +126,110 @@ def test_missing_data_keys_raises_type_error():
             param_keys=["theta"],
             storage=None,
         )
+
+
+# ---------------------------------------------------------------------------
+# Early stopping parameters
+# ---------------------------------------------------------------------------
+
+
+def test_optimize_forwards_early_stopping_params_to_objective_config(monkeypatch):
+    """optimize() forwards early_stopping_patience/window to ObjectiveConfig."""
+    captured = {}
+
+    class _FakeGenericObjective:
+        def __init__(self, config):
+            captured["config"] = config
+            self.n_objectives = 2
+
+        def __call__(self, trial):  # pragma: no cover
+            return (0.0, 0.0)
+
+    monkeypatch.setattr(
+        "bayesflow_hpo.api.GenericObjective",
+        _FakeGenericObjective,
+    )
+    monkeypatch.setattr(
+        "bayesflow_hpo.api.create_study",
+        lambda **kwargs: MagicMock(),
+    )
+    monkeypatch.setattr(
+        "bayesflow_hpo.api.optimize_until",
+        lambda study, objective, **kwargs: None,
+    )
+
+    import bayesflow_hpo.api as api
+
+    fake_simulator = MagicMock()
+    fake_adapter = MagicMock()
+    fake_search_space = MagicMock()
+    fake_search_space.inference_space = MagicMock()
+    fake_search_space.summary_space = None
+
+    api.optimize(
+        simulator=fake_simulator,
+        adapter=fake_adapter,
+        param_keys=["theta"],
+        data_keys=["x"],
+        search_space=fake_search_space,
+        n_trials=1,
+        epochs=10,
+        batches_per_epoch=5,
+        early_stopping_patience=10,
+        early_stopping_window=5,
+        storage=None,
+    )
+
+    config = captured["config"]
+    assert config.early_stopping_patience == 10
+    assert config.early_stopping_window == 5
+
+
+def test_optimize_early_stopping_default_values(monkeypatch):
+    """optimize() applies default patience=5, window=7 when not specified."""
+    captured = {}
+
+    class _FakeGenericObjective:
+        def __init__(self, config):
+            captured["config"] = config
+            self.n_objectives = 2
+
+        def __call__(self, trial):  # pragma: no cover
+            return (0.0, 0.0)
+
+    monkeypatch.setattr(
+        "bayesflow_hpo.api.GenericObjective",
+        _FakeGenericObjective,
+    )
+    monkeypatch.setattr(
+        "bayesflow_hpo.api.create_study",
+        lambda **kwargs: MagicMock(),
+    )
+    monkeypatch.setattr(
+        "bayesflow_hpo.api.optimize_until",
+        lambda study, objective, **kwargs: None,
+    )
+
+    import bayesflow_hpo.api as api
+
+    fake_simulator = MagicMock()
+    fake_adapter = MagicMock()
+    fake_search_space = MagicMock()
+    fake_search_space.inference_space = MagicMock()
+    fake_search_space.summary_space = None
+
+    api.optimize(
+        simulator=fake_simulator,
+        adapter=fake_adapter,
+        param_keys=["theta"],
+        data_keys=["x"],
+        search_space=fake_search_space,
+        n_trials=1,
+        epochs=10,
+        batches_per_epoch=5,
+        storage=None,
+    )
+
+    config = captured["config"]
+    assert config.early_stopping_patience == 5
+    assert config.early_stopping_window == 7

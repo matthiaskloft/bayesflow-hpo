@@ -355,6 +355,36 @@ def test_objective_reraises_memory_error_from_probe(monkeypatch):
         objective(trial)
 
 
+def test_objective_config_early_stopping_defaults():
+    """ObjectiveConfig defaults: early_stopping_patience=5, early_stopping_window=7."""
+    config = ObjectiveConfig(
+        simulator=object(),
+        adapter=object(),
+        search_space=_FakeSearchSpace(),
+        epochs=1,
+        batches_per_epoch=1,
+        validation_data=None,
+    )
+    assert config.early_stopping_patience == 5
+    assert config.early_stopping_window == 7
+
+
+def test_objective_config_early_stopping_custom_values():
+    """ObjectiveConfig accepts custom early_stopping_patience and window."""
+    config = ObjectiveConfig(
+        simulator=object(),
+        adapter=object(),
+        search_space=_FakeSearchSpace(),
+        epochs=1,
+        batches_per_epoch=1,
+        validation_data=None,
+        early_stopping_patience=10,
+        early_stopping_window=5,
+    )
+    assert config.early_stopping_patience == 10
+    assert config.early_stopping_window == 5
+
+
 def test_objective_config_rejects_invalid_mode():
     """ObjectiveConfig eagerly validates objective_mode."""
     with pytest.raises(ValueError, match="Unknown objective_mode"):
