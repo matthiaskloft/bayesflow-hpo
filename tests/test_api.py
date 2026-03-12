@@ -1,4 +1,4 @@
-"""Tests for the high-level optimize() API – key inference, validation, and early stopping."""
+"""Tests for the high-level optimize() API."""
 
 from __future__ import annotations
 
