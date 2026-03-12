@@ -65,22 +65,22 @@ class DeepSetSpace(BaseSearchSpace):
 
     activation: CategoricalDimension = field(
         default_factory=lambda: CategoricalDimension(
-            "ds_activation", choices=["silu", "mish"], default=False
+            "ds_activation", choices=["silu", "mish"], enabled=False
         )
     )
     spectral_norm: CategoricalDimension = field(
         default_factory=lambda: CategoricalDimension(
-            "ds_spectral_norm", choices=[True, False], default=False
+            "ds_spectral_norm", choices=[True, False], enabled=False
         )
     )
     inner_pooling: CategoricalDimension = field(
         default_factory=lambda: CategoricalDimension(
-            "ds_inner_pooling", choices=["mean", "max"], default=False
+            "ds_inner_pooling", choices=["mean", "max"], enabled=False
         )
     )
     output_pooling: CategoricalDimension = field(
         default_factory=lambda: CategoricalDimension(
-            "ds_output_pooling", choices=["mean", "max"], default=False
+            "ds_output_pooling", choices=["mean", "max"], enabled=False
         )
     )
 

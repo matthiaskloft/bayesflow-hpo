@@ -13,7 +13,7 @@ def test_default_sampling_skips_optional_dimensions():
     assert "cf_subnet_depth" in params
     assert "cf_dropout" in params
 
-    # cf_activation is now optional (default=False), falls back to "mish"
+    # cf_activation is now optional (enabled=False), falls back to "mish"
     assert "cf_activation" not in params
 
     assert "cf_transform" not in params

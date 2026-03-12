@@ -16,7 +16,7 @@ class IntDimension:
     high: int
     step: int | None = None
     log: bool = False
-    default: bool = True
+    enabled: bool = True
 
 
 @dataclass
@@ -27,7 +27,7 @@ class FloatDimension:
     low: float
     high: float
     log: bool = False
-    default: bool = True
+    enabled: bool = True
 
 
 @dataclass
@@ -36,7 +36,7 @@ class CategoricalDimension:
 
     name: str
     choices: Sequence[str | int | float | bool | None]
-    default: bool = True
+    enabled: bool = True
 
 
 Dimension = IntDimension | FloatDimension | CategoricalDimension
@@ -69,7 +69,7 @@ class BaseSearchSpace:
     def sample(self, trial: Any) -> dict[str, Any]:
         params: dict[str, Any] = {}
         for dim in self.dimensions:
-            if not dim.default and not self.include_optional:
+            if not dim.enabled and not self.include_optional:
                 continue
 
             if isinstance(dim, IntDimension):

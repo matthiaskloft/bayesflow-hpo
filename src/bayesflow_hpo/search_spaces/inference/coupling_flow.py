@@ -58,23 +58,23 @@ class CouplingFlowSpace(BaseSearchSpace):
     )
     activation: CategoricalDimension = field(
         default_factory=lambda: CategoricalDimension(
-            "cf_activation", choices=["silu", "relu", "mish"], default=False
+            "cf_activation", choices=["silu", "relu", "mish"], enabled=False
         )
     )
 
     transform: CategoricalDimension = field(
         default_factory=lambda: CategoricalDimension(
-            "cf_transform", choices=["affine", "spline"], default=False
+            "cf_transform", choices=["affine", "spline"], enabled=False
         )
     )
     permutation: CategoricalDimension = field(
         default_factory=lambda: CategoricalDimension(
-            "cf_permutation", choices=["random", "orthogonal"], default=False
+            "cf_permutation", choices=["random", "orthogonal"], enabled=False
         )
     )
     use_actnorm: CategoricalDimension = field(
         default_factory=lambda: CategoricalDimension(
-            "cf_actnorm", choices=[True, False], default=False
+            "cf_actnorm", choices=[True, False], enabled=False
         )
     )
 

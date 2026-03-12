@@ -43,17 +43,17 @@ class SetTransformerSpace(BaseSearchSpace):
 
     mlp_width: IntDimension = field(
         default_factory=lambda: IntDimension(
-            "st_mlp_width", low=64, high=512, step=64, default=False
+            "st_mlp_width", low=64, high=512, step=64, enabled=False
         )
     )
     mlp_depth: IntDimension = field(
         default_factory=lambda: IntDimension(
-            "st_mlp_depth", low=1, high=4, default=False
+            "st_mlp_depth", low=1, high=4, enabled=False
         )
     )
     num_inducing: IntDimension = field(
         default_factory=lambda: IntDimension(
-            "st_num_inducing", low=8, high=64, step=8, default=False
+            "st_num_inducing", low=8, high=64, step=8, enabled=False
         )
     )
 
