@@ -35,35 +35,55 @@ pip install -e ".[dashboard]"       # Optional: Optuna dashboard
 ```
 src/bayesflow_hpo/
 ├── api.py              # optimize() entry point + adapter key inference
+├── objectives.py       # Param/cost normalization, objective value extraction
 ├── registration.py     # Custom network registration helpers
+├── utils.py            # loguniform_float/int sampling helpers
 ├── search_spaces/      # Dataclass-based search space definitions
 │   ├── base.py         # BaseSearchSpace (auto-derives dimensions from fields)
-│   ├── composite.py    # CompositeSearchSpace, NetworkSelectionSpace
+│   ├── composite.py    # CompositeSearchSpace, NetworkSelectionSpace, SummarySelectionSpace
 │   ├── registry.py     # Factory registries + aliasing
-│   └── ...             # Per-network spaces (coupling_flow, deep_set, etc.)
+│   ├── training.py     # TrainingSpace (learning rate, batch size, etc.)
+│   ├── inference/      # Inference network spaces (5 types)
+│   │   ├── coupling_flow.py, flow_matching.py, diffusion.py
+│   │   ├── consistency.py, stable_consistency.py
+│   └── summary/        # Summary network spaces (5 types)
+│       ├── deep_set.py, set_transformer.py, fusion_transformer.py
+│       └── time_series_network.py, time_series_transformer.py
 ├── builders/           # Construct BayesFlow objects from trial params
-│   ├── workflow.py     # build_workflow() → BasicWorkflow
+│   ├── workflow.py     # build_workflow(), WorkflowBuildConfig
+│   ├── inference.py    # build_inference_network()
+│   ├── summary.py      # build_summary_network()
+│   ├── adapter.py      # Adapter-related build logic
 │   └── registry.py     # Builder registries for custom networks
 ├── optimization/       # Optuna study management + trial logic
-│   ├── study.py        # create_study(), optimize_until(), warm_start
-│   ├── objective.py    # GenericObjective (main trial function)
+│   ├── study.py        # create_study(), optimize_until(), warm_start, resume_study()
+│   ├── objective.py    # GenericObjective, ObjectiveConfig
+│   ├── sampling.py     # sample_hyperparameters()
 │   ├── callbacks.py    # OptunaReportCallback, MovingAverageEarlyStopping
-│   └── constraints.py  # Memory/param budget checks (pre-training rejection)
+│   ├── constraints.py  # Memory/param budget checks (pre-training rejection)
+│   ├── checkpoint_pool.py  # CheckpointPool for trial weight persistence
+│   ├── cleanup.py      # cleanup_trial()
+│   └── validation_callback.py  # PeriodicValidationCallback
 ├── validation/         # Fixed-dataset validation pipeline
 │   ├── data.py         # ValidationDataset generation + save/load
-│   ├── registry.py     # 13+ built-in metrics (calibration, NRMSE, SBC, etc.)
+│   ├── registry.py     # 14 built-in metrics (calibration, NRMSE, SBC, etc.)
 │   ├── pipeline.py     # run_validation_pipeline()
+│   ├── metrics.py      # compute_condition_metrics(), aggregate_condition_rows()
+│   ├── inference.py    # make_bayesflow_infer_fn()
+│   ├── result.py       # ValidationResult dataclass
+│   ├── dry_run.py      # validate_once()
 │   └── sbc_tests.py    # SBC uniformity tests (KS, chi-squared, C2ST)
 └── results/            # Post-optimization analysis + export
-    ├── extraction.py   # trials_to_dataframe(), get_pareto_trials()
-    └── visualization.py # Pareto front, param importance, metric panels
+    ├── extraction.py   # trials_to_dataframe(), get_pareto_trials(), summarize_study()
+    ├── export.py       # save/load_workflow_with_metadata(), get_workflow_metadata()
+    └── visualization.py # Pareto front, param importance, metric panels, scatter
 ```
 
 ## Key Patterns
 
 - **BaseSearchSpace**: Declare dimensions as dataclass fields → `dimensions` and `sample()` auto-derive; only implement `build()`
 - **Registry pattern**: Search spaces, builders, and metrics all use name→factory registries with alias support
-- **CompositeSearchSpace**: Combines inference + summary + training sub-spaces; NetworkSelectionSpace lets Optuna choose network type
+- **CompositeSearchSpace**: Combines inference + summary + training sub-spaces; NetworkSelectionSpace / SummarySelectionSpace let Optuna choose network type
 - **Trial budget**: Trials exceeding `max_param_count` or `max_memory_mb` are rejected pre-training and NOT counted toward `n_trials`
 
 ## Gotchas
