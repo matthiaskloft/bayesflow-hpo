@@ -74,7 +74,7 @@ class FlowMatchingSpace(BaseSearchSpace):
     )
     time_resolution: IntDimension = field(
         default_factory=lambda: IntDimension(
-            "fm_time_resolution", low=50, high=300, step=50, default=False
+            "fm_time_resolution", low=50, high=300, step=50, enabled=False
         )
     )
 

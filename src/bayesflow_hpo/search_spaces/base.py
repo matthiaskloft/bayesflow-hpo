@@ -68,7 +68,7 @@ class BaseSearchSpace:
     method, and ``_validate`` helper are derived automatically — subclasses
     only need to implement ``build``.
 
-    Dimensions with ``default=False`` are *optional*: they are only sampled
+    Dimensions with ``enabled=False`` are *optional*: they are only sampled
     when ``include_optional=True``.
     """
 
@@ -91,7 +91,7 @@ class BaseSearchSpace:
 
     def _validate(self, params: dict[str, Any]) -> None:
         """Raise ``ValueError`` if any required dimension key is missing."""
-        required = [d.name for d in self.dimensions if d.default]
+        required = [d.name for d in self.dimensions if d.enabled]
         missing = [k for k in required if k not in params]
         if missing:
             raise ValueError(

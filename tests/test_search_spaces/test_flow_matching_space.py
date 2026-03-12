@@ -86,4 +86,4 @@ def test_time_resolution_dimension_range():
     assert dim.low == 50
     assert dim.high == 300
     assert dim.step == 50
-    assert dim.default is False
+    assert dim.enabled is False
