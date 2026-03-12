@@ -4,10 +4,12 @@ import pytest
 from conftest import FakeTrial
 
 from bayesflow_hpo.search_spaces.inference.consistency import ConsistencyModelSpace
+from bayesflow_hpo.search_spaces.inference.coupling_flow import CouplingFlowSpace
 from bayesflow_hpo.search_spaces.inference.diffusion import DiffusionModelSpace
 from bayesflow_hpo.search_spaces.inference.stable_consistency import (
     StableConsistencyModelSpace,
 )
+from bayesflow_hpo.search_spaces.summary.deep_set import DeepSetSpace
 from bayesflow_hpo.search_spaces.summary.fusion_transformer import (
     FusionTransformerSpace,
 )
@@ -82,9 +84,11 @@ def test_optional_sampling_includes_optional(space, optional_key):
 @pytest.mark.parametrize(
     ("space", "error_prefix"),
     [
+        (CouplingFlowSpace(), "CouplingFlowSpace.build"),
         (DiffusionModelSpace(), "DiffusionModelSpace.build"),
         (ConsistencyModelSpace(), "ConsistencyModelSpace.build"),
         (StableConsistencyModelSpace(), "StableConsistencyModelSpace.build"),
+        (DeepSetSpace(), "DeepSetSpace.build"),
         (SetTransformerSpace(), "SetTransformerSpace.build"),
         (TimeSeriesNetworkSpace(), "TimeSeriesNetworkSpace.build"),
         (TimeSeriesTransformerSpace(), "TimeSeriesTransformerSpace.build"),
