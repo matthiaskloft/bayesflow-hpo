@@ -35,7 +35,17 @@ class FlowMatchingSpace(BaseSearchSpace):
 
     Optional dimensions (enabled via ``include_optional=True``)
     -----------------------------------------------------------
-    fm_use_ot, fm_time_alpha.
+    fm_use_ot : bool
+        Whether to use optimal transport for improved training stability.
+        Increases training time (~2.5x) but may speed up inference.
+    fm_time_alpha : float
+        Power-law exponent for the time distribution during training.
+        Controls sampling bias: ``p(t) ∝ t^(1/(1+α))``. Default
+        ``α=0`` corresponds to uniform sampling.
+    fm_time_resolution : int
+        Number of fixed ODE solver steps used at inference time (50--300,
+        step 50). Higher values improve quality at the cost of slower
+        inference. When omitted, BayesFlow uses adaptive stepping.
     """
 
     include_optional: bool = False
@@ -67,6 +77,11 @@ class FlowMatchingSpace(BaseSearchSpace):
             "fm_time_alpha", low=0.0, high=2.0, enabled=False
         )
     )
+    time_resolution: IntDimension = field(
+        default_factory=lambda: IntDimension(
+            "fm_time_resolution", low=50, high=300, step=50, default=False
+        )
+    )
 
     @property
     def dimensions(self) -> list[Dimension]:
@@ -77,6 +92,7 @@ class FlowMatchingSpace(BaseSearchSpace):
             self.activation,
             self.use_optimal_transport,
             self.time_alpha,
+            self.time_resolution,
         ]
 
     def sample(self, trial: Any) -> dict[str, Any]:
@@ -91,10 +107,16 @@ class FlowMatchingSpace(BaseSearchSpace):
 
         width = int(params["fm_subnet_width"])
         depth = int(params["fm_subnet_depth"])
+
+        integrate_kwargs = None
+        if "fm_time_resolution" in params:
+            integrate_kwargs = {"steps": int(params["fm_time_resolution"])}
+
         return bf.networks.FlowMatching(
             use_optimal_transport=bool(params.get("fm_use_ot", False)),
             time_power_law_alpha=float(params.get("fm_time_alpha", 0.0)),
             loss_fn="mse",
+            integrate_kwargs=integrate_kwargs,
             subnet_kwargs={
                 "widths": tuple([width] * depth),
                 "activation": params.get("fm_activation", "mish"),
