@@ -74,12 +74,19 @@ class TimeSeriesNetworkSpace(BaseSearchSpace):
     def build(self, params: dict[str, Any]) -> bf.networks.TimeSeriesNetwork:
         self._validate(params)
 
-        return bf.networks.TimeSeriesNetwork(
-            summary_dim=int(params["tsn_summary_dim"]),
-            recurrent_dim=int(params["tsn_recurrent_dim"]),
-            filters=int(params["tsn_filters"]),
-            dropout=float(params["tsn_dropout"]),
-            recurrent_type=params.get("tsn_recurrent_type", "gru"),
-            bidirectional=bool(params.get("tsn_bidirectional", True)),
-            skip_steps=int(params.get("tsn_skip_steps", 4)),
-        )
+        kwargs: dict[str, Any] = {
+            "summary_dim": int(params["tsn_summary_dim"]),
+            "recurrent_dim": int(params["tsn_recurrent_dim"]),
+            "filters": int(params["tsn_filters"]),
+            "dropout": float(params["tsn_dropout"]),
+        }
+        if "tsn_recurrent_type" in params:
+            kwargs["recurrent_type"] = params["tsn_recurrent_type"]
+        if "tsn_bidirectional" in params:
+            kwargs["bidirectional"] = bool(
+                params["tsn_bidirectional"]
+            )
+        if "tsn_skip_steps" in params:
+            kwargs["skip_steps"] = int(params["tsn_skip_steps"])
+
+        return bf.networks.TimeSeriesNetwork(**kwargs)

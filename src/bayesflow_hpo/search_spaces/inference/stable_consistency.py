@@ -56,10 +56,13 @@ class StableConsistencyModelSpace(BaseSearchSpace):
 
         width = int(params["scm_subnet_width"])
         depth = int(params["scm_subnet_depth"])
-        return bf.networks.StableConsistencyModel(
-            sigma=float(params.get("scm_sigma", 1.0)),
-            subnet_kwargs={
+        kwargs: dict[str, Any] = {
+            "subnet_kwargs": {
                 "widths": tuple([width] * depth),
                 "dropout": float(params["scm_dropout"]),
             },
-        )
+        }
+        if "scm_sigma" in params:
+            kwargs["sigma"] = float(params["scm_sigma"])
+
+        return bf.networks.StableConsistencyModel(**kwargs)

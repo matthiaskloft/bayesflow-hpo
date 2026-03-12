@@ -39,10 +39,9 @@ class FlowMatchingSpace(BaseSearchSpace):
         Power-law exponent for the time distribution during training.
         Controls sampling bias: ``p(t) ∝ t^(1/(1+α))``. Default
         ``α=0`` corresponds to uniform sampling.
-    fm_time_resolution : int
-        Number of fixed ODE solver steps used at inference time (50--300,
-        step 50). Higher values improve quality at the cost of slower
-        inference. When omitted, BayesFlow uses adaptive stepping.
+    fm_time_embedding_dim : int
+        Dimensionality of the Fourier time embedding in the subnet
+        (8--64, step 4). BayesFlow defaults to 32 when omitted.
     """
 
     subnet_width: IntDimension = field(
@@ -72,9 +71,9 @@ class FlowMatchingSpace(BaseSearchSpace):
             "fm_time_alpha", low=0.0, high=2.0, enabled=False
         )
     )
-    time_resolution: IntDimension = field(
+    time_embedding_dim: IntDimension = field(
         default_factory=lambda: IntDimension(
-            "fm_time_resolution", low=50, high=300, step=50, enabled=False
+            "fm_time_embedding_dim", low=8, high=64, step=4, enabled=False
         )
     )
 
@@ -84,17 +83,25 @@ class FlowMatchingSpace(BaseSearchSpace):
         width = int(params["fm_subnet_width"])
         depth = int(params["fm_subnet_depth"])
 
-        kwargs: dict[str, Any] = {
-            "use_optimal_transport": bool(params.get("fm_use_ot", False)),
-            "time_power_law_alpha": float(params.get("fm_time_alpha", 0.0)),
-            "loss_fn": "mse",
-            "subnet_kwargs": {
-                "widths": tuple([width] * depth),
-                "activation": params.get("fm_activation", "mish"),
-                "dropout": float(params["fm_dropout"]),
-            },
+        subnet_kwargs: dict[str, Any] = {
+            "widths": tuple([width] * depth),
+            "dropout": float(params["fm_dropout"]),
         }
-        if "fm_time_resolution" in params:
-            kwargs["integrate_kwargs"] = {"steps": int(params["fm_time_resolution"])}
+        if "fm_activation" in params:
+            subnet_kwargs["activation"] = params["fm_activation"]
+        if "fm_time_embedding_dim" in params:
+            subnet_kwargs["time_embedding_dim"] = int(
+                params["fm_time_embedding_dim"]
+            )
+
+        kwargs: dict[str, Any] = {
+            "subnet_kwargs": subnet_kwargs,
+        }
+        if "fm_use_ot" in params:
+            kwargs["use_optimal_transport"] = bool(params["fm_use_ot"])
+        if "fm_time_alpha" in params:
+            kwargs["time_power_law_alpha"] = float(
+                params["fm_time_alpha"]
+            )
 
         return bf.networks.FlowMatching(**kwargs)

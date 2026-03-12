@@ -83,14 +83,23 @@ class CouplingFlowSpace(BaseSearchSpace):
 
         width = int(params["cf_subnet_width"])
         n_layers = int(params["cf_subnet_depth"])
-        return bf.networks.CouplingFlow(
-            depth=int(params["cf_depth"]),
-            transform=params.get("cf_transform", "affine"),
-            permutation=params.get("cf_permutation", "random"),
-            use_actnorm=bool(params.get("cf_actnorm", True)),
-            subnet_kwargs={
-                "widths": tuple([width] * n_layers),
-                "activation": params.get("cf_activation", "mish"),
-                "dropout": float(params["cf_dropout"]),
-            },
-        )
+
+        subnet_kwargs: dict[str, Any] = {
+            "widths": tuple([width] * n_layers),
+            "dropout": float(params["cf_dropout"]),
+        }
+        if "cf_activation" in params:
+            subnet_kwargs["activation"] = params["cf_activation"]
+
+        kwargs: dict[str, Any] = {
+            "depth": int(params["cf_depth"]),
+            "subnet_kwargs": subnet_kwargs,
+        }
+        if "cf_transform" in params:
+            kwargs["transform"] = params["cf_transform"]
+        if "cf_permutation" in params:
+            kwargs["permutation"] = params["cf_permutation"]
+        if "cf_actnorm" in params:
+            kwargs["use_actnorm"] = bool(params["cf_actnorm"])
+
+        return bf.networks.CouplingFlow(**kwargs)

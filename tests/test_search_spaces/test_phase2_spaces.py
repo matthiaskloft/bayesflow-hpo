@@ -101,6 +101,170 @@ def test_build_validates_required_keys(space, error_prefix):
 
 
 
+_BUILD_OMISSION_CASES = [
+    pytest.param(
+        CouplingFlowSpace(),
+        "bayesflow_hpo.search_spaces.inference.coupling_flow.bf.networks.CouplingFlow",
+        {
+            "cf_depth": 4,
+            "cf_subnet_width": 64,
+            "cf_subnet_depth": 2,
+            "cf_dropout": 0.1,
+        },
+        ["transform", "permutation", "use_actnorm"],
+        ["activation"],
+        id="CouplingFlow",
+    ),
+    pytest.param(
+        DiffusionModelSpace(),
+        "bayesflow_hpo.search_spaces.inference.diffusion.bf.networks.DiffusionModel",
+        {
+            "dm_subnet_width": 64,
+            "dm_subnet_depth": 2,
+            "dm_dropout": 0.1,
+            "dm_activation": "mish",
+        },
+        ["noise_schedule", "prediction_type"],
+        [],
+        id="DiffusionModel",
+    ),
+    pytest.param(
+        ConsistencyModelSpace(),
+        "bayesflow_hpo.search_spaces.inference.consistency.bf.networks.ConsistencyModel",
+        {
+            "cm_subnet_width": 64,
+            "cm_subnet_depth": 2,
+            "cm_dropout": 0.1,
+            "epochs": 10,
+            "batches_per_epoch": 10,
+        },
+        ["max_time", "sigma2", "s0", "s1"],
+        [],
+        id="ConsistencyModel",
+    ),
+    pytest.param(
+        StableConsistencyModelSpace(),
+        "bayesflow_hpo.search_spaces.inference.stable_consistency.bf.networks.StableConsistencyModel",
+        {
+            "scm_subnet_width": 64,
+            "scm_subnet_depth": 2,
+            "scm_dropout": 0.1,
+        },
+        ["sigma"],
+        [],
+        id="StableConsistencyModel",
+    ),
+    pytest.param(
+        DeepSetSpace(),
+        "bayesflow_hpo.search_spaces.summary.deep_set.bf.networks.DeepSet",
+        {
+            "ds_summary_dim": 16,
+            "ds_depth": 2,
+            "ds_width": 64,
+            "ds_dropout": 0.1,
+        },
+        [
+            "activation",
+            "spectral_normalization",
+            "inner_pooling",
+            "output_pooling",
+        ],
+        [],
+        id="DeepSet",
+    ),
+    pytest.param(
+        SetTransformerSpace(),
+        "bayesflow_hpo.search_spaces.summary.set_transformer.bf.networks.SetTransformer",
+        {
+            "st_summary_dim": 16,
+            "st_embed_dim": 64,
+            "st_num_heads": 4,
+            "st_num_layers": 2,
+            "st_dropout": 0.1,
+        },
+        ["num_inducing_points", "mlp_widths", "mlp_depths"],
+        [],
+        id="SetTransformer",
+    ),
+    pytest.param(
+        TimeSeriesNetworkSpace(),
+        "bayesflow_hpo.search_spaces.summary.time_series_network.bf.networks.TimeSeriesNetwork",
+        {
+            "tsn_summary_dim": 16,
+            "tsn_recurrent_dim": 64,
+            "tsn_filters": 32,
+            "tsn_dropout": 0.1,
+        },
+        ["recurrent_type", "bidirectional", "skip_steps"],
+        [],
+        id="TimeSeriesNetwork",
+    ),
+    pytest.param(
+        TimeSeriesTransformerSpace(),
+        "bayesflow_hpo.search_spaces.summary.time_series_transformer.bf.networks.TimeSeriesTransformer",
+        {
+            "tst_summary_dim": 16,
+            "tst_embed_dim": 64,
+            "tst_num_heads": 4,
+            "tst_num_layers": 2,
+            "tst_dropout": 0.1,
+        },
+        ["time_embedding", "mlp_widths"],
+        [],
+        id="TimeSeriesTransformer",
+    ),
+    pytest.param(
+        FusionTransformerSpace(),
+        "bayesflow_hpo.search_spaces.summary.fusion_transformer.bf.networks.FusionTransformer",
+        {
+            "ft_summary_dim": 16,
+            "ft_embed_dim": 64,
+            "ft_num_heads": 4,
+            "ft_num_layers": 2,
+            "ft_template_dim": 64,
+            "ft_dropout": 0.1,
+        },
+        ["template_type"],
+        [],
+        id="FusionTransformer",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    (
+        "space",
+        "monkeypatch_target",
+        "required_params",
+        "omitted_kwargs",
+        "omitted_subnet_kwargs",
+    ),
+    _BUILD_OMISSION_CASES,
+)
+def test_build_omits_optional_kwargs_when_absent(
+    monkeypatch,
+    space,
+    monkeypatch_target,
+    required_params,
+    omitted_kwargs,
+    omitted_subnet_kwargs,
+):
+    captured = {}
+
+    class FakeNetwork:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(monkeypatch_target, FakeNetwork)
+
+    space.build(required_params)
+    for key in omitted_kwargs:
+        assert key not in captured, f"{key!r} should be omitted"
+    subnet = captured.get("subnet_kwargs", {})
+    for key in omitted_subnet_kwargs:
+        assert key not in subnet, f"subnet_kwargs[{key!r}] should be omitted"
+
+
 def test_consistency_total_steps_from_training_keys(monkeypatch):
     captured = {}
 
