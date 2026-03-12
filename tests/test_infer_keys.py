@@ -129,7 +129,7 @@ class TestInferKeysFromAdapter:
 
 
 # ---------------------------------------------------------------------------
-# optimize() integration: keys inferred from adapter
+# optimize() integration: keys derived from adapter
 # ---------------------------------------------------------------------------
 
 
@@ -155,8 +155,8 @@ def _patched_optimize(adapter, **extra_kwargs):
         return mock_obj_cls.call_args[0][0]
 
 
-class TestOptimizeInfersKeys:
-    def test_infer_param_and_data_keys_from_adapter(self):
+class TestOptimizeDeriveKeys:
+    def test_derive_param_and_data_keys_from_adapter(self):
         adapter = _make_adapter(
             [
                 _FakeRename("theta", "inference_variables"),
@@ -167,7 +167,7 @@ class TestOptimizeInfersKeys:
         assert config.param_keys == ["theta"]
         assert config.data_keys == ["x"]
 
-    def test_infer_inference_conditions_from_adapter(self):
+    def test_derive_inference_conditions_from_adapter(self):
         adapter = _make_adapter(
             [
                 _FakeRename("theta", "inference_variables"),
@@ -178,22 +178,7 @@ class TestOptimizeInfersKeys:
         config = _patched_optimize(adapter)
         assert config.inference_conditions == ["N"]
 
-    def test_explicit_keys_override_adapter(self):
-        adapter = _make_adapter(
-            [
-                _FakeRename("theta", "inference_variables"),
-                _FakeRename("x", "summary_variables"),
-            ]
-        )
-        config = _patched_optimize(
-            adapter,
-            param_keys=["my_param"],
-            data_keys=["my_data"],
-        )
-        assert config.param_keys == ["my_param"]
-        assert config.data_keys == ["my_data"]
-
-    def test_adapter_inferred_keys_match_validation_data(self):
+    def test_adapter_keys_match_validation_data(self):
         adapter = _make_adapter(
             [
                 _FakeRename("theta", "inference_variables"),
@@ -211,7 +196,7 @@ class TestOptimizeInfersKeys:
         assert config.param_keys == ["theta"]
         assert config.data_keys == ["x"]
 
-    def test_adapter_inferred_keys_mismatch_validation_data_raises(self):
+    def test_adapter_keys_mismatch_validation_data_raises(self):
         adapter = _make_adapter(
             [
                 _FakeRename("theta", "inference_variables"),
@@ -225,7 +210,7 @@ class TestOptimizeInfersKeys:
             data_keys=["x"],
             seed=0,
         )
-        with pytest.raises(ValueError, match="param_keys mismatch"):
+        with pytest.raises(ValueError, match="param_keys"):
             _patched_optimize(adapter, validation_data=vd)
 
     def test_no_canonical_keys_no_validation_data_raises(self):
@@ -234,5 +219,19 @@ class TestOptimizeInfersKeys:
                 _FakeBroadcast(["theta"], to="b_group"),
             ]
         )
-        with pytest.raises(TypeError, match="param_keys is required"):
+        with pytest.raises(TypeError, match="param_keys"):
             _patched_optimize(adapter)
+
+    def test_fallback_to_validation_data_keys(self):
+        """When adapter lacks canonical keys, fall back to validation_data."""
+        adapter = _make_adapter([])
+        vd = ValidationDataset(
+            simulations=[{"theta": np.zeros((5, 1)), "x": np.zeros((5, 1))}],
+            condition_labels=[{}],
+            param_keys=["theta"],
+            data_keys=["x"],
+            seed=0,
+        )
+        config = _patched_optimize(adapter, validation_data=vd)
+        assert config.param_keys == ["theta"]
+        assert config.data_keys == ["x"]

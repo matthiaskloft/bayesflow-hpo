@@ -10,6 +10,35 @@ import pytest
 from bayesflow_hpo.api import optimize
 from bayesflow_hpo.validation.data import ValidationDataset
 
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+class _FakeRename:
+    """Mimics bayesflow Rename transform."""
+
+    def __init__(self, from_key: str, to_key: str):
+        self.from_key = from_key
+        self.to_key = to_key
+
+
+def _make_adapter(transforms):
+    """Return a mock adapter with a transforms list."""
+    adapter = MagicMock()
+    adapter.transforms = transforms
+    return adapter
+
+
+def _canonical_adapter():
+    """Adapter with standard theta/x canonical renames."""
+    return _make_adapter(
+        [
+            _FakeRename("theta", "inference_variables"),
+            _FakeRename("x", "summary_variables"),
+        ]
+    )
+
 
 @pytest.fixture()
 def validation_ds():
@@ -23,8 +52,11 @@ def validation_ds():
     )
 
 
-def _patched_optimize(validation_ds, **extra_kwargs):
+def _patched_optimize(validation_ds=None, adapter=None, **extra_kwargs):
     """Call optimize() with heavy internals mocked out."""
+    if adapter is None:
+        adapter = _canonical_adapter()
+
     with (
         patch("bayesflow_hpo.api.GenericObjective") as mock_obj_cls,
         patch("bayesflow_hpo.api.create_study"),
@@ -34,12 +66,15 @@ def _patched_optimize(validation_ds, **extra_kwargs):
         mock_instance.n_objectives = 2
         mock_obj_cls.return_value = mock_instance
 
+        kwargs = {"storage": None}
+        if validation_ds is not None:
+            kwargs["validation_data"] = validation_ds
+        kwargs.update(extra_kwargs)
+
         optimize(
             simulator=MagicMock(),
-            adapter=MagicMock(),
-            validation_data=validation_ds,
-            storage=None,
-            **extra_kwargs,
+            adapter=adapter,
+            **kwargs,
         )
 
         # ObjectiveConfig passed to GenericObjective
@@ -47,85 +82,86 @@ def _patched_optimize(validation_ds, **extra_kwargs):
 
 
 # ---------------------------------------------------------------------------
-# Inference: param_keys / data_keys inferred from ValidationDataset
+# Keys derived from adapter
 # ---------------------------------------------------------------------------
 
 
-def test_infer_param_keys_from_validation_data(validation_ds):
-    """param_keys should be inferred from validation_data when not provided."""
-    config = _patched_optimize(validation_ds)
-    assert config.param_keys == ["theta"]
-
-
-def test_infer_data_keys_from_validation_data(validation_ds):
-    """data_keys should be inferred from validation_data when not provided."""
-    config = _patched_optimize(validation_ds)
-    assert config.data_keys == ["x"]
-
-
-def test_matching_keys_accepted(validation_ds):
-    """Providing param_keys/data_keys that match validation_data should succeed."""
-    config = _patched_optimize(validation_ds, param_keys=["theta"], data_keys=["x"])
+def test_keys_derived_from_adapter():
+    """param_keys and data_keys are derived from adapter transforms."""
+    config = _patched_optimize()
     assert config.param_keys == ["theta"]
     assert config.data_keys == ["x"]
 
 
+def test_keys_derived_from_adapter_match_validation_data(validation_ds):
+    """Adapter-derived keys that match validation_data succeed."""
+    config = _patched_optimize(validation_ds)
+    assert config.param_keys == ["theta"]
+    assert config.data_keys == ["x"]
+
+
+def test_keys_fallback_to_validation_data(validation_ds):
+    """When adapter has no canonical keys, fall back to validation_data."""
+    adapter = _make_adapter([])  # no canonical transforms
+    config = _patched_optimize(validation_ds, adapter=adapter)
+    assert config.param_keys == ["theta"]
+    assert config.data_keys == ["x"]
+
+
 # ---------------------------------------------------------------------------
-# Mismatch: ValueError when provided keys diverge from the dataset
+# Mismatch: ValueError when adapter keys diverge from the dataset
 # ---------------------------------------------------------------------------
 
 
 def test_param_keys_mismatch_raises(validation_ds):
-    """ValueError raised when param_keys disagrees with validation_data."""
-    with pytest.raises(ValueError, match="param_keys mismatch"):
-        optimize(
-            simulator=MagicMock(),
-            adapter=MagicMock(),
-            param_keys=["wrong"],
-            data_keys=["x"],
-            validation_data=validation_ds,
-            storage=None,
-        )
+    """ValueError when adapter-derived param_keys disagree with validation_data."""
+    adapter = _make_adapter(
+        [
+            _FakeRename("wrong", "inference_variables"),
+            _FakeRename("x", "summary_variables"),
+        ]
+    )
+    with pytest.raises(ValueError, match="param_keys"):
+        _patched_optimize(validation_ds, adapter=adapter)
 
 
 def test_data_keys_mismatch_raises(validation_ds):
-    """ValueError raised when data_keys disagrees with validation_data."""
-    with pytest.raises(ValueError, match="data_keys mismatch"):
-        optimize(
-            simulator=MagicMock(),
-            adapter=MagicMock(),
-            param_keys=["theta"],
-            data_keys=["wrong"],
-            validation_data=validation_ds,
-            storage=None,
-        )
+    """ValueError when adapter-derived data_keys disagree with validation_data."""
+    adapter = _make_adapter(
+        [
+            _FakeRename("theta", "inference_variables"),
+            _FakeRename("wrong", "summary_variables"),
+        ]
+    )
+    with pytest.raises(ValueError, match="data_keys"):
+        _patched_optimize(validation_ds, adapter=adapter)
 
 
 # ---------------------------------------------------------------------------
-# Missing keys without validation_data: TypeError
+# Missing keys: TypeError when adapter has no canonical keys and no dataset
 # ---------------------------------------------------------------------------
 
 
 def test_missing_param_keys_raises_type_error():
-    """TypeError raised when param_keys is None and no validation_data given."""
-    with pytest.raises(TypeError, match="param_keys is required"):
-        optimize(
-            simulator=MagicMock(),
-            adapter=MagicMock(),
-            data_keys=["x"],
-            storage=None,
-        )
+    """TypeError when adapter lacks inference_variables and no validation_data."""
+    adapter = _make_adapter(
+        [
+            _FakeRename("x", "summary_variables"),
+        ]
+    )
+    with pytest.raises(TypeError, match="param_keys"):
+        _patched_optimize(adapter=adapter)
 
 
 def test_missing_data_keys_raises_type_error():
-    """TypeError raised when data_keys is None and no validation_data given."""
-    with pytest.raises(TypeError, match="data_keys is required"):
-        optimize(
-            simulator=MagicMock(),
-            adapter=MagicMock(),
-            param_keys=["theta"],
-            storage=None,
-        )
+    """TypeError when adapter lacks summary_variables and no validation_data."""
+    adapter = _make_adapter(
+        [
+            _FakeRename("theta", "inference_variables"),
+        ]
+    )
+    with pytest.raises(TypeError, match="data_keys"):
+        _patched_optimize(adapter=adapter)
 
 
 # ---------------------------------------------------------------------------
@@ -161,16 +197,13 @@ def test_optimize_forwards_early_stopping_params_to_objective_config(monkeypatch
     import bayesflow_hpo.api as api
 
     fake_simulator = MagicMock()
-    fake_adapter = MagicMock()
     fake_search_space = MagicMock()
     fake_search_space.inference_space = MagicMock()
     fake_search_space.summary_space = None
 
     api.optimize(
         simulator=fake_simulator,
-        adapter=fake_adapter,
-        param_keys=["theta"],
-        data_keys=["x"],
+        adapter=_canonical_adapter(),
         search_space=fake_search_space,
         n_trials=1,
         epochs=10,
@@ -213,16 +246,13 @@ def test_optimize_early_stopping_default_values(monkeypatch):
     import bayesflow_hpo.api as api
 
     fake_simulator = MagicMock()
-    fake_adapter = MagicMock()
     fake_search_space = MagicMock()
     fake_search_space.inference_space = MagicMock()
     fake_search_space.summary_space = None
 
     api.optimize(
         simulator=fake_simulator,
-        adapter=fake_adapter,
-        param_keys=["theta"],
-        data_keys=["x"],
+        adapter=_canonical_adapter(),
         search_space=fake_search_space,
         n_trials=1,
         epochs=10,
