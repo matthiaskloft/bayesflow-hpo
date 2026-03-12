@@ -10,10 +10,8 @@ import bayesflow as bf
 from bayesflow_hpo.search_spaces.base import (
     BaseSearchSpace,
     CategoricalDimension,
-    Dimension,
     FloatDimension,
     IntDimension,
-    validate_required_params,
 )
 
 
@@ -21,20 +19,20 @@ from bayesflow_hpo.search_spaces.base import (
 class FlowMatchingSpace(BaseSearchSpace):
     """Search space for `bf.networks.FlowMatching`.
 
-    Default ranges
-    --------------
+    Default dimensions
+    ------------------
     fm_subnet_width : int
         MLP width (32--256, step 32).
     fm_subnet_depth : int
         MLP depth (1--4).
     fm_dropout : float
         Dropout rate (0.0--0.2).
-    fm_activation : str
-        **Optional** (off by default). Falls back to BayesFlow's TimeMLP
-        default ``"mish"``.
 
     Optional dimensions (enabled via ``include_optional=True``)
     -----------------------------------------------------------
+    fm_activation : str
+        Subnet activation function. Falls back to BayesFlow's TimeMLP
+        default ``"mish"``.
     fm_use_ot : bool
         Whether to use optimal transport for improved training stability.
         Increases training time (~2.5x) but may speed up inference.
@@ -47,8 +45,6 @@ class FlowMatchingSpace(BaseSearchSpace):
         step 50). Higher values improve quality at the cost of slower
         inference. When omitted, BayesFlow uses adaptive stepping.
     """
-
-    include_optional: bool = False
 
     subnet_width: IntDimension = field(
         default_factory=lambda: IntDimension(
@@ -83,27 +79,8 @@ class FlowMatchingSpace(BaseSearchSpace):
         )
     )
 
-    @property
-    def dimensions(self) -> list[Dimension]:
-        return [
-            self.subnet_width,
-            self.subnet_depth,
-            self.dropout,
-            self.activation,
-            self.use_optimal_transport,
-            self.time_alpha,
-            self.time_resolution,
-        ]
-
-    def sample(self, trial: Any) -> dict[str, Any]:
-        return BaseSearchSpace.sample(self, trial)
-
     def build(self, params: dict[str, Any]) -> bf.networks.FlowMatching:
-        validate_required_params(
-            params,
-            ["fm_subnet_width", "fm_subnet_depth", "fm_dropout"],
-            "FlowMatchingSpace.build",
-        )
+        self._validate(params)
 
         width = int(params["fm_subnet_width"])
         depth = int(params["fm_subnet_depth"])

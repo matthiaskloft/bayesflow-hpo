@@ -10,18 +10,36 @@ import bayesflow as bf
 from bayesflow_hpo.search_spaces.base import (
     BaseSearchSpace,
     CategoricalDimension,
-    Dimension,
     FloatDimension,
     IntDimension,
-    validate_required_params,
 )
 
 
 @dataclass
 class TimeSeriesTransformerSpace(BaseSearchSpace):
-    """Search space for `bf.networks.TimeSeriesTransformer`."""
+    """Search space for `bf.networks.TimeSeriesTransformer`.
 
-    include_optional: bool = False
+    Default dimensions
+    ------------------
+    tst_summary_dim : int
+        Output summary dimensionality (8--64, step 8).
+    tst_embed_dim : int
+        Embedding width (32--256, step 32).
+    tst_num_heads : int
+        Number of attention heads (1, 2, 4, or 8).
+    tst_num_layers : int
+        Number of transformer layers (1--4).
+    tst_dropout : float
+        Dropout rate (0.0--0.3).
+
+    Optional dimensions (enabled via ``include_optional=True``)
+    -----------------------------------------------------------
+    tst_mlp_width : int
+        Feed-forward MLP width (64--512, step 64). Defaults to
+        ``2 * embed_dim``.
+    tst_time_embed : str
+        Time embedding type (``"time2vec"`` or ``"sinusoidal"``).
+    """
 
     summary_dim: IntDimension = field(
         default_factory=lambda: IntDimension("tst_summary_dim", low=8, high=64, step=8)
@@ -52,33 +70,8 @@ class TimeSeriesTransformerSpace(BaseSearchSpace):
         )
     )
 
-    @property
-    def dimensions(self) -> list[Dimension]:
-        return [
-            self.summary_dim,
-            self.embed_dim,
-            self.num_heads,
-            self.num_layers,
-            self.dropout,
-            self.mlp_width,
-            self.time_embed,
-        ]
-
-    def sample(self, trial: Any) -> dict[str, Any]:
-        return BaseSearchSpace.sample(self, trial)
-
     def build(self, params: dict[str, Any]) -> bf.networks.TimeSeriesTransformer:
-        validate_required_params(
-            params,
-            [
-                "tst_summary_dim",
-                "tst_embed_dim",
-                "tst_num_heads",
-                "tst_num_layers",
-                "tst_dropout",
-            ],
-            "TimeSeriesTransformerSpace.build",
-        )
+        self._validate(params)
 
         num_layers = int(params["tst_num_layers"])
         embed_dim = int(params["tst_embed_dim"])

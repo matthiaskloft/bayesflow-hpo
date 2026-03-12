@@ -10,18 +10,35 @@ import bayesflow as bf
 from bayesflow_hpo.search_spaces.base import (
     BaseSearchSpace,
     CategoricalDimension,
-    Dimension,
     FloatDimension,
     IntDimension,
-    validate_required_params,
 )
 
 
 @dataclass
 class TimeSeriesNetworkSpace(BaseSearchSpace):
-    """Search space for `bf.networks.TimeSeriesNetwork`."""
+    """Search space for `bf.networks.TimeSeriesNetwork`.
 
-    include_optional: bool = False
+    Default dimensions
+    ------------------
+    tsn_summary_dim : int
+        Output summary dimensionality (8--64, step 8).
+    tsn_recurrent_dim : int
+        Recurrent hidden size (32--256, step 32).
+    tsn_filters : int
+        Convolutional filter count (16--128, step 16).
+    tsn_dropout : float
+        Dropout rate (0.0--0.3).
+
+    Optional dimensions (enabled via ``include_optional=True``)
+    -----------------------------------------------------------
+    tsn_recurrent_type : str
+        Recurrent cell type (``"gru"`` or ``"lstm"``).
+    tsn_bidirectional : bool
+        Whether to use a bidirectional recurrent layer.
+    tsn_skip_steps : int
+        Skip-connection stride (1--8).
+    """
 
     summary_dim: IntDimension = field(
         default_factory=lambda: IntDimension("tsn_summary_dim", low=8, high=64, step=8)
@@ -54,27 +71,8 @@ class TimeSeriesNetworkSpace(BaseSearchSpace):
         )
     )
 
-    @property
-    def dimensions(self) -> list[Dimension]:
-        return [
-            self.summary_dim,
-            self.recurrent_dim,
-            self.filters,
-            self.dropout,
-            self.recurrent_type,
-            self.bidirectional,
-            self.skip_steps,
-        ]
-
-    def sample(self, trial: Any) -> dict[str, Any]:
-        return BaseSearchSpace.sample(self, trial)
-
     def build(self, params: dict[str, Any]) -> bf.networks.TimeSeriesNetwork:
-        validate_required_params(
-            params,
-            ["tsn_summary_dim", "tsn_recurrent_dim", "tsn_filters", "tsn_dropout"],
-            "TimeSeriesNetworkSpace.build",
-        )
+        self._validate(params)
 
         return bf.networks.TimeSeriesNetwork(
             summary_dim=int(params["tsn_summary_dim"]),

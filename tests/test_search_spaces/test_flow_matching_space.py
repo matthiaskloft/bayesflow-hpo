@@ -1,5 +1,6 @@
 """Tests for FlowMatching search space behavior."""
 
+import pytest
 from conftest import FakeTrial
 
 from bayesflow_hpo.search_spaces.inference.flow_matching import FlowMatchingSpace
@@ -29,8 +30,6 @@ def test_optional_sampling_includes_optional_dimensions():
 
 
 def test_build_validates_required_keys():
-    import pytest
-
     with pytest.raises(ValueError, match="FlowMatchingSpace.build"):
         FlowMatchingSpace().build({})
 

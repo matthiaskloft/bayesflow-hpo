@@ -10,18 +10,33 @@ import bayesflow as bf
 from bayesflow_hpo.search_spaces.base import (
     BaseSearchSpace,
     CategoricalDimension,
-    Dimension,
     FloatDimension,
     IntDimension,
-    validate_required_params,
 )
 
 
 @dataclass
 class DiffusionModelSpace(BaseSearchSpace):
-    """Search space for `bf.networks.DiffusionModel`."""
+    """Search space for `bf.networks.DiffusionModel`.
 
-    include_optional: bool = False
+    Default dimensions
+    ------------------
+    dm_subnet_width : int
+        MLP width (32--256, step 32).
+    dm_subnet_depth : int
+        MLP depth (1--4).
+    dm_dropout : float
+        Dropout rate (0.0--0.2).
+    dm_activation : str
+        Subnet activation function (``"mish"`` or ``"silu"``).
+
+    Optional dimensions (enabled via ``include_optional=True``)
+    -----------------------------------------------------------
+    dm_noise_schedule : str
+        Noise schedule type (``"edm"`` or ``"cosine"``).
+    dm_prediction_type : str
+        Prediction target (``"F"``, ``"velocity"``, ``"noise"``, ``"x"``).
+    """
 
     subnet_width: IntDimension = field(
         default_factory=lambda: IntDimension(
@@ -51,26 +66,8 @@ class DiffusionModelSpace(BaseSearchSpace):
         )
     )
 
-    @property
-    def dimensions(self) -> list[Dimension]:
-        return [
-            self.subnet_width,
-            self.subnet_depth,
-            self.dropout,
-            self.activation,
-            self.noise_schedule,
-            self.prediction_type,
-        ]
-
-    def sample(self, trial: Any) -> dict[str, Any]:
-        return BaseSearchSpace.sample(self, trial)
-
     def build(self, params: dict[str, Any]) -> bf.networks.DiffusionModel:
-        validate_required_params(
-            params,
-            ["dm_subnet_width", "dm_subnet_depth", "dm_dropout", "dm_activation"],
-            "DiffusionModelSpace.build",
-        )
+        self._validate(params)
 
         width = int(params["dm_subnet_width"])
         depth = int(params["dm_subnet_depth"])

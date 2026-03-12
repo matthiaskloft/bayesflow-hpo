@@ -10,10 +10,8 @@ import bayesflow as bf
 from bayesflow_hpo.search_spaces.base import (
     BaseSearchSpace,
     CategoricalDimension,
-    Dimension,
     FloatDimension,
     IntDimension,
-    validate_required_params,
 )
 
 
@@ -21,8 +19,8 @@ from bayesflow_hpo.search_spaces.base import (
 class CouplingFlowSpace(BaseSearchSpace):
     """Search space for `bf.networks.CouplingFlow`.
 
-    Default ranges
-    --------------
+    Default dimensions
+    ------------------
     cf_depth : int
         Number of coupling layers (2--8).
     cf_subnet_width : int
@@ -31,16 +29,19 @@ class CouplingFlowSpace(BaseSearchSpace):
         MLP depth per coupling subnet (1--3).
     cf_dropout : float
         Dropout rate (0.0--0.3).
-    cf_activation : str
-        **Optional** (off by default). Falls back to BayesFlow's MLP default
-        ``"mish"``.
 
     Optional dimensions (enabled via ``include_optional=True``)
     -----------------------------------------------------------
-    cf_transform, cf_permutation, cf_actnorm.
+    cf_activation : str
+        Subnet activation function. Falls back to BayesFlow's MLP default
+        ``"mish"``.
+    cf_transform : str
+        Coupling transform type (``"affine"`` or ``"spline"``).
+    cf_permutation : str
+        Permutation strategy (``"random"`` or ``"orthogonal"``).
+    cf_actnorm : bool
+        Whether to use activation normalization between coupling layers.
     """
-
-    include_optional: bool = False
 
     depth: IntDimension = field(
         default_factory=lambda: IntDimension("cf_depth", low=2, high=8)
@@ -78,33 +79,8 @@ class CouplingFlowSpace(BaseSearchSpace):
         )
     )
 
-    @property
-    def dimensions(self) -> list[Dimension]:
-        return [
-            self.depth,
-            self.subnet_width,
-            self.subnet_depth,
-            self.dropout,
-            self.activation,
-            self.transform,
-            self.permutation,
-            self.use_actnorm,
-        ]
-
-    def sample(self, trial: Any) -> dict[str, Any]:
-        return BaseSearchSpace.sample(self, trial)
-
     def build(self, params: dict[str, Any]) -> bf.networks.CouplingFlow:
-        validate_required_params(
-            params,
-            [
-                "cf_depth",
-                "cf_subnet_width",
-                "cf_subnet_depth",
-                "cf_dropout",
-            ],
-            "CouplingFlowSpace.build",
-        )
+        self._validate(params)
 
         width = int(params["cf_subnet_width"])
         n_layers = int(params["cf_subnet_depth"])

@@ -10,10 +10,8 @@ import bayesflow as bf
 from bayesflow_hpo.search_spaces.base import (
     BaseSearchSpace,
     CategoricalDimension,
-    Dimension,
     FloatDimension,
     IntDimension,
-    validate_required_params,
 )
 
 
@@ -21,8 +19,8 @@ from bayesflow_hpo.search_spaces.base import (
 class DeepSetSpace(BaseSearchSpace):
     """Search space for `bf.networks.DeepSet`.
 
-    Default ranges
-    --------------
+    Default dimensions
+    ------------------
     ds_summary_dim : int
         Output summary dimensionality (4--64).
     ds_depth : int
@@ -35,11 +33,13 @@ class DeepSetSpace(BaseSearchSpace):
     Optional dimensions (enabled via ``include_optional=True``)
     -----------------------------------------------------------
     ds_activation : str
-        Falls back to BayesFlow default ``"silu"``.
+        Activation function. Falls back to BayesFlow default ``"silu"``.
     ds_spectral_norm : bool
-        Falls back to ``False``.
-    ds_inner_pooling, ds_output_pooling : str
-        Falls back to ``"mean"``. Choices: ``["mean", "max"]``.
+        Whether to apply spectral normalization. Falls back to ``False``.
+    ds_inner_pooling : str
+        Inner pooling strategy (``"mean"`` or ``"max"``).
+    ds_output_pooling : str
+        Output pooling strategy (``"mean"`` or ``"max"``).
 
     Architecture notes
     ------------------
@@ -47,8 +47,6 @@ class DeepSetSpace(BaseSearchSpace):
     bottleneck, matching BayesFlow's default architecture.  All other MLPs
     use ``(width, width)``.
     """
-
-    include_optional: bool = False
 
     summary_dim: IntDimension = field(
         default_factory=lambda: IntDimension("ds_summary_dim", low=4, high=64)
@@ -84,28 +82,8 @@ class DeepSetSpace(BaseSearchSpace):
         )
     )
 
-    @property
-    def dimensions(self) -> list[Dimension]:
-        return [
-            self.summary_dim,
-            self.depth,
-            self.width,
-            self.dropout,
-            self.activation,
-            self.spectral_norm,
-            self.inner_pooling,
-            self.output_pooling,
-        ]
-
-    def sample(self, trial: Any) -> dict[str, Any]:
-        return BaseSearchSpace.sample(self, trial)
-
     def build(self, params: dict[str, Any]) -> bf.networks.DeepSet:
-        validate_required_params(
-            params,
-            ["ds_summary_dim", "ds_depth", "ds_width", "ds_dropout"],
-            "DeepSetSpace.build",
-        )
+        self._validate(params)
 
         width = int(params["ds_width"])
         summary_dim = int(params["ds_summary_dim"])
