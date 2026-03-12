@@ -33,6 +33,74 @@ from bayesflow_hpo.validation.data import (
 
 logger = logging.getLogger(__name__)
 
+# BayesFlow canonical key names used by Adapter.rename / .concatenate
+_CANONICAL_PARAM = "inference_variables"
+_CANONICAL_DATA = "summary_variables"
+_CANONICAL_COND = "inference_conditions"
+
+
+def infer_keys_from_adapter(
+    adapter: bf.adapters.Adapter,
+) -> dict[str, list[str] | None]:
+    """Infer ``param_keys``, ``data_keys``, and ``inference_conditions`` from *adapter*.
+
+    The function walks the adapter's transform list and looks for
+    :class:`~bayesflow.adapters.transforms.Rename` or
+    :class:`~bayesflow.adapters.transforms.Concatenate` transforms whose
+    target is one of BayesFlow's canonical keys (``inference_variables``,
+    ``summary_variables``, ``inference_conditions``).
+
+    Returns
+    -------
+    dict
+        ``{"param_keys": [...] | None, "data_keys": [...] | None,
+        "inference_conditions": [...] | None}``.  A value is ``None``
+        when no matching transform was found for that role.
+    """
+    result: dict[str, list[str] | None] = {
+        "param_keys": None,
+        "data_keys": None,
+        "inference_conditions": None,
+    }
+
+    canonical_to_result = {
+        _CANONICAL_PARAM: "param_keys",
+        _CANONICAL_DATA: "data_keys",
+        _CANONICAL_COND: "inference_conditions",
+    }
+
+    transforms = getattr(adapter, "transforms", None)
+    if transforms is None:
+        return result
+
+    for transform in transforms:
+        # Rename('original' -> 'inference_variables')
+        to_key = getattr(transform, "to_key", None)
+        if to_key in canonical_to_result:
+            from_key = getattr(transform, "from_key", None)
+            if from_key is not None:
+                result_key = canonical_to_result[to_key]
+                existing = result[result_key]
+                if existing is None:
+                    result[result_key] = [from_key]
+                else:
+                    existing.append(from_key)
+            continue
+
+        # Concatenate(['a', 'b'] -> 'inference_variables')
+        into = getattr(transform, "into", None)
+        if into in canonical_to_result:
+            keys = getattr(transform, "keys", None)
+            if keys is not None:
+                result_key = canonical_to_result[into]
+                existing = result[result_key]
+                if existing is None:
+                    result[result_key] = list(keys)
+                else:
+                    existing.extend(keys)
+
+    return result
+
 
 def optimize(
     simulator: bf.simulators.Simulator,
@@ -189,6 +257,26 @@ def optimize(
     optuna.Study
         The optimized Optuna study.
     """
+    # --- Infer keys from adapter when not explicitly provided ---
+    adapter_keys = infer_keys_from_adapter(adapter)
+
+    if param_keys is None and adapter_keys["param_keys"] is not None:
+        param_keys = adapter_keys["param_keys"]
+        logger.info("Inferred param_keys from adapter: %s", param_keys)
+
+    if data_keys is None and adapter_keys["data_keys"] is not None:
+        data_keys = adapter_keys["data_keys"]
+        logger.info("Inferred data_keys from adapter: %s", data_keys)
+
+    inferred_cond = adapter_keys["inference_conditions"]
+    if inference_conditions is None and inferred_cond is not None:
+        inference_conditions = inferred_cond
+        logger.info(
+            "Inferred inference_conditions from adapter: %s",
+            inference_conditions,
+        )
+
+    # --- Validate / fall back to validation_data ---
     if validation_data is not None:
         if param_keys is None:
             param_keys = validation_data.param_keys
@@ -207,11 +295,13 @@ def optimize(
     else:
         if param_keys is None:
             raise TypeError(
-                "param_keys is required when validation_data is not provided"
+                "param_keys is required when neither validation_data "
+                "is provided nor the adapter uses canonical key names"
             )
         if data_keys is None:
             raise TypeError(
-                "data_keys is required when validation_data is not provided"
+                "data_keys is required when neither validation_data "
+                "is provided nor the adapter uses canonical key names"
             )
 
     if search_space is None:
