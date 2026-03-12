@@ -150,15 +150,15 @@ def optimize(
     adapter
         BayesFlow adapter for data preprocessing.
     param_keys
-        Names of the parameters to infer.  Optional when
-        ``validation_data`` is provided; inferred from the dataset in
-        that case.  Must match ``validation_data.param_keys`` if both
-        are given.
+        Names of the parameters to infer.  Optional when the adapter
+        uses canonical key names (``inference_variables``) or when
+        ``validation_data`` is provided.  Must match
+        ``validation_data.param_keys`` if both are given.
     data_keys
-        Names of the data/observable variables.  Optional when
-        ``validation_data`` is provided; inferred from the dataset in
-        that case.  Must match ``validation_data.data_keys`` if both
-        are given.
+        Names of the data/observable variables.  Optional when the
+        adapter uses canonical key names (``summary_variables``) or
+        when ``validation_data`` is provided.  Must match
+        ``validation_data.data_keys`` if both are given.
     validation_data
         Pre-generated :class:`ValidationDataset`.  When ``None`` and
         ``validation_conditions`` is provided, data is generated
