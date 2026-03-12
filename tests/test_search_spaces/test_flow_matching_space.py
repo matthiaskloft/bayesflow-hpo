@@ -76,7 +76,7 @@ def test_build_omits_integrate_kwargs_without_time_resolution(monkeypatch):
         "fm_dropout": 0.1,
     }
     space.build(params)
-    assert captured["integrate_kwargs"] is None
+    assert "integrate_kwargs" not in captured
 
 
 def test_time_resolution_dimension_range():

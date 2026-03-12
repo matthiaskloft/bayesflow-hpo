@@ -85,18 +85,17 @@ class FlowMatchingSpace(BaseSearchSpace):
         width = int(params["fm_subnet_width"])
         depth = int(params["fm_subnet_depth"])
 
-        integrate_kwargs = None
-        if "fm_time_resolution" in params:
-            integrate_kwargs = {"steps": int(params["fm_time_resolution"])}
-
-        return bf.networks.FlowMatching(
-            use_optimal_transport=bool(params.get("fm_use_ot", False)),
-            time_power_law_alpha=float(params.get("fm_time_alpha", 0.0)),
-            loss_fn="mse",
-            integrate_kwargs=integrate_kwargs,
-            subnet_kwargs={
+        kwargs: dict[str, Any] = {
+            "use_optimal_transport": bool(params.get("fm_use_ot", False)),
+            "time_power_law_alpha": float(params.get("fm_time_alpha", 0.0)),
+            "loss_fn": "mse",
+            "subnet_kwargs": {
                 "widths": tuple([width] * depth),
                 "activation": params.get("fm_activation", "mish"),
                 "dropout": float(params["fm_dropout"]),
             },
-        )
+        }
+        if "fm_time_resolution" in params:
+            kwargs["integrate_kwargs"] = {"steps": int(params["fm_time_resolution"])}
+
+        return bf.networks.FlowMatching(**kwargs)

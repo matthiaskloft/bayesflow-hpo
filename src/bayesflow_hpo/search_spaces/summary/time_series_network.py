@@ -33,11 +33,11 @@ class TimeSeriesNetworkSpace(BaseSearchSpace):
     Optional dimensions (enabled via ``include_optional=True``)
     -----------------------------------------------------------
     tsn_recurrent_type : str
-        Recurrent cell type (``"gru"`` or ``"lstm"``).
+        Recurrent cell type (``"gru"`` or ``"lstm"``). Defaults to ``"gru"``.
     tsn_bidirectional : bool
-        Whether to use a bidirectional recurrent layer.
+        Whether to use a bidirectional recurrent layer. Defaults to ``True``.
     tsn_skip_steps : int
-        Skip-connection stride (1--8).
+        Skip-connection stride (1--8). Defaults to ``4``.
     """
 
     summary_dim: IntDimension = field(
