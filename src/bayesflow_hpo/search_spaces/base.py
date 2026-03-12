@@ -77,11 +77,22 @@ class BaseSearchSpace:
     @property
     def dimensions(self) -> list[Dimension]:
         cls = type(self)
-        if cls is not BaseSearchSpace and "__dataclass_fields__" not in cls.__dict__:
-            raise TypeError(
-                f"{cls.__name__} must be decorated with @dataclass "
-                f"to use BaseSearchSpace's automatic dimension discovery."
-            )
+        if cls is not BaseSearchSpace:
+            # Detect subclasses that forgot the @dataclass decorator.
+            # Their dimension annotations won't appear in fields().
+            own_annotations = cls.__dict__.get("__annotations__", {})
+            field_names = {f.name for f in fields(self)}
+            missing = [
+                name
+                for name in own_annotations
+                if name not in field_names
+                and isinstance(getattr(cls, name, None), _DIMENSION_TYPES)
+            ]
+            if missing:
+                raise TypeError(
+                    f"{cls.__name__} must be decorated with @dataclass "
+                    f"to use BaseSearchSpace's automatic dimension discovery."
+                )
         all_fields = fields(self)
         return [
             getattr(self, f.name)
