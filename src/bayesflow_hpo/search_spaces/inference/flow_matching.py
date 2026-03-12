@@ -39,10 +39,9 @@ class FlowMatchingSpace(BaseSearchSpace):
         Power-law exponent for the time distribution during training.
         Controls sampling bias: ``p(t) ∝ t^(1/(1+α))``. Default
         ``α=0`` corresponds to uniform sampling.
-    fm_time_resolution : int
-        Number of fixed ODE solver steps used at inference time (50--300,
-        step 50). Higher values improve quality at the cost of slower
-        inference. When omitted, BayesFlow uses adaptive stepping.
+    fm_time_embedding_dim : int
+        Dimensionality of the Fourier time embedding in the subnet
+        (8--64, step 4). BayesFlow defaults to 32 when omitted.
     """
 
     subnet_width: IntDimension = field(
@@ -72,9 +71,9 @@ class FlowMatchingSpace(BaseSearchSpace):
             "fm_time_alpha", low=0.0, high=2.0, enabled=False
         )
     )
-    time_resolution: IntDimension = field(
+    time_embedding_dim: IntDimension = field(
         default_factory=lambda: IntDimension(
-            "fm_time_resolution", low=50, high=300, step=50, enabled=False
+            "fm_time_embedding_dim", low=8, high=64, step=4, enabled=False
         )
     )
 
@@ -94,7 +93,8 @@ class FlowMatchingSpace(BaseSearchSpace):
                 "dropout": float(params["fm_dropout"]),
             },
         }
-        if "fm_time_resolution" in params:
-            kwargs["integrate_kwargs"] = {"steps": int(params["fm_time_resolution"])}
+        if "fm_time_embedding_dim" in params:
+            dim = int(params["fm_time_embedding_dim"])
+            kwargs["subnet_kwargs"]["time_embedding_dim"] = dim
 
         return bf.networks.FlowMatching(**kwargs)

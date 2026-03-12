@@ -17,7 +17,7 @@ def test_default_sampling_skips_optional_dimensions():
     assert "fm_activation" not in params
     assert "fm_use_ot" not in params
     assert "fm_time_alpha" not in params
-    assert "fm_time_resolution" not in params
+    assert "fm_time_embedding_dim" not in params
 
 
 def test_optional_sampling_includes_optional_dimensions():
@@ -25,7 +25,7 @@ def test_optional_sampling_includes_optional_dimensions():
 
     assert "fm_use_ot" in params
     assert "fm_time_alpha" in params
-    assert "fm_time_resolution" in params
+    assert "fm_time_embedding_dim" in params
     assert "fm_activation" in params
 
 
@@ -34,7 +34,7 @@ def test_build_validates_required_keys():
         FlowMatchingSpace().build({})
 
 
-def test_build_passes_time_resolution(monkeypatch):
+def test_build_passes_time_embedding_dim(monkeypatch):
     captured = {}
 
     class FakeFlowMatching:
@@ -51,13 +51,13 @@ def test_build_passes_time_resolution(monkeypatch):
         "fm_subnet_width": 64,
         "fm_subnet_depth": 2,
         "fm_dropout": 0.1,
-        "fm_time_resolution": 150,
+        "fm_time_embedding_dim": 24,
     }
     space.build(params)
-    assert captured["integrate_kwargs"] == {"steps": 150}
+    assert captured["subnet_kwargs"]["time_embedding_dim"] == 24
 
 
-def test_build_omits_integrate_kwargs_without_time_resolution(monkeypatch):
+def test_build_omits_time_embedding_dim_when_absent(monkeypatch):
     captured = {}
 
     class FakeFlowMatching:
@@ -76,14 +76,14 @@ def test_build_omits_integrate_kwargs_without_time_resolution(monkeypatch):
         "fm_dropout": 0.1,
     }
     space.build(params)
-    assert "integrate_kwargs" not in captured
+    assert "time_embedding_dim" not in captured["subnet_kwargs"]
 
 
-def test_time_resolution_dimension_range():
+def test_time_embedding_dim_dimension_range():
     space = FlowMatchingSpace()
-    dim = space.time_resolution
-    assert dim.name == "fm_time_resolution"
-    assert dim.low == 50
-    assert dim.high == 300
-    assert dim.step == 50
+    dim = space.time_embedding_dim
+    assert dim.name == "fm_time_embedding_dim"
+    assert dim.low == 8
+    assert dim.high == 64
+    assert dim.step == 4
     assert dim.enabled is False
