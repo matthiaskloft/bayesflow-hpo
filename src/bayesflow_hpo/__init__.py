@@ -7,7 +7,7 @@ try:
 except PackageNotFoundError:
     __version__ = "0.1.0"
 
-from bayesflow_hpo.api import optimize
+from bayesflow_hpo.api import infer_keys_from_adapter, optimize
 from bayesflow_hpo.builders import (
     WorkflowBuildConfig,
     build_inference_network,
@@ -100,6 +100,7 @@ __all__ = [
     # Version
     "__version__",
     # High-level API
+    "infer_keys_from_adapter",
     "optimize",
     # Builders
     "WorkflowBuildConfig",

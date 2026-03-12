@@ -43,12 +43,12 @@ class TimeSeriesTransformerSpace(BaseSearchSpace):
 
     mlp_width: IntDimension = field(
         default_factory=lambda: IntDimension(
-            "tst_mlp_width", low=64, high=512, step=64, default=False
+            "tst_mlp_width", low=64, high=512, step=64, enabled=False
         )
     )
     time_embed: CategoricalDimension = field(
         default_factory=lambda: CategoricalDimension(
-            "tst_time_embed", choices=["time2vec", "sinusoidal"], default=False
+            "tst_time_embed", choices=["time2vec", "sinusoidal"], enabled=False
         )
     )
 

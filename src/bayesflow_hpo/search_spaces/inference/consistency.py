@@ -47,19 +47,19 @@ class ConsistencyModelSpace(BaseSearchSpace):
 
     max_time: IntDimension = field(
         default_factory=lambda: IntDimension(
-            "cm_max_time", low=50, high=500, default=False
+            "cm_max_time", low=50, high=500, enabled=False
         )
     )
     sigma2: FloatDimension = field(
         default_factory=lambda: FloatDimension(
-            "cm_sigma2", low=0.1, high=2.0, default=False
+            "cm_sigma2", low=0.1, high=2.0, enabled=False
         )
     )
     s0: IntDimension = field(
-        default_factory=lambda: IntDimension("cm_s0", low=2, high=30, default=False)
+        default_factory=lambda: IntDimension("cm_s0", low=2, high=30, enabled=False)
     )
     s1: IntDimension = field(
-        default_factory=lambda: IntDimension("cm_s1", low=20, high=100, default=False)
+        default_factory=lambda: IntDimension("cm_s1", low=20, high=100, enabled=False)
     )
 
     @property

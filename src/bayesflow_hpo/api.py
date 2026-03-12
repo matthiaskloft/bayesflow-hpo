@@ -33,6 +33,74 @@ from bayesflow_hpo.validation.data import (
 
 logger = logging.getLogger(__name__)
 
+# BayesFlow canonical key names used by Adapter.rename / .concatenate
+_CANONICAL_PARAM = "inference_variables"
+_CANONICAL_DATA = "summary_variables"
+_CANONICAL_COND = "inference_conditions"
+
+
+def infer_keys_from_adapter(
+    adapter: bf.adapters.Adapter,
+) -> dict[str, list[str] | None]:
+    """Infer ``param_keys``, ``data_keys``, and ``inference_conditions`` from *adapter*.
+
+    The function walks the adapter's transform list and looks for
+    :class:`~bayesflow.adapters.transforms.Rename` or
+    :class:`~bayesflow.adapters.transforms.Concatenate` transforms whose
+    target is one of BayesFlow's canonical keys (``inference_variables``,
+    ``summary_variables``, ``inference_conditions``).
+
+    Returns
+    -------
+    dict
+        ``{"param_keys": [...] | None, "data_keys": [...] | None,
+        "inference_conditions": [...] | None}``.  A value is ``None``
+        when no matching transform was found for that role.
+    """
+    result: dict[str, list[str] | None] = {
+        "param_keys": None,
+        "data_keys": None,
+        "inference_conditions": None,
+    }
+
+    canonical_to_result = {
+        _CANONICAL_PARAM: "param_keys",
+        _CANONICAL_DATA: "data_keys",
+        _CANONICAL_COND: "inference_conditions",
+    }
+
+    transforms = getattr(adapter, "transforms", None)
+    if transforms is None:
+        return result
+
+    for transform in transforms:
+        # Rename('original' -> 'inference_variables')
+        to_key = getattr(transform, "to_key", None)
+        if to_key in canonical_to_result:
+            from_key = getattr(transform, "from_key", None)
+            if from_key is not None:
+                result_key = canonical_to_result[to_key]
+                existing = result[result_key]
+                if existing is None:
+                    result[result_key] = [from_key]
+                else:
+                    existing.append(from_key)
+            continue
+
+        # Concatenate(['a', 'b'] -> 'inference_variables')
+        into = getattr(transform, "into", None)
+        if into in canonical_to_result:
+            keys = getattr(transform, "keys", None)
+            if keys is not None:
+                result_key = canonical_to_result[into]
+                existing = result[result_key]
+                if existing is None:
+                    result[result_key] = list(keys)
+                else:
+                    existing.extend(keys)
+
+    return result
+
 
 def optimize(
     simulator: bf.simulators.Simulator,
@@ -74,23 +142,34 @@ def optimize(
     generates validation data (if ``validation_conditions`` are given),
     and runs ``n_trials`` fully-trained trials.
 
+    ``param_keys``, ``data_keys``, and ``inference_conditions`` are
+    derived automatically from the adapter's transforms by inspecting
+    :class:`~bayesflow.adapters.transforms.Rename` and
+    :class:`~bayesflow.adapters.transforms.Concatenate` targeting
+    BayesFlow's canonical keys (``inference_variables``,
+    ``summary_variables``, ``inference_conditions``).  Explicit
+    overrides take precedence over adapter inference.  When
+    ``validation_data`` is also provided its keys are cross-checked
+    and used as a final fallback.
+
     Parameters
     ----------
     simulator
         BayesFlow simulator used for online training and (optionally)
         for generating validation data.
     adapter
-        BayesFlow adapter for data preprocessing.
+        BayesFlow adapter for data preprocessing.  When using
+        ``Rename`` or ``Concatenate`` transforms that map to
+        canonical key names, ``param_keys``, ``data_keys``, and
+        ``inference_conditions`` are inferred automatically.
     param_keys
-        Names of the parameters to infer.  Optional when
-        ``validation_data`` is provided; inferred from the dataset in
-        that case.  Must match ``validation_data.param_keys`` if both
-        are given.
+        Names of the parameters to infer.  Inferred from the
+        adapter when ``None`` (default).  Explicit values take
+        precedence over adapter inference.
     data_keys
-        Names of the data/observable variables.  Optional when
-        ``validation_data`` is provided; inferred from the dataset in
-        that case.  Must match ``validation_data.data_keys`` if both
-        are given.
+        Names of the data/observable variables.  Inferred from the
+        adapter when ``None`` (default).  Explicit values take
+        precedence over adapter inference.
     validation_data
         Pre-generated :class:`ValidationDataset`.  When ``None`` and
         ``validation_conditions`` is provided, data is generated
@@ -108,6 +187,7 @@ def optimize(
         SetTransformer for summary, plus ``TrainingSpace``.
     inference_conditions
         Names of conditioning variables passed to the workflow.
+        Inferred from the adapter when ``None`` (default).
     n_trials
         Number of *trained* trials to collect (default 50).
         Budget-rejected trials (those exceeding ``max_param_count``
@@ -189,29 +269,60 @@ def optimize(
     optuna.Study
         The optimized Optuna study.
     """
+    # --- Derive keys from adapter, then apply explicit overrides ---
+    adapter_keys = infer_keys_from_adapter(adapter)
+
+    if param_keys is None:
+        param_keys = adapter_keys["param_keys"]
+    if data_keys is None:
+        data_keys = adapter_keys["data_keys"]
+    if inference_conditions is None:
+        inference_conditions = adapter_keys["inference_conditions"]
+
+    # --- Cross-check / fall back to validation_data ---
     if validation_data is not None:
         if param_keys is None:
             param_keys = validation_data.param_keys
         elif param_keys != validation_data.param_keys:
             raise ValueError(
-                f"param_keys mismatch: got {param_keys}, "
-                f"dataset has {validation_data.param_keys}"
+                f"param_keys {param_keys} do not match "
+                f"validation_data.param_keys "
+                f"{validation_data.param_keys}"
             )
         if data_keys is None:
             data_keys = validation_data.data_keys
         elif data_keys != validation_data.data_keys:
             raise ValueError(
-                f"data_keys mismatch: got {data_keys}, "
-                f"dataset has {validation_data.data_keys}"
+                f"data_keys {data_keys} do not match "
+                f"validation_data.data_keys "
+                f"{validation_data.data_keys}"
             )
+        # Validate inference_conditions against condition_labels.
+        if inference_conditions is not None:
+            cond_label_keys = set()
+            for label in validation_data.condition_labels:
+                cond_label_keys.update(label.keys())
+            if cond_label_keys:
+                missing = set(inference_conditions) - cond_label_keys
+                if missing:
+                    raise ValueError(
+                        f"inference_conditions {sorted(missing)} "
+                        f"not found in validation_data "
+                        f"condition_labels (available: "
+                        f"{sorted(cond_label_keys)})"
+                    )
     else:
         if param_keys is None:
             raise TypeError(
-                "param_keys is required when validation_data is not provided"
+                "Could not infer param_keys: the adapter has no "
+                "Rename/Concatenate targeting 'inference_variables' "
+                "and no validation_data was provided"
             )
         if data_keys is None:
             raise TypeError(
-                "data_keys is required when validation_data is not provided"
+                "Could not infer data_keys: the adapter has no "
+                "Rename/Concatenate targeting 'summary_variables' "
+                "and no validation_data was provided"
             )
 
     if search_space is None:

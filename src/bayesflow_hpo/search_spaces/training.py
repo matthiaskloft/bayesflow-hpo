@@ -26,7 +26,7 @@ class TrainingSpace(BaseSearchSpace):
     )
     batch_size: IntDimension = field(
         default_factory=lambda: IntDimension(
-            "batch_size", low=32, high=1024, step=32, default=False
+            "batch_size", low=32, high=1024, step=32, enabled=False
         )
     )
     @property

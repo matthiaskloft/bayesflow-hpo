@@ -42,12 +42,12 @@ class DiffusionModelSpace(BaseSearchSpace):
 
     noise_schedule: CategoricalDimension = field(
         default_factory=lambda: CategoricalDimension(
-            "dm_noise_schedule", choices=["edm", "cosine"], default=False
+            "dm_noise_schedule", choices=["edm", "cosine"], enabled=False
         )
     )
     prediction_type: CategoricalDimension = field(
         default_factory=lambda: CategoricalDimension(
-            "dm_prediction_type", choices=["F", "velocity", "noise", "x"], default=False
+            "dm_prediction_type", choices=["F", "velocity", "noise", "x"], enabled=False
         )
     )
 

@@ -36,7 +36,7 @@ class StableConsistencyModelSpace(BaseSearchSpace):
 
     sigma: FloatDimension = field(
         default_factory=lambda: FloatDimension(
-            "scm_sigma", low=0.1, high=2.0, default=False
+            "scm_sigma", low=0.1, high=2.0, enabled=False
         )
     )
 

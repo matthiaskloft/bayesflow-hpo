@@ -40,17 +40,17 @@ class TimeSeriesNetworkSpace(BaseSearchSpace):
 
     recurrent_type: CategoricalDimension = field(
         default_factory=lambda: CategoricalDimension(
-            "tsn_recurrent_type", choices=["gru", "lstm"], default=False
+            "tsn_recurrent_type", choices=["gru", "lstm"], enabled=False
         )
     )
     bidirectional: CategoricalDimension = field(
         default_factory=lambda: CategoricalDimension(
-            "tsn_bidirectional", choices=[True, False], default=False
+            "tsn_bidirectional", choices=[True, False], enabled=False
         )
     )
     skip_steps: IntDimension = field(
         default_factory=lambda: IntDimension(
-            "tsn_skip_steps", low=1, high=8, default=False
+            "tsn_skip_steps", low=1, high=8, enabled=False
         )
     )
 
