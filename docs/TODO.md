@@ -56,3 +56,27 @@ Stores `epoch_{N}_loss` on every epoch for every trial. With 200 epochs and 100+
 **File:** `optimization/study.py:79-82`
 
 The `pruner` docstring doesn't mention that the `MedianPruner` is only used for single-objective studies. Multi-objective studies use the custom median strategy in `PeriodicValidationCallback`.
+
+---
+
+## Extensibility
+
+### `optimize()` assumes `BasicWorkflow` — no hook for custom approximators
+
+**File:** `api.py`, `builders/workflow.py`
+
+`optimize()` internally calls `build_workflow()` which always constructs a `BasicWorkflow`. Packages with custom approximators (e.g. `bayesflow-irt`'s `EquivariantIRTApproximator` with batch×items merging) cannot use the high-level API and must write their own Optuna objective from scratch, duplicating budget rejection, early stopping, checkpoint management, and metric logging.
+
+**Concrete case:** `bayesflow-irt/examples/04_2PL_HPO.ipynb` reimplements a minimal objective because the IRT approximator requires a custom summary network (`EquivariantIRTSummary`) and per-item posterior shapes `(batch, n_samples, I, param_dim)`.
+
+**Proposed fix:** Accept optional `build_fn` and `validate_fn` callables in `optimize()` (or `GenericObjective`):
+- `build_fn(params, adapter, search_space) -> approximator` — replaces `build_workflow()`
+- `validate_fn(approximator, validation_data) -> dict[str, float]` — replaces `run_validation_pipeline()`
+
+Default to the current `BasicWorkflow` path when not provided. This lets domain packages supply only the custom pieces while reusing the full trial lifecycle (budget rejection, pruning callbacks, checkpoint pool, metric logging).
+
+### `run_validation_pipeline` assumes flat posterior shape
+
+**File:** `validation/pipeline.py`, `validation/inference.py`
+
+`make_bayesflow_infer_fn` returns draws of shape `(n_sims, n_samples)` or `(n_sims, n_samples, n_params)`. Models with structured posteriors (e.g. per-item `(n_sims, n_samples, I)`) cannot use the pipeline without first flattening items into the batch dimension. A pluggable `validate_fn` (see above) would resolve this.
