@@ -33,8 +33,7 @@ class CouplingFlowSpace(BaseSearchSpace):
     Optional dimensions (enabled via ``include_optional=True``)
     -----------------------------------------------------------
     cf_activation : str
-        Subnet activation function. Falls back to BayesFlow's MLP default
-        ``"mish"``.
+        Subnet activation function. Defaults to ``"mish"`` when omitted.
     cf_transform : str
         Coupling transform type (``"affine"`` or ``"spline"``).
     cf_permutation : str

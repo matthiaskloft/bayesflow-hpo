@@ -76,13 +76,13 @@ class BaseSearchSpace:
 
     @property
     def dimensions(self) -> list[Dimension]:
-        try:
-            all_fields = fields(self)
-        except TypeError:
+        cls = type(self)
+        if cls is not BaseSearchSpace and "__dataclass_fields__" not in cls.__dict__:
             raise TypeError(
-                f"{type(self).__name__} must be decorated with @dataclass "
+                f"{cls.__name__} must be decorated with @dataclass "
                 f"to use BaseSearchSpace's automatic dimension discovery."
-            ) from None
+            )
+        all_fields = fields(self)
         return [
             getattr(self, f.name)
             for f in all_fields

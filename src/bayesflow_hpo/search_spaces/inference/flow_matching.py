@@ -31,8 +31,7 @@ class FlowMatchingSpace(BaseSearchSpace):
     Optional dimensions (enabled via ``include_optional=True``)
     -----------------------------------------------------------
     fm_activation : str
-        Subnet activation function. Falls back to BayesFlow's TimeMLP
-        default ``"mish"``.
+        Subnet activation function. Defaults to ``"mish"`` when omitted.
     fm_use_ot : bool
         Whether to use optimal transport for improved training stability.
         Increases training time (~2.5x) but may speed up inference.
