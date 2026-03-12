@@ -35,10 +35,9 @@ class SetTransformerSpace(BaseSearchSpace):
     Optional dimensions (enabled via ``include_optional=True``)
     -----------------------------------------------------------
     st_mlp_width : int
-        Feed-forward MLP width (64--512, step 64). Defaults to
-        ``2 * embed_dim``.
+        Feed-forward MLP width (64--512, step 64).
     st_mlp_depth : int
-        Feed-forward MLP depth (1--4). Defaults to 2.
+        Feed-forward MLP depth (1--4).
     st_num_inducing : int
         Number of inducing points for ISAB (8--64, step 8).
     """
@@ -84,25 +83,22 @@ class SetTransformerSpace(BaseSearchSpace):
         embed_dim = int(params["st_embed_dim"])
         num_heads = int(params["st_num_heads"])
 
-        mlp_width = (
-            int(params["st_mlp_width"])
-            if "st_mlp_width" in params
-            else 2 * embed_dim
-        )
-        mlp_depth = (
-            int(params["st_mlp_depth"])
-            if "st_mlp_depth" in params
-            else 2
-        )
-
         kwargs: dict[str, Any] = {
             "summary_dim": int(params["st_summary_dim"]),
             "embed_dims": tuple([embed_dim] * num_layers),
             "num_heads": tuple([num_heads] * num_layers),
-            "mlp_depths": tuple([mlp_depth] * num_layers),
-            "mlp_widths": tuple([mlp_width] * num_layers),
             "dropout": float(params["st_dropout"]),
         }
+        if "st_mlp_width" in params:
+            mlp_width = int(params["st_mlp_width"])
+            kwargs["mlp_widths"] = tuple(
+                [mlp_width] * num_layers
+            )
+        if "st_mlp_depth" in params:
+            mlp_depth = int(params["st_mlp_depth"])
+            kwargs["mlp_depths"] = tuple(
+                [mlp_depth] * num_layers
+            )
         if "st_num_inducing" in params:
             kwargs["num_inducing_points"] = int(
                 params["st_num_inducing"]
