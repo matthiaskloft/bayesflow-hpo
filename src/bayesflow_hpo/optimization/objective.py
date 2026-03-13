@@ -400,8 +400,21 @@ class GenericObjective:
             )
         initial_lr = float(params.get("initial_lr", 1e-3))
         decay_steps = config.batches_per_epoch * config.epochs
-        optimizer = _make_cosine_decay_optimizer(initial_lr, decay_steps)
-        _compile_for_compat(approximator, optimizer)
+        try:
+            optimizer = _make_cosine_decay_optimizer(
+                initial_lr, decay_steps,
+            )
+            _compile_for_compat(approximator, optimizer)
+        except TypeError:
+            pass  # _compile_for_compat handles TypeError internally
+        except Exception as exc:
+            logger.warning(
+                "Trial #%d: compile failed: %s", trial.number, exc,
+            )
+            trial.set_user_attr("rejected_reason", "compile_failed")
+            trial.set_user_attr("compile_error", str(exc))
+            cleanup_trial()
+            return self._penalty()
 
         # --- Step 6: Exact param count check ---
         try:

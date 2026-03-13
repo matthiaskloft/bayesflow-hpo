@@ -133,7 +133,8 @@ def check_pipeline(
 
     1. Sample dummy hparams from ``search_space`` (using a mock trial).
     2. Call ``build_approximator_fn`` (or default) — verify result has
-       ``fit`` and ``compute_loss`` methods (duck-typed).
+       ``fit``, ``compute_loss``/``build_from_data``, and ``sample``
+       methods (duck-typed).
     3. Generate a tiny validation dataset (``sims_per_condition=5``).
     4. Compile and run one training step (1 epoch, 1 batch).
     5. Call ``validate_fn`` (or default) — verify it returns
@@ -211,12 +212,41 @@ def check_pipeline(
             f"'fit' method. The approximator must support .fit()."
         )
 
+    # When using default train/validate, the objective's param-probe
+    # calls compute_loss or build_from_data, and validation calls sample.
+    if build_approximator_fn is not None:
+        if (
+            not hasattr(approximator, "compute_loss")
+            and not hasattr(approximator, "build_from_data")
+        ):
+            raise PipelineError(
+                f"Builder returned {type(approximator).__name__} which "
+                f"has neither 'compute_loss' nor 'build_from_data'. "
+                f"The objective uses these for parameter counting."
+            )
+        if validate_fn is None and not hasattr(approximator, "sample"):
+            raise PipelineError(
+                f"Builder returned {type(approximator).__name__} which "
+                f"has no 'sample' method. The default validation "
+                f"pipeline requires .sample(). Provide a custom "
+                f"validate_fn if your approximator uses a different "
+                f"inference API."
+            )
+
     # --- Step 3: Generate tiny validation dataset ---
     from bayesflow_hpo.api import infer_keys_from_adapter
 
     adapter_keys = infer_keys_from_adapter(adapter)
-    param_keys = adapter_keys.get("param_keys") or ["theta"]
-    data_keys = adapter_keys.get("data_keys") or ["x"]
+    param_keys = adapter_keys.get("param_keys")
+    data_keys = adapter_keys.get("data_keys")
+
+    if param_keys is None or data_keys is None:
+        raise PipelineError(
+            "Could not infer param_keys and/or data_keys from the "
+            "adapter. Ensure the adapter has Rename/Concatenate "
+            "transforms targeting 'inference_variables' and "
+            "'summary_variables'."
+        )
 
     try:
         validation_data = generate_validation_dataset(
@@ -239,8 +269,15 @@ def check_pipeline(
         )
     initial_lr = float(hparams.get("initial_lr", 1e-3))
     decay_steps = batches_per_epoch * epochs
-    optimizer = _make_cosine_decay_optimizer(initial_lr, decay_steps)
-    _compile_for_compat(approximator, optimizer)
+    try:
+        optimizer = _make_cosine_decay_optimizer(initial_lr, decay_steps)
+        _compile_for_compat(approximator, optimizer)
+    except TypeError:
+        pass  # _compile_for_compat handles TypeError internally
+    except Exception as exc:
+        raise PipelineError(
+            f"Compile step failed: {exc}"
+        ) from exc
 
     # --- Step 5: Train one step ---
     actual_train_fn = train_fn if train_fn is not None else default_train_fn
