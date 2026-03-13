@@ -331,20 +331,6 @@ def _coverage_two_sided(
     return make_coverage_metric(side="two-sided")(draws, true_values)
 
 
-def _mean_cal_error(
-    draws: np.ndarray, true_values: np.ndarray,
-) -> dict[str, float]:
-    """SBC rank-based mean absolute coverage error across standard levels.
-
-    Averages ``|empirical − nominal|`` at [0.9, 0.95, 0.975, 0.99].
-    More comprehensive than ``calibration_error`` (BayesFlow ECE) because
-    it tests the full posterior via SBC ranks at multiple credible-interval
-    levels rather than relying on a single ECE summary.
-    """
-    result = make_coverage_metric(side="two-sided")(draws, true_values)
-    return {"mean_cal_error": result["mean_cal_error"]}
-
-
 def _coverage_left(
     draws: np.ndarray, true_values: np.ndarray,
 ) -> dict[str, float]:
@@ -378,7 +364,6 @@ register_metric("z_score", _bf_z_score)
 register_metric("log_gamma", _bf_log_gamma)
 
 # Native metrics
-register_metric("mean_cal_error", _mean_cal_error)
 register_metric("sbc", _sbc_metric)
 register_metric("coverage", _coverage_two_sided, aliases=["coverage_two_sided"])
 register_metric("coverage_left", _coverage_left)
