@@ -155,7 +155,7 @@ study = hpo.optimize(..., objective_metrics=["calibration_error", "nrmse"], obje
 
 | Category | Metrics |
 |---|---|
-| Calibration | `calibration_error`, `mean_cal_error`, `coverage`, `coverage_left`, `coverage_right` |
+| Calibration | `calibration_error`, `coverage`, `coverage_left`, `coverage_right` |
 | Accuracy | `rmse`, `nrmse`, `mae`, `bias`, `correlation` |
 | Diagnostics | `contraction`, `z_score`, `log_gamma` |
 | SBC | `sbc` (KS test, chi-squared, C2ST) |
