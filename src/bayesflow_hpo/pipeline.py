@@ -1,0 +1,223 @@
+"""Pre-flight validation for the HPO pipeline.
+
+``check_pipeline()`` runs a minimal dry-run of the full build → compile
+→ train → validate lifecycle to catch interface errors before GPU hours
+are wasted.
+"""
+
+from __future__ import annotations
+
+import logging
+import math
+from typing import Any
+
+from bayesflow_hpo.builders.workflow import (
+    _compile_for_compat,
+    _make_cosine_decay_optimizer,
+    build_continuous_approximator,
+)
+from bayesflow_hpo.optimization.objective import default_train_fn, default_validate_fn
+from bayesflow_hpo.search_spaces.composite import CompositeSearchSpace
+from bayesflow_hpo.types import BuildApproximatorFn, TrainFn, ValidateFn
+from bayesflow_hpo.validation.data import generate_validation_dataset
+
+logger = logging.getLogger(__name__)
+
+
+class PipelineError(Exception):
+    """Raised when ``check_pipeline()`` detects an interface mismatch."""
+
+
+class _MockTrial:
+    """Lightweight Optuna trial stub for sampling dummy hparams."""
+
+    def suggest_int(
+        self, name: str, low: int, high: int,
+        step: int | None = None, log: bool = False,
+    ) -> int:
+        return low
+
+    def suggest_float(
+        self, name: str, low: float, high: float,
+        log: bool = False,
+    ) -> float:
+        return low
+
+    def suggest_categorical(self, name: str, choices: list) -> Any:
+        return choices[0]
+
+
+class _TrackingDict(dict):
+    """Dict wrapper that records which keys are read via ``__getitem__``/``get``."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.accessed_keys: set[str] = set()
+
+    def __getitem__(self, key):
+        self.accessed_keys.add(key)
+        return super().__getitem__(key)
+
+    def get(self, key, default=None):
+        self.accessed_keys.add(key)
+        return super().get(key, default)
+
+
+def check_pipeline(
+    simulator: Any,
+    adapter: Any,
+    search_space: CompositeSearchSpace,
+    build_approximator_fn: BuildApproximatorFn | None = None,
+    train_fn: TrainFn | None = None,
+    validate_fn: ValidateFn | None = None,
+    objective_metrics: list[str] | None = None,
+    sims_per_condition: int = 5,
+    n_posterior_samples: int = 2,
+    validation_conditions: dict[str, list[Any]] | None = None,
+    epochs: int = 1,
+    batches_per_epoch: int = 1,
+) -> None:
+    """Dry-run the full pipeline to catch interface errors early.
+
+    Steps:
+
+    1. Sample dummy hparams from ``search_space`` (using a mock trial).
+    2. Call ``build_approximator_fn`` (or default) — verify result has
+       ``fit`` and ``compute_loss`` methods (duck-typed).
+    3. Generate a tiny validation dataset (``sims_per_condition=5``).
+    4. Compile and run one training step (1 epoch, 1 batch).
+    5. Call ``validate_fn`` (or default) — verify it returns
+       ``dict[str, float]`` whose keys include all ``objective_metrics``.
+    6. Warn about sampled hparam keys not consumed by the builder.
+
+    Parameters
+    ----------
+    simulator
+        BayesFlow simulator.
+    adapter
+        BayesFlow adapter.
+    search_space
+        Composite search space.
+    build_approximator_fn
+        Optional custom builder.
+    train_fn
+        Optional custom training function.
+    validate_fn
+        Optional custom validation function.
+    objective_metrics
+        Metric keys the objective expects. Default
+        ``["calibration_error", "nrmse"]``.
+    sims_per_condition
+        Simulations per condition for tiny validation dataset.
+    n_posterior_samples
+        Posterior draws for validation dry run.
+    validation_conditions
+        Optional condition grid for validation data generation.
+    epochs
+        Training epochs for dry run (default 1).
+    batches_per_epoch
+        Batches per epoch for dry run (default 1).
+
+    Raises
+    ------
+    PipelineError
+        With a clear message identifying which component failed and why.
+    """
+    if objective_metrics is None:
+        objective_metrics = ["calibration_error", "nrmse"]
+
+    # --- Step 1: Sample dummy hparams ---
+    try:
+        raw_hparams = search_space.sample(_MockTrial())
+    except Exception as exc:
+        raise PipelineError(
+            f"Failed to sample hparams from search_space: {exc}"
+        ) from exc
+
+    hparams = _TrackingDict(raw_hparams)
+    hparams["epochs"] = epochs
+    hparams["batches_per_epoch"] = batches_per_epoch
+
+    # --- Step 2: Build approximator ---
+    try:
+        if build_approximator_fn is not None:
+            approximator = build_approximator_fn(hparams)
+        else:
+            approximator = build_continuous_approximator(hparams, adapter, search_space)
+    except Exception as exc:
+        raise PipelineError(f"Build step failed: {exc}") from exc
+
+    if not hasattr(approximator, "fit"):
+        raise PipelineError(
+            f"Builder returned {type(approximator).__name__} which has no "
+            f"'fit' method. The approximator must support .fit()."
+        )
+
+    # --- Step 3: Generate tiny validation dataset ---
+    from bayesflow_hpo.api import infer_keys_from_adapter
+
+    adapter_keys = infer_keys_from_adapter(adapter)
+    param_keys = adapter_keys.get("param_keys") or ["theta"]
+    data_keys = adapter_keys.get("data_keys") or ["x"]
+
+    try:
+        validation_data = generate_validation_dataset(
+            simulator=simulator,
+            param_keys=param_keys,
+            data_keys=data_keys,
+            condition_grid=validation_conditions,
+            sims_per_condition=sims_per_condition,
+        )
+    except Exception as exc:
+        raise PipelineError(f"Validation dataset generation failed: {exc}") from exc
+
+    # --- Step 4: Compile ---
+    initial_lr = float(hparams.get("initial_lr", 1e-3))
+    decay_steps = batches_per_epoch * epochs
+    optimizer = _make_cosine_decay_optimizer(initial_lr, decay_steps)
+    _compile_for_compat(approximator, optimizer)
+
+    # --- Step 5: Train one step ---
+    actual_train_fn = train_fn if train_fn is not None else default_train_fn
+    try:
+        actual_train_fn(approximator, simulator, dict(hparams), [])
+    except Exception as exc:
+        raise PipelineError(f"Training step failed: {exc}") from exc
+
+    # --- Step 6: Validate ---
+    actual_validate_fn = validate_fn if validate_fn is not None else default_validate_fn
+    try:
+        result = actual_validate_fn(approximator, validation_data, n_posterior_samples)
+    except Exception as exc:
+        raise PipelineError(f"Validation step failed: {exc}") from exc
+
+    if not isinstance(result, dict):
+        raise PipelineError(
+            f"validate_fn must return dict[str, float], got {type(result).__name__}"
+        )
+
+    missing_keys = set(objective_metrics) - set(result.keys())
+    if missing_keys:
+        raise PipelineError(
+            f"validate_fn output is missing required metric keys: "
+            f"{sorted(missing_keys)}. Got keys: {sorted(result.keys())}"
+        )
+
+    for key in objective_metrics:
+        val = result[key]
+        if not isinstance(val, (int, float)) or not math.isfinite(val):
+            raise PipelineError(
+                f"validate_fn returned non-finite value for {key!r}: {val}"
+            )
+
+    # --- Step 7: Warn about unused hparams ---
+    if build_approximator_fn is not None:
+        sampled_keys = set(raw_hparams.keys())
+        unused = sampled_keys - hparams.accessed_keys
+        if unused:
+            logger.warning(
+                "Search space sampled keys that were never read by "
+                "build_approximator_fn: %s. Consider removing them "
+                "from the search space to avoid wasting Optuna budget.",
+                sorted(unused),
+            )

@@ -4,12 +4,10 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import numpy as np
 import pytest
 from conftest import FakeBroadcast, FakeConcatenate, FakeRename, make_adapter
 
 from bayesflow_hpo.api import infer_keys_from_adapter, optimize
-from bayesflow_hpo.validation.data import ValidationDataset
 
 # ---------------------------------------------------------------------------
 # infer_keys_from_adapter: unit tests
@@ -53,7 +51,9 @@ class TestInferKeysFromAdapter:
     def test_concatenate_into_inference_variables(self):
         adapter = make_adapter(
             [
-                FakeConcatenate(["alpha", "beta"], into="inference_variables"),
+                FakeConcatenate(
+                    ["alpha", "beta"], into="inference_variables"
+                ),
                 FakeRename("x", "summary_variables"),
             ]
         )
@@ -98,102 +98,57 @@ class TestInferKeysFromAdapter:
 # ---------------------------------------------------------------------------
 
 
+def _make_fake_search_space():
+    space = MagicMock()
+    space.inference_space = MagicMock()
+    space.summary_space = None
+    return space
+
+
 def _patched_optimize(adapter, **extra_kwargs):
     """Call optimize() with heavy internals mocked out."""
     with (
         patch("bayesflow_hpo.api.GenericObjective") as mock_obj_cls,
         patch("bayesflow_hpo.api.create_study"),
         patch("bayesflow_hpo.api.optimize_until"),
+        patch("bayesflow_hpo.api.check_pipeline"),
+        patch(
+            "bayesflow_hpo.api.generate_validation_dataset"
+        ) as mock_gen,
     ):
         mock_instance = MagicMock()
-        mock_instance.n_objectives = 2
+        mock_instance.n_objectives = 3
         mock_obj_cls.return_value = mock_instance
+        mock_gen.return_value = MagicMock()
+
+        kwargs = {
+            "storage": None,
+            "search_space": _make_fake_search_space(),
+        }
+        kwargs.update(extra_kwargs)
 
         optimize(
             simulator=MagicMock(),
             adapter=adapter,
-            storage=None,
-            **extra_kwargs,
+            **kwargs,
         )
 
-        # ObjectiveConfig passed to GenericObjective
         return mock_obj_cls.call_args[0][0]
 
 
 class TestOptimizeDeriveKeys:
-    def test_derive_param_and_data_keys_from_adapter(self):
+    def test_derive_keys_from_adapter(self):
+        """optimize() succeeds with canonical adapter."""
         adapter = make_adapter(
             [
                 FakeRename("theta", "inference_variables"),
                 FakeRename("x", "summary_variables"),
             ]
         )
-        config = _patched_optimize(adapter)
-        assert config.param_keys == ["theta"]
-        assert config.data_keys == ["x"]
+        _patched_optimize(adapter)
 
-    def test_derive_inference_conditions_from_adapter(self):
-        adapter = make_adapter(
-            [
-                FakeRename("theta", "inference_variables"),
-                FakeRename("x", "summary_variables"),
-                FakeRename("N", "inference_conditions"),
-            ]
-        )
-        config = _patched_optimize(adapter)
-        assert config.inference_conditions == ["N"]
-
-    def test_explicit_keys_override_adapter(self):
-        adapter = make_adapter(
-            [
-                FakeRename("theta", "inference_variables"),
-                FakeRename("x", "summary_variables"),
-            ]
-        )
-        config = _patched_optimize(
-            adapter,
-            param_keys=["my_param"],
-            data_keys=["my_data"],
-        )
-        assert config.param_keys == ["my_param"]
-        assert config.data_keys == ["my_data"]
-
-    def test_adapter_keys_match_validation_data(self):
-        adapter = make_adapter(
-            [
-                FakeRename("theta", "inference_variables"),
-                FakeRename("x", "summary_variables"),
-            ]
-        )
-        vd = ValidationDataset(
-            simulations=[{"theta": np.zeros((5, 1)), "x": np.zeros((5, 1))}],
-            condition_labels=[{}],
-            param_keys=["theta"],
-            data_keys=["x"],
-            seed=0,
-        )
-        config = _patched_optimize(adapter, validation_data=vd)
-        assert config.param_keys == ["theta"]
-        assert config.data_keys == ["x"]
-
-    def test_adapter_keys_mismatch_validation_data_raises(self):
-        adapter = make_adapter(
-            [
-                FakeRename("theta", "inference_variables"),
-                FakeRename("x", "summary_variables"),
-            ]
-        )
-        vd = ValidationDataset(
-            simulations=[{"alpha": np.zeros((5, 1)), "x": np.zeros((5, 1))}],
-            condition_labels=[{}],
-            param_keys=["alpha"],
-            data_keys=["x"],
-            seed=0,
-        )
-        with pytest.raises(ValueError, match="param_keys"):
-            _patched_optimize(adapter, validation_data=vd)
-
-    def test_no_canonical_keys_no_validation_data_raises(self):
+    def test_no_canonical_keys_raises(self):
+        """TypeError when adapter lacks canonical keys."""
         adapter = make_adapter(
             [
                 FakeBroadcast(["theta"], to="b_group"),
@@ -202,16 +157,12 @@ class TestOptimizeDeriveKeys:
         with pytest.raises(TypeError, match="param_keys"):
             _patched_optimize(adapter)
 
-    def test_fallback_to_validation_data_keys(self):
-        """When adapter lacks canonical keys, fall back to validation_data."""
-        adapter = make_adapter([])
-        vd = ValidationDataset(
-            simulations=[{"theta": np.zeros((5, 1)), "x": np.zeros((5, 1))}],
-            condition_labels=[{}],
-            param_keys=["theta"],
-            data_keys=["x"],
-            seed=0,
+    def test_missing_data_keys_raises(self):
+        """TypeError when adapter lacks summary_variables."""
+        adapter = make_adapter(
+            [
+                FakeRename("theta", "inference_variables"),
+            ]
         )
-        config = _patched_optimize(adapter, validation_data=vd)
-        assert config.param_keys == ["theta"]
-        assert config.data_keys == ["x"]
+        with pytest.raises(TypeError, match="data_keys"):
+            _patched_optimize(adapter)

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
 from typing import Any
 
 import bayesflow as bf
@@ -16,18 +15,10 @@ from bayesflow_hpo.optimization.study import (
     create_study,
     optimize_until,
 )
-from bayesflow_hpo.search_spaces.composite import (
-    CompositeSearchSpace,
-    NetworkSelectionSpace,
-    SummarySelectionSpace,
-)
-from bayesflow_hpo.search_spaces.inference.coupling_flow import CouplingFlowSpace
-from bayesflow_hpo.search_spaces.inference.flow_matching import FlowMatchingSpace
-from bayesflow_hpo.search_spaces.summary.deep_set import DeepSetSpace
-from bayesflow_hpo.search_spaces.summary.set_transformer import SetTransformerSpace
-from bayesflow_hpo.search_spaces.training import TrainingSpace
+from bayesflow_hpo.pipeline import check_pipeline
+from bayesflow_hpo.search_spaces.composite import CompositeSearchSpace
+from bayesflow_hpo.types import BuildApproximatorFn, TrainFn, ValidateFn
 from bayesflow_hpo.validation.data import (
-    ValidationDataset,
     generate_validation_dataset,
 )
 
@@ -105,31 +96,35 @@ def infer_keys_from_adapter(
 def optimize(
     simulator: bf.simulators.Simulator,
     adapter: bf.adapters.Adapter,
-    param_keys: list[str] | None = None,
-    data_keys: list[str] | None = None,
-    validation_data: ValidationDataset | None = None,
+    search_space: CompositeSearchSpace,
+    # Custom approximator hooks (all optional)
+    build_approximator_fn: BuildApproximatorFn | None = None,
+    train_fn: TrainFn | None = None,
+    validate_fn: ValidateFn | None = None,
+    # Validation data
     validation_conditions: dict[str, list[Any]] | None = None,
     sims_per_condition: int = 200,
-    search_space: CompositeSearchSpace | None = None,
-    inference_conditions: list[str] | None = None,
-    n_trials: int = 50,
-    max_total_trials: int | None = None,
+    n_posterior_samples: int = 500,
+    # Objectives
+    objective_metrics: list[str] | None = None,
+    objective_mode: str = "pareto",
+    cost_metric: str = "inference_time",
+    # Training
     epochs: int = 200,
     batches_per_epoch: int = 50,
     early_stopping_patience: int = 5,
     early_stopping_window: int = 7,
+    # Budget
     max_param_count: int = 1_000_000,
     max_memory_mb: float | None = None,
-    metrics: list[str] | None = None,
-    objective_metric: str = "calibration_error",
-    objective_metrics: list[str] | None = None,
-    objective_mode: str = "mean",
-    cost_metric: str = "inference_time",
-    train_fn: Callable[[bf.BasicWorkflow, dict, list], None] | None = None,
-    storage: str | None = DEFAULT_STORAGE,
+    # Study
+    n_trials: int = 50,
+    max_total_trials: int | None = None,
     study_name: str = "bayesflow_hpo",
-    directions: list[str] | None = None,
+    storage: str | None = DEFAULT_STORAGE,
     resume: bool = False,
+    # Optional
+    directions: list[str] | None = None,
     warm_start_from: Any | None = None,
     warm_start_top_k: int = 25,
     checkpoint_pool: CheckpointPool | None = None,
@@ -138,68 +133,63 @@ def optimize(
     """Run HPO with a high-level convenience API.
 
     This is the main entry point for hyperparameter optimization.  It
-    creates an Optuna study, builds a search space (if not provided),
-    generates validation data (if ``validation_conditions`` are given),
-    and runs ``n_trials`` fully-trained trials.
+    creates an Optuna study, generates validation data, runs
+    ``check_pipeline()`` to catch interface errors, and then runs
+    ``n_trials`` fully-trained trials.
 
-    ``param_keys``, ``data_keys``, and ``inference_conditions`` are
-    derived automatically from the adapter's transforms by inspecting
-    :class:`~bayesflow.adapters.transforms.Rename` and
-    :class:`~bayesflow.adapters.transforms.Concatenate` targeting
-    BayesFlow's canonical keys (``inference_variables``,
-    ``summary_variables``, ``inference_conditions``).  Explicit
-    overrides take precedence over adapter inference.  When
-    ``validation_data`` is also provided its keys are cross-checked
-    and used as a final fallback.
+    Three optional hooks let callers replace the build, train, and
+    validate steps while reusing the full trial lifecycle (budget
+    rejection, early stopping, checkpoint management, cost scoring):
+
+    - ``build_approximator_fn``: custom approximator construction
+    - ``train_fn``: custom training loop
+    - ``validate_fn``: custom validation metrics
 
     Parameters
     ----------
     simulator
-        BayesFlow simulator used for online training and (optionally)
-        for generating validation data.
+        BayesFlow simulator used for online training and for
+        generating validation data.
     adapter
-        BayesFlow adapter for data preprocessing.  When using
-        ``Rename`` or ``Concatenate`` transforms that map to
-        canonical key names, ``param_keys``, ``data_keys``, and
-        ``inference_conditions`` are inferred automatically.
-    param_keys
-        Names of the parameters to infer.  Inferred from the
-        adapter when ``None`` (default).  Explicit values take
-        precedence over adapter inference.
-    data_keys
-        Names of the data/observable variables.  Inferred from the
-        adapter when ``None`` (default).  Explicit values take
-        precedence over adapter inference.
-    validation_data
-        Pre-generated :class:`ValidationDataset`.  When ``None`` and
-        ``validation_conditions`` is provided, data is generated
-        automatically.
+        BayesFlow adapter for data preprocessing.
+    search_space
+        Search space defining the tunable dimensions.
+    build_approximator_fn
+        Optional custom build function ``(hparams) -> Approximator``.
+        Must return an **uncompiled** approximator.  When ``None``
+        (default), uses ``build_continuous_approximator()``.
+    train_fn
+        Optional custom training function
+        ``(approximator, simulator, hparams, callbacks) -> None``.
+        When ``None`` (default), uses ``default_train_fn()``.
+    validate_fn
+        Optional custom validation function
+        ``(approximator, validation_data, n_posterior_samples) ->
+        dict[str, float]``.  When ``None`` (default), uses
+        ``default_validate_fn()``.
     validation_conditions
         Condition grid specification
         (e.g. ``{"N": [50, 100, 200]}``).  Used to build a
         ``ValidationDataset`` via :func:`generate_validation_dataset`.
+        When ``None`` and no conditions are inferred from the adapter,
+        a single unconditional batch is generated.
     sims_per_condition
         Simulations per condition grid point (default 200).
-    search_space
-        Search space defining the tunable dimensions.  Default is
-        ``NetworkSelectionSpace`` over CouplingFlow + FlowMatching
-        for inference, ``SummarySelectionSpace`` over DeepSet +
-        SetTransformer for summary, plus ``TrainingSpace``.
-    inference_conditions
-        Names of conditioning variables passed to the workflow.
-        Inferred from the adapter when ``None`` (default).
-    n_trials
-        Number of *trained* trials to collect (default 50).
-        Budget-rejected trials (those exceeding ``max_param_count``
-        or ``max_memory_mb``) are not counted toward this number.
-    max_total_trials
-        Hard cap on total trials including budget-rejected ones.
-        Defaults to ``3 * n_trials``.
+    n_posterior_samples
+        Posterior draws for validation (default 500).
+    objective_metrics
+        List of metric keys to optimize simultaneously.  Default
+        ``["calibration_error", "nrmse"]``.
+    objective_mode
+        ``"pareto"`` (default) — each metric is its own objective;
+        study has ``len(objective_metrics) + 1`` directions.
+        ``"mean"`` — arithmetic mean of the listed metrics forms one
+        scalar; study has 2 directions (mean + cost).
+    cost_metric
+        Which cost objective to use as the last Optuna direction.
+        ``"inference_time"`` (default) or ``"param_count"``.
     epochs
-        Maximum training epochs per trial (default 200).  A cosine-
-        annealed learning rate schedule decays from ``initial_lr`` to
-        near-zero over this many epochs.  Early stopping typically
-        halts training before reaching the limit.
+        Maximum training epochs per trial (default 200).
     batches_per_epoch
         Number of online simulation batches per epoch (default 50).
     early_stopping_patience
@@ -211,47 +201,22 @@ def optimize(
         rejected before training (default 1 000 000).
     max_memory_mb
         Optional peak-memory budget in MB.  Disabled by default.
-    metrics
-        List of metric names for post-training validation (resolved
-        via the metric registry).  Defaults to ``DEFAULT_METRICS``
-        (calibration_error, nrmse, correlation, coverage, rmse,
-        contraction).
-    objective_metric
-        Key in the validation summary used as the first HPO objective
-        (default ``"calibration_error"``).  Ignored when
-        ``objective_metrics`` is set.
-    objective_metrics
-        List of metric keys to optimize simultaneously.  When set,
-        overrides ``objective_metric``.  The number of directions is
-        computed automatically based on ``objective_mode``.
-        Example: ``["calibration_error", "nrmse"]``.
-    objective_mode
-        ``"mean"`` (default) — arithmetic mean of the listed metrics
-        forms one scalar; study has 2 directions (mean + cost).
-        ``"pareto"`` — each metric is its own objective; study has
-        ``len(objective_metrics) + 1`` directions.
-    cost_metric
-        Which cost objective to use as the last Optuna direction.
-        ``"inference_time"`` (default) — inference-to-simulation time
-        ratio.  ``"param_count"`` — normalized parameter count.
-    train_fn
-        Optional custom training function
-        ``(workflow, params, callbacks) -> None``.  By default uses
-        ``workflow.fit_online(...)``.
-    storage
-        Optuna storage URL (default ``"sqlite:///bayesflow_hpo.db"``
-        for automatic persistence).  Pass ``None`` for in-memory.
+    n_trials
+        Number of *trained* trials to collect (default 50).
+    max_total_trials
+        Hard cap on total trials including budget-rejected ones.
+        Defaults to ``3 * n_trials``.
     study_name
         Optuna study name (default ``"bayesflow_hpo"``).
+    storage
+        Optuna storage URL (default ``"sqlite:///bayesflow_hpo.db"``).
+        Pass ``None`` for in-memory.
+    resume
+        If ``True``, continue a previously persisted study.  If
+        ``False`` (default), any existing study is deleted first.
     directions
         Optimization directions.  Default ``None`` (auto-derived as
-        ``["minimize"] * n_objectives``).  Pass explicitly only to
-        override auto-derivation.
-    resume
-        If ``True``, continue a previously persisted study with the
-        same ``study_name`` and ``storage``.  If ``False`` (default),
-        any existing study with that name is deleted first so the
-        optimization starts from scratch.
+        ``["minimize"] * n_objectives``).
     warm_start_from
         Optional source ``optuna.Study`` to seed initial trials from.
     warm_start_top_k
@@ -259,8 +224,7 @@ def optimize(
         (default 25).
     checkpoint_pool
         Optional :class:`CheckpointPool` for persisting the best
-        trial weights.  Default creates a pool of size 5 under
-        ``checkpoints/``.
+        trial weights.
     show_progress_bar
         Whether to show Optuna's progress bar (default ``True``).
 
@@ -269,114 +233,71 @@ def optimize(
     optuna.Study
         The optimized Optuna study.
     """
-    # --- Derive keys from adapter, then apply explicit overrides ---
+    if objective_metrics is None:
+        objective_metrics = ["calibration_error", "nrmse"]
+
+    # --- Derive keys from adapter ---
     adapter_keys = infer_keys_from_adapter(adapter)
+    param_keys = adapter_keys["param_keys"]
+    data_keys = adapter_keys["data_keys"]
 
     if param_keys is None:
-        param_keys = adapter_keys["param_keys"]
+        raise TypeError(
+            "Could not infer param_keys: the adapter has no "
+            "Rename/Concatenate targeting 'inference_variables'."
+        )
     if data_keys is None:
-        data_keys = adapter_keys["data_keys"]
-    if inference_conditions is None:
-        inference_conditions = adapter_keys["inference_conditions"]
-
-    # --- Cross-check / fall back to validation_data ---
-    if validation_data is not None:
-        if param_keys is None:
-            param_keys = validation_data.param_keys
-        elif param_keys != validation_data.param_keys:
-            raise ValueError(
-                f"param_keys {param_keys} do not match "
-                f"validation_data.param_keys "
-                f"{validation_data.param_keys}"
-            )
-        if data_keys is None:
-            data_keys = validation_data.data_keys
-        elif data_keys != validation_data.data_keys:
-            raise ValueError(
-                f"data_keys {data_keys} do not match "
-                f"validation_data.data_keys "
-                f"{validation_data.data_keys}"
-            )
-        # Validate inference_conditions against condition_labels.
-        if inference_conditions is not None:
-            cond_label_keys = set()
-            for label in validation_data.condition_labels:
-                cond_label_keys.update(label.keys())
-            if cond_label_keys:
-                missing = set(inference_conditions) - cond_label_keys
-                if missing:
-                    raise ValueError(
-                        f"inference_conditions {sorted(missing)} "
-                        f"not found in validation_data "
-                        f"condition_labels (available: "
-                        f"{sorted(cond_label_keys)})"
-                    )
-    else:
-        if param_keys is None:
-            raise TypeError(
-                "Could not infer param_keys: the adapter has no "
-                "Rename/Concatenate targeting 'inference_variables' "
-                "and no validation_data was provided"
-            )
-        if data_keys is None:
-            raise TypeError(
-                "Could not infer data_keys: the adapter has no "
-                "Rename/Concatenate targeting 'summary_variables' "
-                "and no validation_data was provided"
-            )
-
-    if search_space is None:
-        search_space = CompositeSearchSpace(
-            inference_space=NetworkSelectionSpace(
-                candidates={
-                    "coupling_flow": CouplingFlowSpace(),
-                    "flow_matching": FlowMatchingSpace(),
-                }
-            ),
-            summary_space=SummarySelectionSpace(
-                candidates={
-                    "deep_set": DeepSetSpace(),
-                    "set_transformer": SetTransformerSpace(),
-                }
-            ),
-            training_space=TrainingSpace(),
+        raise TypeError(
+            "Could not infer data_keys: the adapter has no "
+            "Rename/Concatenate targeting 'summary_variables'."
         )
 
-    if validation_data is None and validation_conditions is not None:
-        validation_data = generate_validation_dataset(
-            simulator=simulator,
-            param_keys=param_keys,
-            data_keys=data_keys,
-            condition_grid=validation_conditions,
-            sims_per_condition=sims_per_condition,
-        )
+    # --- Always build validation data internally ---
+    validation_data = generate_validation_dataset(
+        simulator=simulator,
+        param_keys=param_keys,
+        data_keys=data_keys,
+        condition_grid=validation_conditions,
+        sims_per_condition=sims_per_condition,
+    )
 
+    # --- Pre-flight validation ---
+    check_pipeline(
+        simulator=simulator,
+        adapter=adapter,
+        search_space=search_space,
+        build_approximator_fn=build_approximator_fn,
+        train_fn=train_fn,
+        validate_fn=validate_fn,
+        objective_metrics=objective_metrics,
+        validation_conditions=validation_conditions,
+    )
+
+    # --- Build objective ---
     objective = GenericObjective(
         ObjectiveConfig(
             simulator=simulator,
             adapter=adapter,
             search_space=search_space,
-            inference_conditions=inference_conditions,
             validation_data=validation_data,
-            param_keys=param_keys,
-            data_keys=data_keys,
             epochs=epochs,
             batches_per_epoch=batches_per_epoch,
             early_stopping_patience=early_stopping_patience,
             early_stopping_window=early_stopping_window,
             max_param_count=max_param_count,
             max_memory_mb=max_memory_mb,
-            metrics=metrics,
-            objective_metric=objective_metric,
+            n_posterior_samples=n_posterior_samples,
             objective_metrics=objective_metrics,
             objective_mode=objective_mode,
             cost_metric=cost_metric,
+            build_approximator_fn=build_approximator_fn,
             train_fn=train_fn,
+            validate_fn=validate_fn,
             checkpoint_pool=checkpoint_pool,
         )
     )
 
-    # Derive directions and metric_names from the objective shape.
+    # --- Derive directions ---
     n_obj = objective.n_objectives
     if directions is None:
         directions = ["minimize"] * n_obj
@@ -390,25 +311,21 @@ def optimize(
             f"provide exactly {n_obj} directions."
         )
 
-    cost_label = cost_metric  # "inference_time" or "param_count"
-    if objective_metrics and objective_mode == "pareto":
+    cost_label = cost_metric
+    if objective_mode == "pareto":
         metric_names = list(objective_metrics) + [cost_label]
-    elif objective_metrics:
-        metric_names = ["mean(" + "+".join(objective_metrics) + ")", cost_label]
     else:
-        metric_names = [objective_metric, cost_label]
+        metric_names = ["mean(" + "+".join(objective_metrics) + ")", cost_label]
 
     if not resume and storage is not None:
         try:
             optuna.delete_study(study_name=study_name, storage=storage)
         except KeyError:
-            pass  # no existing study to delete
+            pass
         except Exception:
             logger.warning(
                 "Could not delete existing study %r from storage %s",
-                study_name,
-                storage,
-                exc_info=True,
+                study_name, storage, exc_info=True,
             )
 
     study = create_study(

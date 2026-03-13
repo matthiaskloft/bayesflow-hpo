@@ -4,27 +4,21 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import numpy as np
 import pytest
 from conftest import FakeRename, canonical_adapter, make_adapter
 
 from bayesflow_hpo.api import optimize
-from bayesflow_hpo.validation.data import ValidationDataset
 
 
-@pytest.fixture()
-def validation_ds():
-    """Minimal pre-built ValidationDataset used across tests."""
-    return ValidationDataset(
-        simulations=[{"theta": np.zeros((5, 1)), "x": np.zeros((5, 1))}],
-        condition_labels=[{}],
-        param_keys=["theta"],
-        data_keys=["x"],
-        seed=0,
-    )
+def _make_fake_search_space():
+    """Return a mock search space for tests."""
+    space = MagicMock()
+    space.inference_space = MagicMock()
+    space.summary_space = None
+    return space
 
 
-def _patched_optimize(validation_ds=None, adapter=None, **extra_kwargs):
+def _patched_optimize(adapter=None, **extra_kwargs):
     """Call optimize() with heavy internals mocked out."""
     if adapter is None:
         adapter = canonical_adapter()
@@ -33,14 +27,17 @@ def _patched_optimize(validation_ds=None, adapter=None, **extra_kwargs):
         patch("bayesflow_hpo.api.GenericObjective") as mock_obj_cls,
         patch("bayesflow_hpo.api.create_study"),
         patch("bayesflow_hpo.api.optimize_until"),
+        patch("bayesflow_hpo.api.check_pipeline"),
+        patch("bayesflow_hpo.api.generate_validation_dataset") as mock_gen,
     ):
         mock_instance = MagicMock()
-        mock_instance.n_objectives = 2
+        mock_instance.n_objectives = 3  # pareto default: 2 metrics + cost
         mock_obj_cls.return_value = mock_instance
 
-        kwargs = {"storage": None}
-        if validation_ds is not None:
-            kwargs["validation_data"] = validation_ds
+        # Return a mock validation dataset
+        mock_gen.return_value = MagicMock()
+
+        kwargs = {"storage": None, "search_space": _make_fake_search_space()}
         kwargs.update(extra_kwargs)
 
         optimize(
@@ -60,72 +57,13 @@ def _patched_optimize(validation_ds=None, adapter=None, **extra_kwargs):
 
 def test_keys_derived_from_adapter():
     """param_keys and data_keys are derived from adapter transforms."""
-    config = _patched_optimize()
-    assert config.param_keys == ["theta"]
-    assert config.data_keys == ["x"]
-
-
-def test_keys_derived_from_adapter_match_validation_data(validation_ds):
-    """Adapter-derived keys that match validation_data succeed."""
-    config = _patched_optimize(validation_ds)
-    assert config.param_keys == ["theta"]
-    assert config.data_keys == ["x"]
-
-
-def test_keys_fallback_to_validation_data(validation_ds):
-    """When adapter has no canonical keys, fall back to validation_data."""
-    adapter = make_adapter([])  # no canonical transforms
-    config = _patched_optimize(validation_ds, adapter=adapter)
-    assert config.param_keys == ["theta"]
-    assert config.data_keys == ["x"]
-
-
-def test_explicit_keys_override_adapter():
-    """Explicit param_keys/data_keys take precedence over adapter inference."""
-    config = _patched_optimize(
-        param_keys=["my_param"],
-        data_keys=["my_data"],
-    )
-    assert config.param_keys == ["my_param"]
-    assert config.data_keys == ["my_data"]
-
-
-# ---------------------------------------------------------------------------
-# Mismatch: ValueError when keys diverge from the dataset
-# ---------------------------------------------------------------------------
-
-
-def test_param_keys_mismatch_raises(validation_ds):
-    """ValueError when param_keys disagree with validation_data."""
-    adapter = make_adapter(
-        [
-            FakeRename("wrong", "inference_variables"),
-            FakeRename("x", "summary_variables"),
-        ]
-    )
-    with pytest.raises(ValueError, match="param_keys"):
-        _patched_optimize(validation_ds, adapter=adapter)
-
-
-def test_data_keys_mismatch_raises(validation_ds):
-    """ValueError when data_keys disagree with validation_data."""
-    adapter = make_adapter(
-        [
-            FakeRename("theta", "inference_variables"),
-            FakeRename("wrong", "summary_variables"),
-        ]
-    )
-    with pytest.raises(ValueError, match="data_keys"):
-        _patched_optimize(validation_ds, adapter=adapter)
-
-
-# ---------------------------------------------------------------------------
-# Missing keys: TypeError when adapter has no canonical keys and no dataset
-# ---------------------------------------------------------------------------
+    # Keys are inferred internally, not stored on config anymore.
+    # The test verifies optimize() doesn't raise with a canonical adapter.
+    _patched_optimize()
 
 
 def test_missing_param_keys_raises_type_error():
-    """TypeError when adapter lacks inference_variables and no validation_data."""
+    """TypeError when adapter lacks inference_variables."""
     adapter = make_adapter(
         [
             FakeRename("x", "summary_variables"),
@@ -136,7 +74,7 @@ def test_missing_param_keys_raises_type_error():
 
 
 def test_missing_data_keys_raises_type_error():
-    """TypeError when adapter lacks summary_variables and no validation_data."""
+    """TypeError when adapter lacks summary_variables."""
     adapter = make_adapter(
         [
             FakeRename("theta", "inference_variables"),
@@ -147,146 +85,92 @@ def test_missing_data_keys_raises_type_error():
 
 
 # ---------------------------------------------------------------------------
-# inference_conditions validation
-# ---------------------------------------------------------------------------
-
-
-def test_inference_conditions_validated_against_condition_labels():
-    """ValueError when inference_conditions not in condition_labels."""
-    adapter = make_adapter(
-        [
-            FakeRename("theta", "inference_variables"),
-            FakeRename("x", "summary_variables"),
-            FakeRename("N", "inference_conditions"),
-        ]
-    )
-    vd = ValidationDataset(
-        simulations=[{"theta": np.zeros((5, 1)), "x": np.zeros((5, 1))}],
-        condition_labels=[{"T": 100}],  # N is not here
-        param_keys=["theta"],
-        data_keys=["x"],
-        seed=0,
-    )
-    with pytest.raises(ValueError, match="inference_conditions"):
-        _patched_optimize(vd, adapter=adapter)
-
-
-def test_inference_conditions_valid_passes():
-    """No error when inference_conditions are present in condition_labels."""
-    adapter = make_adapter(
-        [
-            FakeRename("theta", "inference_variables"),
-            FakeRename("x", "summary_variables"),
-            FakeRename("N", "inference_conditions"),
-        ]
-    )
-    vd = ValidationDataset(
-        simulations=[{"theta": np.zeros((5, 1)), "x": np.zeros((5, 1))}],
-        condition_labels=[{"N": 50}],
-        param_keys=["theta"],
-        data_keys=["x"],
-        seed=0,
-    )
-    config = _patched_optimize(vd, adapter=adapter)
-    assert config.inference_conditions == ["N"]
-
-
-# ---------------------------------------------------------------------------
 # Early stopping parameters
 # ---------------------------------------------------------------------------
 
 
-def test_optimize_forwards_early_stopping_params_to_objective_config(monkeypatch):
+def test_optimize_forwards_early_stopping_params_to_objective_config():
     """optimize() forwards early_stopping_patience/window to ObjectiveConfig."""
-    captured = {}
-
-    class _FakeGenericObjective:
-        def __init__(self, config):
-            captured["config"] = config
-            self.n_objectives = 2
-
-        def __call__(self, trial):  # pragma: no cover
-            return (0.0, 0.0)
-
-    monkeypatch.setattr(
-        "bayesflow_hpo.api.GenericObjective",
-        _FakeGenericObjective,
-    )
-    monkeypatch.setattr(
-        "bayesflow_hpo.api.create_study",
-        lambda **kwargs: MagicMock(),
-    )
-    monkeypatch.setattr(
-        "bayesflow_hpo.api.optimize_until",
-        lambda study, objective, **kwargs: None,
-    )
-
-    import bayesflow_hpo.api as api
-
-    fake_simulator = MagicMock()
-    fake_search_space = MagicMock()
-    fake_search_space.inference_space = MagicMock()
-    fake_search_space.summary_space = None
-
-    api.optimize(
-        simulator=fake_simulator,
-        adapter=canonical_adapter(),
-        search_space=fake_search_space,
-        n_trials=1,
-        epochs=10,
-        batches_per_epoch=5,
+    config = _patched_optimize(
         early_stopping_patience=10,
         early_stopping_window=5,
-        storage=None,
     )
-
-    config = captured["config"]
     assert config.early_stopping_patience == 10
     assert config.early_stopping_window == 5
 
 
-def test_optimize_early_stopping_default_values(monkeypatch):
+def test_optimize_early_stopping_default_values():
     """optimize() applies default patience=5, window=7 when not specified."""
-    captured = {}
-
-    class _FakeGenericObjective:
-        def __init__(self, config):
-            captured["config"] = config
-            self.n_objectives = 2
-
-        def __call__(self, trial):  # pragma: no cover
-            return (0.0, 0.0)
-
-    monkeypatch.setattr(
-        "bayesflow_hpo.api.GenericObjective",
-        _FakeGenericObjective,
-    )
-    monkeypatch.setattr(
-        "bayesflow_hpo.api.create_study",
-        lambda **kwargs: MagicMock(),
-    )
-    monkeypatch.setattr(
-        "bayesflow_hpo.api.optimize_until",
-        lambda study, objective, **kwargs: None,
-    )
-
-    import bayesflow_hpo.api as api
-
-    fake_simulator = MagicMock()
-    fake_search_space = MagicMock()
-    fake_search_space.inference_space = MagicMock()
-    fake_search_space.summary_space = None
-
-    api.optimize(
-        simulator=fake_simulator,
-        adapter=canonical_adapter(),
-        search_space=fake_search_space,
-        n_trials=1,
-        epochs=10,
-        batches_per_epoch=5,
-        storage=None,
-    )
-
-    config = captured["config"]
+    config = _patched_optimize()
     assert config.early_stopping_patience == 5
     assert config.early_stopping_window == 7
+
+
+# ---------------------------------------------------------------------------
+# Hook forwarding
+# ---------------------------------------------------------------------------
+
+
+def test_optimize_forwards_build_approximator_fn():
+    """build_approximator_fn is forwarded to ObjectiveConfig."""
+    sentinel = lambda hp: None  # noqa: E731
+    config = _patched_optimize(build_approximator_fn=sentinel)
+    assert config.build_approximator_fn is sentinel
+
+
+def test_optimize_forwards_train_fn():
+    """train_fn is forwarded to ObjectiveConfig."""
+    sentinel = lambda approx, sim, hp, cb: None  # noqa: E731
+    config = _patched_optimize(train_fn=sentinel)
+    assert config.train_fn is sentinel
+
+
+def test_optimize_forwards_validate_fn():
+    """validate_fn is forwarded to ObjectiveConfig."""
+    sentinel = lambda approx, vd, n: {}  # noqa: E731
+    config = _patched_optimize(validate_fn=sentinel)
+    assert config.validate_fn is sentinel
+
+
+def test_optimize_forwards_n_posterior_samples():
+    """n_posterior_samples is forwarded to ObjectiveConfig."""
+    config = _patched_optimize(n_posterior_samples=1000)
+    assert config.n_posterior_samples == 1000
+
+
+def test_optimize_default_objective_metrics():
+    """Default objective_metrics is ["calibration_error", "nrmse"]."""
+    config = _patched_optimize()
+    assert config.objective_metrics == ["calibration_error", "nrmse"]
+
+
+def test_optimize_default_objective_mode():
+    """Default objective_mode is "pareto"."""
+    config = _patched_optimize()
+    assert config.objective_mode == "pareto"
+
+
+def test_optimize_calls_check_pipeline():
+    """check_pipeline() is called at start of optimize()."""
+    adapter = canonical_adapter()
+
+    with (
+        patch("bayesflow_hpo.api.GenericObjective") as mock_obj_cls,
+        patch("bayesflow_hpo.api.create_study"),
+        patch("bayesflow_hpo.api.optimize_until"),
+        patch("bayesflow_hpo.api.check_pipeline") as mock_check,
+        patch("bayesflow_hpo.api.generate_validation_dataset") as mock_gen,
+    ):
+        mock_instance = MagicMock()
+        mock_instance.n_objectives = 3
+        mock_obj_cls.return_value = mock_instance
+        mock_gen.return_value = MagicMock()
+
+        optimize(
+            simulator=MagicMock(),
+            adapter=adapter,
+            search_space=_make_fake_search_space(),
+            storage=None,
+        )
+
+        mock_check.assert_called_once()

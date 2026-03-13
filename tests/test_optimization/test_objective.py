@@ -3,7 +3,11 @@
 import pytest
 
 from bayesflow_hpo.objectives import FAILED_TRIAL_CAL_ERROR, FAILED_TRIAL_COST
-from bayesflow_hpo.optimization.objective import GenericObjective, ObjectiveConfig
+from bayesflow_hpo.optimization.objective import (
+    GenericObjective,
+    ObjectiveConfig,
+    _validate_metric_keys,
+)
 
 
 class _FakeTrial:
@@ -41,6 +45,9 @@ class _FakeApproximator:
     def count_params(self):
         return self._param_count
 
+    def compile(self, *args, **kwargs):
+        pass
+
 
 def test_objective_training_failure_sets_user_attr_and_penalty(monkeypatch):
     monkeypatch.setattr(
@@ -50,12 +57,9 @@ def test_objective_training_failure_sets_user_attr_and_penalty(monkeypatch):
 
     fake_approx = _FakeApproximator(param_count=50_000)
 
-    class _FakeWorkflow:
-        approximator = fake_approx
-
     monkeypatch.setattr(
-        "bayesflow_hpo.optimization.objective.build_workflow",
-        lambda **kwargs: _FakeWorkflow(),
+        "bayesflow_hpo.optimization.objective.build_continuous_approximator",
+        lambda params, adapter, search_space: fake_approx,
     )
     monkeypatch.setattr(
         "bayesflow_hpo.optimization.objective.cleanup_trial",
@@ -70,7 +74,7 @@ def test_objective_training_failure_sets_user_attr_and_penalty(monkeypatch):
         def __call__(self, data):
             return data
 
-    def _raise_training_error(workflow, params, callbacks):
+    def _raise_training_error(approximator, simulator, hparams, callbacks):
         raise RuntimeError("You must call compile() before calling fit().")
 
     objective = GenericObjective(
@@ -88,8 +92,9 @@ def test_objective_training_failure_sets_user_attr_and_penalty(monkeypatch):
     trial = _FakeTrial()
     values = objective(trial)
 
-    # Default penalty: (FAILED_TRIAL_CAL_ERROR, FAILED_TRIAL_COST)
-    assert values == (FAILED_TRIAL_CAL_ERROR, FAILED_TRIAL_COST)
+    # Default: pareto mode with 2 metrics → 3 objectives
+    assert len(values) == 3
+    assert values[-1] == FAILED_TRIAL_COST
     assert "training_error" in trial.user_attrs
     assert "compile" in trial.user_attrs["training_error"]
 
@@ -103,12 +108,9 @@ def test_objective_rejects_trial_exceeding_param_budget(monkeypatch):
 
     fake_approx = _FakeApproximator(param_count=200_000)
 
-    class _FakeWorkflow:
-        approximator = fake_approx
-
     monkeypatch.setattr(
-        "bayesflow_hpo.optimization.objective.build_workflow",
-        lambda **kwargs: _FakeWorkflow(),
+        "bayesflow_hpo.optimization.objective.build_continuous_approximator",
+        lambda params, adapter, search_space: fake_approx,
     )
     monkeypatch.setattr(
         "bayesflow_hpo.optimization.objective.cleanup_trial",
@@ -138,7 +140,8 @@ def test_objective_rejects_trial_exceeding_param_budget(monkeypatch):
     trial = _FakeTrial()
     values = objective(trial)
 
-    assert values == (FAILED_TRIAL_CAL_ERROR, FAILED_TRIAL_COST)
+    assert len(values) == 3  # pareto default: 2 metrics + cost
+    assert values[-1] == FAILED_TRIAL_COST
     assert trial.user_attrs["rejected_reason"] == "param_budget"
     assert trial.user_attrs["param_count"] == 200_000
 
@@ -152,12 +155,9 @@ def test_objective_allows_trial_within_param_budget(monkeypatch):
 
     fake_approx = _FakeApproximator(param_count=50_000)
 
-    class _FakeWorkflow:
-        approximator = fake_approx
-
     monkeypatch.setattr(
-        "bayesflow_hpo.optimization.objective.build_workflow",
-        lambda **kwargs: _FakeWorkflow(),
+        "bayesflow_hpo.optimization.objective.build_continuous_approximator",
+        lambda params, adapter, search_space: fake_approx,
     )
     monkeypatch.setattr(
         "bayesflow_hpo.optimization.objective.cleanup_trial",
@@ -174,7 +174,7 @@ def test_objective_allows_trial_within_param_budget(monkeypatch):
 
     train_called = []
 
-    def _track_training(workflow, params, callbacks):
+    def _track_training(approximator, simulator, hparams, callbacks):
         train_called.append(True)
         raise RuntimeError("stop after confirming training was reached")
 
@@ -209,12 +209,9 @@ def test_objective_allows_trial_at_exact_budget_boundary(monkeypatch):
 
     fake_approx = _FakeApproximator(param_count=100_000)
 
-    class _FakeWorkflow:
-        approximator = fake_approx
-
     monkeypatch.setattr(
-        "bayesflow_hpo.optimization.objective.build_workflow",
-        lambda **kwargs: _FakeWorkflow(),
+        "bayesflow_hpo.optimization.objective.build_continuous_approximator",
+        lambda params, adapter, search_space: fake_approx,
     )
     monkeypatch.setattr(
         "bayesflow_hpo.optimization.objective.cleanup_trial",
@@ -231,7 +228,7 @@ def test_objective_allows_trial_at_exact_budget_boundary(monkeypatch):
 
     train_called = []
 
-    def _track_training(workflow, params, callbacks):
+    def _track_training(approximator, simulator, hparams, callbacks):
         train_called.append(True)
         raise RuntimeError("stop after confirming training was reached")
 
@@ -263,15 +260,16 @@ def test_objective_rejects_trial_when_probe_fails(monkeypatch):
         lambda params: 1.0,
     )
 
-    class _FakeWorkflow:
-        class approximator:  # noqa: N801
-            @staticmethod
-            def build_from_data(data):
-                raise RuntimeError("shape mismatch during probe")
+    class _BrokenApprox:
+        def compile(self, *args, **kwargs):
+            pass
+
+        def build_from_data(self, data):
+            raise RuntimeError("shape mismatch during probe")
 
     monkeypatch.setattr(
-        "bayesflow_hpo.optimization.objective.build_workflow",
-        lambda **kwargs: _FakeWorkflow(),
+        "bayesflow_hpo.optimization.objective.build_continuous_approximator",
+        lambda params, adapter, search_space: _BrokenApprox(),
     )
     monkeypatch.setattr(
         "bayesflow_hpo.optimization.objective.cleanup_trial",
@@ -288,7 +286,7 @@ def test_objective_rejects_trial_when_probe_fails(monkeypatch):
 
     train_called = []
 
-    def _track_training(workflow, params, callbacks):
+    def _track_training(approximator, simulator, hparams, callbacks):
         train_called.append(True)
 
     objective = GenericObjective(
@@ -310,7 +308,8 @@ def test_objective_rejects_trial_when_probe_fails(monkeypatch):
     assert len(train_called) == 0
     assert trial.user_attrs["rejected_reason"] == "param_probe_failed"
     assert "shape mismatch" in trial.user_attrs["param_probe_error"]
-    assert values == (FAILED_TRIAL_CAL_ERROR, FAILED_TRIAL_COST)
+    assert len(values) == 3  # pareto default
+    assert values[-1] == FAILED_TRIAL_COST
 
 
 def test_objective_reraises_memory_error_from_probe(monkeypatch):
@@ -320,15 +319,16 @@ def test_objective_reraises_memory_error_from_probe(monkeypatch):
         lambda params: 1.0,
     )
 
-    class _FakeWorkflow:
-        class approximator:  # noqa: N801
-            @staticmethod
-            def build_from_data(data):
-                raise MemoryError("CUDA OOM")
+    class _OOMApprox:
+        def compile(self, *args, **kwargs):
+            pass
+
+        def build_from_data(self, data):
+            raise MemoryError("CUDA OOM")
 
     monkeypatch.setattr(
-        "bayesflow_hpo.optimization.objective.build_workflow",
-        lambda **kwargs: _FakeWorkflow(),
+        "bayesflow_hpo.optimization.objective.build_continuous_approximator",
+        lambda params, adapter, search_space: _OOMApprox(),
     )
 
     class _FakeSimulator:
@@ -440,12 +440,9 @@ def test_objective_multi_metric_penalty_shape(monkeypatch):
 
     fake_approx = _FakeApproximator(param_count=50_000)
 
-    class _FakeWorkflow:
-        approximator = fake_approx
-
     monkeypatch.setattr(
-        "bayesflow_hpo.optimization.objective.build_workflow",
-        lambda **kwargs: _FakeWorkflow(),
+        "bayesflow_hpo.optimization.objective.build_continuous_approximator",
+        lambda params, adapter, search_space: fake_approx,
     )
     monkeypatch.setattr(
         "bayesflow_hpo.optimization.objective.cleanup_trial",
@@ -460,7 +457,7 @@ def test_objective_multi_metric_penalty_shape(monkeypatch):
         def __call__(self, data):
             return data
 
-    def _raise_training_error(workflow, params, callbacks):
+    def _raise_training_error(approximator, simulator, hparams, callbacks):
         raise RuntimeError("boom")
 
     objective = GenericObjective(
@@ -486,3 +483,143 @@ def test_objective_multi_metric_penalty_shape(monkeypatch):
         FAILED_TRIAL_CAL_ERROR,
         FAILED_TRIAL_COST,
     )
+
+
+def test_objective_config_default_metrics_and_mode():
+    """ObjectiveConfig has correct defaults for metrics and mode."""
+    config = ObjectiveConfig(
+        simulator=object(),
+        adapter=object(),
+        search_space=_FakeSearchSpace(),
+    )
+    assert config.objective_metrics == ["calibration_error", "nrmse"]
+    assert config.objective_mode == "pareto"
+
+
+def test_objective_config_hooks_default_none():
+    """Hook fields default to None."""
+    config = ObjectiveConfig(
+        simulator=object(),
+        adapter=object(),
+        search_space=_FakeSearchSpace(),
+    )
+    assert config.build_approximator_fn is None
+    assert config.train_fn is None
+    assert config.validate_fn is None
+
+
+def test_objective_uses_custom_build_fn(monkeypatch):
+    """Custom build_approximator_fn is called instead of default builder."""
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.estimate_peak_memory_mb",
+        lambda params: 1.0,
+    )
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.cleanup_trial",
+        lambda: None,
+    )
+
+    build_calls = []
+
+    def custom_builder(hparams):
+        build_calls.append(hparams)
+        return _FakeApproximator(param_count=10_000)
+
+    def _raise(approx, sim, hp, cb):
+        raise RuntimeError("stop")
+
+    class _FakeSimulator:
+        def sample(self, shape):
+            return {}
+
+    class _FakeAdapter:
+        def __call__(self, data):
+            return data
+
+    objective = GenericObjective(
+        ObjectiveConfig(
+            simulator=_FakeSimulator(),
+            adapter=_FakeAdapter(),
+            search_space=_FakeSearchSpace(),
+            epochs=1,
+            batches_per_epoch=1,
+            build_approximator_fn=custom_builder,
+            train_fn=_raise,
+        )
+    )
+
+    trial = _FakeTrial()
+    objective(trial)
+    assert len(build_calls) == 1
+
+
+def test_training_config_injected_into_hparams(monkeypatch):
+    """epochs and batches_per_epoch are injected into hparams before training."""
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.estimate_peak_memory_mb",
+        lambda params: 1.0,
+    )
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.cleanup_trial",
+        lambda: None,
+    )
+
+    captured_hparams = {}
+
+    def custom_train(approximator, simulator, hparams, callbacks):
+        captured_hparams.update(hparams)
+        raise RuntimeError("stop")
+
+    class _FakeSimulator:
+        def sample(self, shape):
+            return {}
+
+    class _FakeAdapter:
+        def __call__(self, data):
+            return data
+
+    objective = GenericObjective(
+        ObjectiveConfig(
+            simulator=_FakeSimulator(),
+            adapter=_FakeAdapter(),
+            search_space=_FakeSearchSpace(),
+            epochs=42,
+            batches_per_epoch=7,
+            build_approximator_fn=lambda hp: _FakeApproximator(10_000),
+            train_fn=custom_train,
+        )
+    )
+
+    trial = _FakeTrial()
+    objective(trial)
+    assert captured_hparams["epochs"] == 42
+    assert captured_hparams["batches_per_epoch"] == 7
+
+
+def test_validate_metric_keys_passes_clean_dict():
+    """Clean dict with all keys passes through unchanged."""
+    raw = {"calibration_error": 0.05, "nrmse": 0.1}
+    result = _validate_metric_keys(raw, ["calibration_error", "nrmse"])
+    assert result == raw
+
+
+def test_validate_metric_keys_fills_missing():
+    """Missing keys are replaced with penalty value."""
+    raw = {"calibration_error": 0.05}
+    result = _validate_metric_keys(raw, ["calibration_error", "nrmse"])
+    assert result["nrmse"] == FAILED_TRIAL_CAL_ERROR
+
+
+def test_validate_metric_keys_replaces_nan():
+    """NaN values are replaced with penalty value."""
+    raw = {"calibration_error": float("nan"), "nrmse": 0.1}
+    result = _validate_metric_keys(raw, ["calibration_error", "nrmse"])
+    assert result["calibration_error"] == FAILED_TRIAL_CAL_ERROR
+    assert result["nrmse"] == 0.1
+
+
+def test_validate_metric_keys_replaces_inf():
+    """Inf values are replaced with penalty value."""
+    raw = {"calibration_error": float("inf"), "nrmse": 0.1}
+    result = _validate_metric_keys(raw, ["calibration_error", "nrmse"])
+    assert result["calibration_error"] == FAILED_TRIAL_CAL_ERROR

@@ -4,9 +4,9 @@ This package wraps Optuna multi-objective search with BayesFlow-aware
 search spaces, builders, and validation.  The main entry point is
 :func:`optimize`, which runs a complete HPO loop:
 
-1. Define or auto-create a search space over inference/summary networks
+1. Define a search space over inference/summary networks
 2. Generate a fixed validation dataset (reused across all trials)
-3. For each trial: sample → build → budget check → train → validate
+3. For each trial: sample → build → compile → train → validate
 4. Return the Optuna study with Pareto-optimal results
 
 Quick start::
@@ -16,6 +16,11 @@ Quick start::
     study = hpo.optimize(
         simulator=my_simulator,
         adapter=my_adapter,
+        search_space=hpo.CompositeSearchSpace(
+            inference_space=hpo.FlowMatchingSpace(),
+            summary_space=hpo.DeepSetSpace(),
+            training_space=hpo.TrainingSpace(),
+        ),
         validation_conditions={"N": [50, 100, 200]},
         n_trials=50,
     )
@@ -30,12 +35,7 @@ except PackageNotFoundError:
     __version__ = "0.1.0"
 
 from bayesflow_hpo.api import infer_keys_from_adapter, optimize
-from bayesflow_hpo.builders import (
-    WorkflowBuildConfig,
-    build_inference_network,
-    build_summary_network,
-    build_workflow,
-)
+from bayesflow_hpo.builders import build_continuous_approximator
 from bayesflow_hpo.objectives import (
     compute_inference_time_ratio,
     denormalize_param_count,
@@ -60,6 +60,8 @@ from bayesflow_hpo.optimization import (
     optimize_until,
     warm_start_study,
 )
+from bayesflow_hpo.optimization.objective import default_train_fn, default_validate_fn
+from bayesflow_hpo.pipeline import PipelineError, check_pipeline
 from bayesflow_hpo.registration import (
     list_registered_network_spaces,
     register_custom_inference_network,
@@ -101,6 +103,7 @@ from bayesflow_hpo.search_spaces import (
     register_inference_space,
     register_summary_space,
 )
+from bayesflow_hpo.types import BuildApproximatorFn, TrainFn, ValidateFn
 from bayesflow_hpo.utils import loguniform_float, loguniform_int
 from bayesflow_hpo.validation import (
     DEFAULT_METRICS,
@@ -122,13 +125,20 @@ __all__ = [
     # Version
     "__version__",
     # High-level API
+    "check_pipeline",
     "infer_keys_from_adapter",
     "optimize",
+    # Type aliases
+    "BuildApproximatorFn",
+    "TrainFn",
+    "ValidateFn",
+    # Pipeline
+    "PipelineError",
     # Builders
-    "WorkflowBuildConfig",
-    "build_inference_network",
-    "build_summary_network",
-    "build_workflow",
+    "build_continuous_approximator",
+    # Default wrappers
+    "default_train_fn",
+    "default_validate_fn",
     # Objectives
     "compute_inference_time_ratio",
     "denormalize_param_count",

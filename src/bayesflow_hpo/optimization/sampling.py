@@ -1,8 +1,7 @@
 """Sampling entry points around search spaces.
 
 Thin convenience wrappers for sampling hyperparameters from composite
-search spaces.  These exist primarily for API symmetry with
-``build_inference_network`` / ``build_summary_network``.
+search spaces.
 """
 
 from __future__ import annotations

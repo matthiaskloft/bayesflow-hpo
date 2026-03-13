@@ -1,8 +1,8 @@
 """Generic Optuna objective for BayesFlow HPO.
 
-This module implements the core trial loop: sample → build → train →
-validate → return objective values.  Each ``__call__`` invocation maps
-one Optuna trial to a minimize-all tuple of metric and cost scores.
+This module implements the core trial loop: sample → build → compile →
+train → validate → return objective values.  Each ``__call__`` invocation
+maps one Optuna trial to a minimize-all tuple of metric and cost scores.
 
 Key design decisions:
 
@@ -14,33 +14,34 @@ Key design decisions:
 
 - **Two-phase param count check**: First a heuristic estimate (fast, no
   GPU), then an exact count after lazy Keras weight initialization.
-  This catches both obvious oversized configs and edge cases where the
-  heuristic underestimates.
 
-- **Cost metric flexibility**: The last objective dimension is always a
-  "cost" signal (inference time or param count), decoupled from accuracy
-  metrics.  This lets Optuna explore the accuracy-cost Pareto front.
+- **Three hooks**: ``build_approximator_fn``, ``train_fn``, and
+  ``validate_fn`` let callers replace the build, train, and validate
+  steps while reusing the full trial lifecycle.
 """
 
 from __future__ import annotations
 
 import logging
+import math
 import time
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
 import bayesflow as bf
 import optuna
 
-from bayesflow_hpo.builders.workflow import WorkflowBuildConfig, build_workflow
+from bayesflow_hpo.builders.workflow import (
+    _compile_for_compat,
+    _make_cosine_decay_optimizer,
+    build_continuous_approximator,
+)
 from bayesflow_hpo.objectives import (
     FAILED_TRIAL_CAL_ERROR,
     FAILED_TRIAL_COST,
     MAX_PARAM_COUNT,
     compute_inference_time_ratio,
     extract_multi_objective_values,
-    extract_objective_values,
     get_param_count,
     normalize_param_count,
 )
@@ -52,9 +53,103 @@ from bayesflow_hpo.optimization.checkpoint_pool import CheckpointPool
 from bayesflow_hpo.optimization.cleanup import cleanup_trial
 from bayesflow_hpo.optimization.constraints import estimate_peak_memory_mb
 from bayesflow_hpo.search_spaces.composite import CompositeSearchSpace
+from bayesflow_hpo.types import BuildApproximatorFn, TrainFn, ValidateFn
 from bayesflow_hpo.validation.data import ValidationDataset
 
 logger = logging.getLogger(__name__)
+
+
+def default_train_fn(
+    approximator: Any,
+    simulator: bf.simulators.Simulator,
+    hparams: dict[str, Any],
+    callbacks: list[Any],
+) -> None:
+    """Train via ``approximator.fit(simulator=..., ...)``.
+
+    This is the default used by ``optimize()`` when ``train_fn`` is ``None``.
+    Reads ``epochs``, ``batches_per_epoch``, and ``batch_size`` from
+    ``hparams`` (injected by the objective before calling).
+
+    Parameters
+    ----------
+    approximator
+        Compiled BayesFlow approximator.
+    simulator
+        BayesFlow simulator for online training.
+    hparams
+        Hyperparameters dict (must contain ``epochs``, ``batches_per_epoch``,
+        and optionally ``batch_size``).
+    callbacks
+        Keras callbacks (early stopping, Optuna reporter, etc.).
+    """
+    approximator.fit(
+        simulator=simulator,
+        epochs=int(hparams["epochs"]),
+        batch_size=int(hparams.get("batch_size", 256)),
+        batches_per_epoch=int(hparams["batches_per_epoch"]),
+        callbacks=callbacks,
+    )
+
+
+def default_validate_fn(
+    approximator: Any,
+    validation_data: ValidationDataset,
+    n_posterior_samples: int,
+) -> dict[str, float]:
+    """Run the built-in validation pipeline and return metric dict.
+
+    This is the default used by ``optimize()`` when ``validate_fn`` is ``None``.
+    Wraps ``run_validation_pipeline()`` and returns its summary as a flat dict.
+
+    Parameters
+    ----------
+    approximator
+        Trained BayesFlow approximator with a ``.sample()`` method.
+    validation_data
+        Pre-generated validation dataset.
+    n_posterior_samples
+        Number of posterior draws per simulation.
+
+    Returns
+    -------
+    dict[str, float]
+        Metric name → value mapping (e.g. ``{"calibration_error": 0.05}``).
+    """
+    from bayesflow_hpo.validation.pipeline import run_validation_pipeline
+
+    result = run_validation_pipeline(
+        approximator=approximator,
+        validation_data=validation_data,
+        n_posterior_samples=n_posterior_samples,
+    )
+    return dict(result.summary)
+
+
+def _validate_metric_keys(
+    raw: dict[str, float],
+    objective_metrics: list[str],
+) -> dict[str, float]:
+    """Validate and sanitize metric dict from a custom validate_fn.
+
+    - Missing keys → replaced with penalty value + warning.
+    - NaN/Inf values → replaced with penalty value + warning.
+
+    Returns a cleaned copy of the dict.
+    """
+    cleaned = dict(raw)
+    for key in objective_metrics:
+        if key not in cleaned:
+            logger.warning(
+                "validate_fn output missing metric %r — using penalty value", key
+            )
+            cleaned[key] = FAILED_TRIAL_CAL_ERROR
+        elif not math.isfinite(cleaned[key]):
+            logger.warning(
+                "validate_fn returned non-finite value for %r — using penalty", key
+            )
+            cleaned[key] = FAILED_TRIAL_CAL_ERROR
+    return cleaned
 
 
 @dataclass
@@ -67,13 +162,8 @@ class ObjectiveConfig:
         BayesFlow simulator and adapter.
     search_space
         Composite search space defining the tunable dimensions.
-    inference_conditions
-        Optional list of condition variable names.
     validation_data
-        Pre-generated :class:`ValidationDataset`.  When ``None`` the
-        objective falls back to the final training loss.
-    param_keys, data_keys
-        Keys used by the validation inference function.
+        Pre-generated :class:`ValidationDataset`.
     epochs
         Maximum training epochs per trial (default 200).
     batches_per_epoch
@@ -101,44 +191,36 @@ class ObjectiveConfig:
     pruning_n_startup_trials
         Minimum completed trials before multi-objective pruning
         activates (default 5).
-    metrics
-        Metric names for final validation (default ``DEFAULT_METRICS``).
-    objective_metric
-        Key in the validation summary used as the first HPO objective
-        (default ``"calibration_error"``).  Ignored when
-        ``objective_metrics`` is set.
     objective_metrics
-        List of metric keys to optimize simultaneously.  When set,
-        overrides ``objective_metric`` and enables multi-metric mode
-        controlled by ``objective_mode``.
+        List of metric keys to optimize simultaneously.
+        Default ``["calibration_error", "nrmse"]``.
     objective_mode
-        ``"mean"`` (default) — arithmetic mean of the listed metrics
-        forms a single scalar; the objective returns 2 values
-        ``(mean, cost_score)``.
-        ``"pareto"`` — each metric becomes its own Optuna objective;
-        returns ``len(objective_metrics) + 1`` values
-        (one per metric + cost_score).
+        ``"pareto"`` (default) — each metric becomes its own Optuna
+        objective; returns ``len(objective_metrics) + 1`` values.
+        ``"mean"`` — arithmetic mean of the listed metrics forms a
+        single scalar; returns 2 values ``(mean, cost_score)``.
     cost_metric
         Which cost objective to use as the last Optuna objective.
-        ``"inference_time"`` (default) — inference-to-simulation time
-        ratio measured during validation.
-        ``"param_count"`` — normalized parameter count (log-linear
-        scaling).
+        ``"inference_time"`` (default) or ``"param_count"``.
     checkpoint_pool
         Optional :class:`CheckpointPool` to persist the best trial
         weights.  When ``None`` a default pool of size 5 is created.
+    build_approximator_fn
+        Optional custom build function ``(hparams) -> Approximator``.
+        Must return an **uncompiled** approximator.
     train_fn
         Optional custom training function
-        ``(workflow, params, callbacks) -> None``.
+        ``(approximator, simulator, hparams, callbacks) -> None``.
+    validate_fn
+        Optional custom validation function
+        ``(approximator, validation_data, n_posterior_samples) ->
+        dict[str, float]``.
     """
 
     simulator: bf.simulators.Simulator
     adapter: bf.adapters.Adapter
     search_space: CompositeSearchSpace
-    inference_conditions: list[str] | None = None
     validation_data: ValidationDataset | None = None
-    param_keys: list[str] = field(default_factory=list)
-    data_keys: list[str] = field(default_factory=list)
     epochs: int = 200
     batches_per_epoch: int = 50
     early_stopping_patience: int = 5
@@ -150,13 +232,15 @@ class ObjectiveConfig:
     intermediate_validation_interval: int = 10
     intermediate_validation_warmup: int = 10
     pruning_n_startup_trials: int = 5
-    metrics: list[str] | None = None
-    objective_metric: str = "calibration_error"
-    objective_metrics: list[str] | None = None
-    objective_mode: str = "mean"
+    objective_metrics: list[str] = field(
+        default_factory=lambda: ["calibration_error", "nrmse"]
+    )
+    objective_mode: str = "pareto"
     cost_metric: str = "inference_time"
     checkpoint_pool: CheckpointPool | None = None
-    train_fn: Callable[[bf.BasicWorkflow, dict, list], None] | None = None
+    build_approximator_fn: BuildApproximatorFn | None = None
+    train_fn: TrainFn | None = None
+    validate_fn: ValidateFn | None = None
 
     def __post_init__(self):
         if self.objective_mode not in ("mean", "pareto"):
@@ -171,27 +255,6 @@ class ObjectiveConfig:
             )
 
 
-def _default_train_fn(
-    workflow: bf.BasicWorkflow,
-    params: dict[str, Any],
-    callbacks: list[Any],
-    *,
-    epochs: int,
-    batches_per_epoch: int,
-) -> None:
-    """Default training function using ``fit_online``.
-
-    Simulates fresh data each epoch (online training).  Batch size is
-    read from ``params["batch_size"]``, defaulting to 256 if absent.
-    """
-    workflow.fit_online(
-        epochs=epochs,
-        batch_size=int(params.get("batch_size", 256)),
-        num_batches_per_epoch=batches_per_epoch,
-        callbacks=callbacks,
-    )
-
-
 def _log_trial_summary(
     trial: optuna.Trial,
     values: tuple[float, ...],
@@ -199,11 +262,7 @@ def _log_trial_summary(
     training_time: float,
     metric_label: str = "obj[0]",
 ) -> None:
-    """Log a concise one-line summary after a trial completes.
-
-    Includes objective value, param count (formatted as K/M), training
-    time, and optional NRMSE/correlation from trial user attributes.
-    """
+    """Log a concise one-line summary after a trial completes."""
     params_label = (
         f"{param_count / 1e6:.2f}M"
         if param_count >= 1e6
@@ -232,18 +291,19 @@ class GenericObjective:
     validates, and returns an objective tuple.  Failed, pruned, or
     budget-rejected trials return penalty values.
 
-    The last objective value is the **cost score**, controlled by
-    ``config.cost_metric``:
+    The trial lifecycle:
 
-    - ``"inference_time"`` (default) — ratio of inference time to
-      simulation time, measured during validation.
-    - ``"param_count"`` — normalized parameter count (log-linear).
-
-    When ``config.objective_metrics`` is set, the return shape depends
-    on ``config.objective_mode``:
-
-    - ``"mean"`` → ``(mean_of_metrics, cost_score)``
-    - ``"pareto"`` → ``(*metric_values, cost_score)``
+    1. Sample hparams from search_space
+    2. Inject training config into hparams
+    3. Budget pre-check (memory estimate)
+    4. BUILD approximator (custom or default)
+    5. COMPILE with Adam + CosineDecay
+    6. Exact param count check
+    7. TRAIN (custom or default)
+    8. VALIDATE (custom or default)
+    9. Cost scoring
+    10. Checkpoint pool
+    11. Logging
     """
 
     def __init__(self, config: ObjectiveConfig):
@@ -262,31 +322,26 @@ class GenericObjective:
     def _metric_label(self) -> str:
         """Human-readable label for the first objective value in logs."""
         cfg = self.config
-        if cfg.objective_metrics:
-            if cfg.objective_mode == "pareto":
-                return cfg.objective_metrics[0]
-            return f"mean({'+'.join(cfg.objective_metrics)})"
-        return cfg.objective_metric
+        if cfg.objective_mode == "pareto":
+            return cfg.objective_metrics[0]
+        return f"mean({'+'.join(cfg.objective_metrics)})"
 
     @property
     def n_objectives(self) -> int:
         """Number of objective values returned per trial."""
-        if self.config.objective_metrics:
-            if self.config.objective_mode == "pareto":
-                return len(self.config.objective_metrics) + 1  # metrics + cost
-            return 2  # mean + cost
-        return 2  # legacy: objective_metric + cost
+        if self.config.objective_mode == "pareto":
+            return len(self.config.objective_metrics) + 1  # metrics + cost
+        return 2  # mean + cost
 
     def _penalty(self) -> tuple[float, ...]:
         """Return penalty values matching the expected objective shape."""
         n = self.n_objectives
         if n == 2:
             return (FAILED_TRIAL_CAL_ERROR, FAILED_TRIAL_COST)
-        # n > 2: penalty for each metric dimension + cost
         return tuple([FAILED_TRIAL_CAL_ERROR] * (n - 1)) + (FAILED_TRIAL_COST,)
 
     def __call__(self, trial: optuna.Trial) -> tuple[float, ...]:
-        """Execute one HPO trial: sample → build → budget check → train → validate.
+        """Execute one HPO trial: sample → build → compile → train → validate.
 
         Returns
         -------
@@ -295,76 +350,73 @@ class GenericObjective:
             ``objective_mode``: 2 values for ``"mean"``, N+1 for ``"pareto"``.
             Failed or budget-rejected trials return penalty values.
         """
-        params = self.config.search_space.sample(trial)
+        config = self.config
 
-        # Inject actual model dimensions for memory estimation.
-        if "n_params" not in params:
-            n_p = len(self.config.param_keys) if self.config.param_keys else 1
-            params["n_params"] = n_p
-        if "n_conditions" not in params:
-            conds = self.config.inference_conditions
-            params["n_conditions"] = len(conds) if conds else 0
+        # --- Step 1: Sample hparams ---
+        params = config.search_space.sample(trial)
 
-        # --- Budget pre-check (memory) ---
+        # --- Step 2: Inject training config ---
+        params["epochs"] = config.epochs
+        params["batches_per_epoch"] = config.batches_per_epoch
+
+        # --- Step 3: Budget pre-check (memory) ---
         estimated_memory = estimate_peak_memory_mb(params)
         trial.set_user_attr("estimated_peak_memory_mb", float(estimated_memory))
         if (
-            self.config.max_memory_mb is not None
-            and estimated_memory > self.config.max_memory_mb
+            config.max_memory_mb is not None
+            and estimated_memory > config.max_memory_mb
         ):
             trial.set_user_attr("rejected_reason", "memory_budget")
             logger.info(
                 "Trial #%d rejected: estimated %.0f MB > budget %.0f MB",
-                trial.number, estimated_memory, self.config.max_memory_mb,
+                trial.number, estimated_memory, config.max_memory_mb,
             )
             return self._penalty()
 
-        # --- Build model ---
-        inference_net = self.config.search_space.inference_space.build(params)
-        summary_net = None
-        if self.config.search_space.summary_space is not None:
-            summary_net = self.config.search_space.summary_space.build(params)
-
-        workflow = build_workflow(
-            simulator=self.config.simulator,
-            adapter=self.config.adapter,
-            inference_network=inference_net,
-            summary_network=summary_net,
-            params=params,
-            config=WorkflowBuildConfig(
-                inference_conditions=self.config.inference_conditions,
-                batches_per_epoch=self.config.batches_per_epoch,
-                epochs=self.config.epochs,
-            ),
-        )
-
-        # --- Exact param count check (post-build, pre-train) ---
-        approximator = getattr(workflow, "approximator", workflow)
+        # --- Step 4: BUILD approximator ---
         try:
-            # Trigger Keras lazy weight initialization with a tiny batch.
-            dummy = self.config.simulator.sample((2,))
-            adapted = self.config.adapter(dummy)
+            if config.build_approximator_fn is not None:
+                approximator = config.build_approximator_fn(params)
+            else:
+                approximator = build_continuous_approximator(
+                    params, config.adapter, config.search_space,
+                )
+        except Exception as exc:
+            logger.warning(
+                "Trial #%d: build failed: %s", trial.number, exc,
+            )
+            trial.set_user_attr("rejected_reason", "build_failed")
+            trial.set_user_attr("build_error", str(exc))
+            cleanup_trial()
+            return self._penalty()
+
+        # --- Step 5: COMPILE with Adam + CosineDecay ---
+        initial_lr = float(params.get("initial_lr", 1e-3))
+        decay_steps = config.batches_per_epoch * config.epochs
+        optimizer = _make_cosine_decay_optimizer(initial_lr, decay_steps)
+        _compile_for_compat(approximator, optimizer)
+
+        # --- Step 6: Exact param count check ---
+        try:
+            dummy = config.simulator.sample((2,))
+            adapted = config.adapter(dummy)
             if hasattr(approximator, "build_from_data"):
                 approximator.build_from_data(adapted)
             else:
                 approximator.compute_loss(adapted)
             param_count_actual = get_param_count(approximator)
             trial.set_user_attr("param_count", int(param_count_actual))
-            if param_count_actual > self.config.max_param_count:
+            if param_count_actual > config.max_param_count:
                 trial.set_user_attr("rejected_reason", "param_budget")
                 logger.info(
                     "Trial #%d rejected: %d params > budget %d",
-                    trial.number, param_count_actual,
-                    self.config.max_param_count,
+                    trial.number, param_count_actual, config.max_param_count,
                 )
                 cleanup_trial()
                 return self._penalty()
         except MemoryError:
-            raise  # never swallow OOM
+            raise
         except Exception as exc:
-            # Without the heuristic fallback, there is no alternative way
-            # to enforce the param budget.  Reject the trial so oversized
-            # models cannot bypass the check.
             logger.warning(
                 "Trial #%d: param count probe failed, rejecting trial: %s",
                 trial.number, exc,
@@ -378,15 +430,14 @@ class GenericObjective:
         callbacks: list[Any] = [
             MovingAverageEarlyStopping(
                 monitor="loss",
-                window=self.config.early_stopping_window,
-                patience=self.config.early_stopping_patience,
+                window=config.early_stopping_window,
+                patience=config.early_stopping_patience,
                 restore_best_weights=True,
             ),
             OptunaReportCallback(trial, monitor="loss"),
         ]
 
-        # Periodic validation callback for pruning.
-        if self.config.validation_data is not None:
+        if config.validation_data is not None:
             from bayesflow_hpo.optimization.validation_callback import (
                 PeriodicValidationCallback,
             )
@@ -395,29 +446,23 @@ class GenericObjective:
                 PeriodicValidationCallback(
                     trial=trial,
                     approximator=approximator,
-                    validation_data=self.config.validation_data,
-                    param_keys=self.config.param_keys,
-                    data_keys=self.config.data_keys,
-                    interval=self.config.intermediate_validation_interval,
-                    warmup=self.config.intermediate_validation_warmup,
-                    n_posterior_samples=self.config.n_intermediate_posterior_samples,
-                    n_startup_trials=self.config.pruning_n_startup_trials,
+                    validation_data=config.validation_data,
+                    param_keys=config.validation_data.param_keys,
+                    data_keys=config.validation_data.data_keys,
+                    interval=config.intermediate_validation_interval,
+                    warmup=config.intermediate_validation_warmup,
+                    n_posterior_samples=config.n_intermediate_posterior_samples,
+                    n_startup_trials=config.pruning_n_startup_trials,
                 )
             )
 
-        # --- Train ---
+        # --- Step 7: TRAIN ---
         t_train_start = time.perf_counter()
         try:
-            if self.config.train_fn is not None:
-                self.config.train_fn(workflow, params, callbacks)
+            if config.train_fn is not None:
+                config.train_fn(approximator, config.simulator, params, callbacks)
             else:
-                _default_train_fn(
-                    workflow,
-                    params,
-                    callbacks,
-                    epochs=self.config.epochs,
-                    batches_per_epoch=self.config.batches_per_epoch,
-                )
+                default_train_fn(approximator, config.simulator, params, callbacks)
         except optuna.TrialPruned:
             cleanup_trial()
             raise
@@ -429,37 +474,50 @@ class GenericObjective:
         training_time = time.perf_counter() - t_train_start
         trial.set_user_attr("training_time_s", round(training_time, 2))
 
-        # --- Final validation ---
+        # --- Step 8: VALIDATE ---
         inference_time = 0.0
         try:
-            if self.config.validation_data is not None:
-                from bayesflow_hpo.validation.pipeline import run_validation_pipeline
+            if config.validation_data is not None:
+                t_val_start = time.perf_counter()
+                if config.validate_fn is not None:
+                    raw = config.validate_fn(
+                        approximator,
+                        config.validation_data,
+                        config.n_posterior_samples,
+                    )
+                    metrics_summary = _validate_metric_keys(
+                        raw, config.objective_metrics,
+                    )
+                    inference_time = time.perf_counter() - t_val_start
+                else:
+                    from bayesflow_hpo.validation.pipeline import (
+                        run_validation_pipeline,
+                    )
 
-                validation_result = run_validation_pipeline(
-                    approximator=workflow.approximator,
-                    validation_data=self.config.validation_data,
-                    n_posterior_samples=self.config.n_posterior_samples,
-                    metrics=self.config.metrics,
-                )
-                # Pass the full summary so multi-metric extraction works.
-                metrics = {"summary": dict(validation_result.summary)}
-                inference_time = validation_result.timing.get("inference", 0.0)
+                    validation_result = run_validation_pipeline(
+                        approximator=approximator,
+                        validation_data=config.validation_data,
+                        n_posterior_samples=config.n_posterior_samples,
+                    )
+                    metrics_summary = dict(validation_result.summary)
+                    inference_time = validation_result.timing.get("inference", 0.0)
 
-                # Store validation timing and summary metrics as trial attrs.
                 trial.set_user_attr(
                     "inference_time_s", round(inference_time, 2),
                 )
-                for key, val in validation_result.summary.items():
+                for key, val in metrics_summary.items():
                     trial.set_user_attr(key, round(float(val), 6))
+
+                # Wrap for extract_multi_objective_values compatibility.
+                metrics = {"summary": metrics_summary}
             else:
-                hist_obj = getattr(workflow, "history", None)
-                hist_dict = (
-                    getattr(hist_obj, "history", {}) if hist_obj is not None else {}
-                )
-                last_loss = float(
-                    hist_dict.get("loss", [FAILED_TRIAL_CAL_ERROR])[-1]
-                )
-                metrics = {"summary": {self.config.objective_metric: last_loss}}
+                # No validation data — use a penalty-like fallback.
+                metrics = {
+                    "summary": {
+                        k: FAILED_TRIAL_CAL_ERROR
+                        for k in config.objective_metrics
+                    }
+                }
 
         except optuna.TrialPruned:
             cleanup_trial()
@@ -467,30 +525,26 @@ class GenericObjective:
         except Exception as exc:
             logger.warning(
                 "Trial %d failed during final validation: %s",
-                trial.number,
-                exc,
+                trial.number, exc,
             )
             trial.set_user_attr("validation_error", str(exc))
-            # Fall back to penalty values.
             values = self._penalty()
-            param_count = -1
             _log_trial_summary(
-                trial, values, param_count, training_time, self._metric_label,
+                trial, values, -1, training_time, self._metric_label,
             )
             cleanup_trial()
             return values
 
-        # --- Parameter count (separate from validation) ---
+        # --- Step 9: Cost score ---
         try:
-            param_count = get_param_count(workflow.approximator)
+            param_count = get_param_count(approximator)
         except (TypeError, ValueError) as exc:
             logger.warning("Trial %d: could not count params: %s", trial.number, exc)
             param_count = -1
         trial.set_user_attr("param_count", param_count)
 
-        # --- Cost score ---
-        if self.config.cost_metric == "inference_time":
-            vd = self.config.validation_data
+        if config.cost_metric == "inference_time":
+            vd = config.validation_data
             n_sims = sum(
                 len(next(iter(batch.values()))) if batch else 0
                 for batch in vd.simulations
@@ -506,31 +560,24 @@ class GenericObjective:
         else:
             cost_score = normalize_param_count(
                 param_count,
-                max_count=self.config.max_param_count,
+                max_count=config.max_param_count,
             )
 
-        if self.config.objective_metrics:
-            values = extract_multi_objective_values(
-                metrics,
-                cost_score,
-                objective_metrics=self.config.objective_metrics,
-                objective_mode=self.config.objective_mode,
-            )
-        else:
-            values = extract_objective_values(
-                metrics,
-                cost_score,
-                objective_metric=self.config.objective_metric,
-            )
+        values = extract_multi_objective_values(
+            metrics,
+            cost_score,
+            objective_metrics=config.objective_metrics,
+            objective_mode=config.objective_mode,
+        )
 
-        # --- Checkpoint pool ---
+        # --- Step 10: Checkpoint pool ---
         self._checkpoint_pool.maybe_save(
             trial_number=trial.number,
             objective_value=values[0],
-            workflow=workflow,
+            approximator=approximator,
         )
 
-        # --- Per-trial summary log ---
+        # --- Step 11: Per-trial summary log ---
         _log_trial_summary(
             trial, values, param_count, training_time, self._metric_label,
         )
