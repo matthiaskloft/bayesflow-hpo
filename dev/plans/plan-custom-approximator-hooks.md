@@ -63,9 +63,11 @@ def build_continuous_approximator(
 **Key detail:** Returns an **uncompiled** approximator. The objective handles
 compilation (step 5 in the lifecycle).
 
-**Migration note:** Keep `build_workflow()` functional for now (it still creates
-`BasicWorkflow`) but mark it as deprecated. The objective will stop calling it in
-Phase 3.
+**Breaking change:** Delete `build_workflow()` and `WorkflowBuildConfig` entirely.
+The objective will call `build_continuous_approximator()` directly in Phase 3.
+Move the CosineDecay optimizer creation into a small helper
+`_make_cosine_decay_optimizer(initial_lr, decay_steps)` in the same file, since
+the objective needs it for the compile step.
 
 ### Step 1.3: Extract `default_train_fn()`
 
@@ -431,25 +433,26 @@ Tests for `check_pipeline()`:
 
 ## Phase 7: Cleanup & Final Exports
 
-### Step 7.1: Deprecate `build_workflow()`
+### Step 7.1: Delete `build_workflow()` and `WorkflowBuildConfig`
 
 **File:** `src/bayesflow_hpo/builders/workflow.py`
 
-Add deprecation warning to `build_workflow()`. It remains importable but logs a
-warning when called. Update docstring to point to `build_continuous_approximator()`.
+Remove `build_workflow()`, `WorkflowBuildConfig`, and the `_compile_candidate_for_compat()`
+helper entirely. The file now contains only `build_continuous_approximator()` and
+`_make_cosine_decay_optimizer()`.
 
-### Step 7.2: Remove deprecated code from objective
+### Step 7.2: Remove dead code from objective
 
 Remove `_default_train_fn()` (replaced by public `default_train_fn()`).
-Remove old single-metric extraction path if fully superseded.
+Remove old single-metric extraction path (fully superseded by `objective_metrics` list).
 
 ### Step 7.3: Clean up `__init__.py` exports
 
 - Add: `check_pipeline`, `PipelineError`, `BuildApproximatorFn`, `TrainFn`,
   `ValidateFn`, `build_continuous_approximator`, `default_train_fn`,
   `default_validate_fn`
-- Keep: `build_workflow`, `WorkflowBuildConfig` (deprecated but still exported)
-- Remove from `__all__` (if used): any symbols that no longer exist
+- Remove: `build_workflow`, `WorkflowBuildConfig`, `build_inference_network`,
+  `build_summary_network` (absorbed into `build_continuous_approximator`)
 
 ### Step 7.4: Run linter and tests
 
@@ -489,6 +492,8 @@ Phase 7 is final cleanup after everything passes.
 
 | Change | Migration |
 |--------|-----------|
+| `build_workflow()` / `WorkflowBuildConfig` deleted | Use `build_continuous_approximator()` |
+| `build_inference_network()` / `build_summary_network()` deleted | Absorbed into `build_continuous_approximator()` |
 | `search_space` now required | Pass explicitly (no more hidden default) |
 | `validation_data` param removed | Use `validation_conditions` + `sims_per_condition` |
 | `param_keys`/`data_keys` params removed | Auto-inferred from adapter |
@@ -505,9 +510,10 @@ Phase 7 is final cleanup after everything passes.
 
 - **Low risk:** Type aliases, exports, `check_pipeline()` — additive, no existing behavior changes.
 - **Medium risk:** `ObjectiveConfig` field changes — many tests construct this directly. Need careful test updates.
-- **Medium risk:** `optimize()` signature — breaking changes to the public API. Coordinate with any downstream users.
+- **Medium risk:** `optimize()` signature — breaking changes to the public API.
 - **Low risk:** `CheckpointPool` rename — internal API, only called from `GenericObjective.__call__()`.
 - **Medium risk:** Compile ownership move — currently in `build_workflow()`, moves to objective. Need to ensure CosineDecay setup is identical.
+- **Low risk:** Deleting `build_workflow()` / `build_inference_network()` / `build_summary_network()` — clean break, no shims.
 
 ---
 
@@ -517,12 +523,14 @@ Phase 7 is final cleanup after everything passes.
 |------|------|-------------|
 | `src/bayesflow_hpo/types.py` | New | ~25 |
 | `src/bayesflow_hpo/pipeline.py` | New | ~150 |
-| `src/bayesflow_hpo/builders/workflow.py` | Modify | ~80 changed |
+| `src/bayesflow_hpo/builders/workflow.py` | Rewrite | ~80 (delete old, write new) |
+| `src/bayesflow_hpo/builders/inference.py` | Delete | — |
+| `src/bayesflow_hpo/builders/summary.py` | Delete | — |
 | `src/bayesflow_hpo/optimization/objective.py` | Modify | ~200 changed |
 | `src/bayesflow_hpo/optimization/checkpoint_pool.py` | Modify | ~15 changed |
 | `src/bayesflow_hpo/api.py` | Modify | ~150 changed |
-| `src/bayesflow_hpo/builders/__init__.py` | Modify | ~5 changed |
-| `src/bayesflow_hpo/__init__.py` | Modify | ~15 changed |
+| `src/bayesflow_hpo/builders/__init__.py` | Modify | ~10 changed |
+| `src/bayesflow_hpo/__init__.py` | Modify | ~20 changed |
 | `tests/test_api.py` | Modify | ~100 changed |
 | `tests/test_optimization/test_objective.py` | Modify | ~100 changed |
 | `tests/test_optimization/test_checkpoint_pool.py` | Modify | ~15 changed |
