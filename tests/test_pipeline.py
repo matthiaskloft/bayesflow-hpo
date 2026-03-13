@@ -249,7 +249,8 @@ def test_check_pipeline_build_fn_wrong_arity_raises():
     def bad_builder(a, b):  # 2 args, should be 1
         return _FakeApproximator()
 
-    with pytest.raises(PipelineError, match="build_approximator_fn must accept exactly 1"):
+    match = "build_approximator_fn must accept exactly 1"
+    with pytest.raises(PipelineError, match=match):
         check_pipeline(
             simulator=_FakeSimulator(),
             adapter=canonical_adapter(),
