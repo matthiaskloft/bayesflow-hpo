@@ -129,7 +129,7 @@ def optimize(
     warm_start_top_k: int = 25,
     checkpoint_pool: CheckpointPool | None = None,
     show_progress_bar: bool = True,
-) -> Any:
+) -> optuna.Study:
     """Run HPO with a high-level convenience API.
 
     This is the main entry point for hyperparameter optimization.  It

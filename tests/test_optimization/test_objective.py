@@ -10,10 +10,19 @@ from bayesflow_hpo.optimization.objective import (
 )
 
 
+class _FakeStudy:
+    """Minimal study stub for PeriodicValidationCallback compatibility."""
+    directions = ["minimize", "minimize", "minimize"]
+
+    def get_trials(self, deepcopy=False, states=None):
+        return []
+
+
 class _FakeTrial:
     def __init__(self):
         self.number = 0
         self.user_attrs = {}
+        self.study = _FakeStudy()
 
     def set_user_attr(self, key, value):
         self.user_attrs[key] = value
@@ -623,3 +632,109 @@ def test_validate_metric_keys_replaces_inf():
     raw = {"calibration_error": float("inf"), "nrmse": 0.1}
     result = _validate_metric_keys(raw, ["calibration_error", "nrmse"])
     assert result["calibration_error"] == FAILED_TRIAL_CAL_ERROR
+
+
+def test_objective_validate_fn_error_returns_penalty(monkeypatch):
+    """Custom validate_fn that raises should result in penalty values, not crash."""
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.estimate_peak_memory_mb",
+        lambda params: 1.0,
+    )
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.cleanup_trial",
+        lambda: None,
+    )
+
+    fake_approx = _FakeApproximator(param_count=10_000)
+
+    class _FakeSimulator:
+        def sample(self, shape):
+            return {}
+
+    class _FakeAdapter:
+        def __call__(self, data):
+            return data
+
+    class _FakeValidationData:
+        param_keys = ["theta"]
+        data_keys = ["x"]
+        simulations = []
+
+    def _raise_validate(approx, vd, n):
+        raise RuntimeError("custom validation exploded")
+
+    objective = GenericObjective(
+        ObjectiveConfig(
+            simulator=_FakeSimulator(),
+            adapter=_FakeAdapter(),
+            search_space=_FakeSearchSpace(),
+            epochs=1,
+            batches_per_epoch=1,
+            validation_data=_FakeValidationData(),
+            build_approximator_fn=lambda hp: fake_approx,
+            train_fn=lambda approx, sim, hp, cb: None,
+            validate_fn=_raise_validate,
+        )
+    )
+
+    trial = _FakeTrial()
+    values = objective(trial)
+
+    assert len(values) == 3  # pareto default
+    assert values[-1] == FAILED_TRIAL_COST
+    assert "validation_error" in trial.user_attrs
+    assert "custom validation exploded" in trial.user_attrs["validation_error"]
+
+
+def test_objective_custom_validate_fn_called_over_default(monkeypatch):
+    """When validate_fn is provided, it's called instead of run_validation_pipeline."""
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.estimate_peak_memory_mb",
+        lambda params: 1.0,
+    )
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.cleanup_trial",
+        lambda: None,
+    )
+
+    fake_approx = _FakeApproximator(param_count=10_000)
+    validate_calls = []
+
+    class _FakeSimulator:
+        def sample(self, shape):
+            return {}
+
+    class _FakeAdapter:
+        def __call__(self, data):
+            return data
+
+    class _FakeValidationData:
+        param_keys = ["theta"]
+        data_keys = ["x"]
+        simulations = [{"x": [1, 2, 3]}]
+        sim_time_per_sim = 0.01
+
+    def custom_validate(approx, vd, n):
+        validate_calls.append(True)
+        return {"calibration_error": 0.05, "nrmse": 0.1}
+
+    objective = GenericObjective(
+        ObjectiveConfig(
+            simulator=_FakeSimulator(),
+            adapter=_FakeAdapter(),
+            search_space=_FakeSearchSpace(),
+            epochs=1,
+            batches_per_epoch=1,
+            validation_data=_FakeValidationData(),
+            build_approximator_fn=lambda hp: fake_approx,
+            train_fn=lambda approx, sim, hp, cb: None,
+            validate_fn=custom_validate,
+        )
+    )
+
+    trial = _FakeTrial()
+    values = objective(trial)
+
+    assert len(validate_calls) == 1
+    assert len(values) == 3
+    assert values[0] == pytest.approx(0.05)  # calibration_error

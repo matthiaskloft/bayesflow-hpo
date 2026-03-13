@@ -104,8 +104,6 @@ class PeriodicValidationCallback(Callback):
         in-place during training).
     validation_data
         Pre-generated :class:`~bayesflow_hpo.validation.data.ValidationDataset`.
-    param_keys, data_keys
-        Keys expected by the inference function.
     interval
         Run validation every *interval* epochs.  Default 10.
     warmup
@@ -124,8 +122,6 @@ class PeriodicValidationCallback(Callback):
         trial: optuna.Trial,
         approximator: Any,
         validation_data: Any,
-        param_keys: list[str],
-        data_keys: list[str],
         interval: int = 10,
         warmup: int = 10,
         n_posterior_samples: int = 250,
@@ -135,8 +131,6 @@ class PeriodicValidationCallback(Callback):
         self.trial = trial
         self.approximator = approximator
         self.validation_data = validation_data
-        self.param_keys = param_keys
-        self.data_keys = data_keys
         self.interval = interval
         self.warmup = warmup
         self.n_posterior_samples = n_posterior_samples

@@ -160,3 +160,133 @@ def test_check_pipeline_warns_unused_hparams(caplog):
         )
 
     assert "never read" in caplog.text
+
+
+def test_check_pipeline_missing_initial_lr_raises():
+    """PipelineError when search space doesn't sample initial_lr and no train_fn."""
+
+    class _NoLrSpace:
+        class _InferenceSpace:
+            def build(self, params):
+                return object()
+
+        def __init__(self):
+            self.inference_space = self._InferenceSpace()
+            self.summary_space = None
+
+        def sample(self, trial):
+            return {"hidden_dim": 64}  # no initial_lr
+
+    with pytest.raises(PipelineError, match="initial_lr"):
+        check_pipeline(
+            simulator=_FakeSimulator(),
+            adapter=canonical_adapter(),
+            search_space=_NoLrSpace(),
+            build_approximator_fn=lambda hp: _FakeApproximator(),
+        )
+
+
+def test_check_pipeline_missing_initial_lr_ok_with_train_fn():
+    """No error when initial_lr missing but custom train_fn is provided."""
+
+    class _NoLrSpace:
+        class _InferenceSpace:
+            def build(self, params):
+                return object()
+
+        def __init__(self):
+            self.inference_space = self._InferenceSpace()
+            self.summary_space = None
+
+        def sample(self, trial):
+            return {"hidden_dim": 64}  # no initial_lr
+
+    check_pipeline(
+        simulator=_FakeSimulator(),
+        adapter=canonical_adapter(),
+        search_space=_NoLrSpace(),
+        build_approximator_fn=lambda hp: _FakeApproximator(),
+        train_fn=lambda approx, sim, hp, cb: None,
+        validate_fn=lambda approx, vd, n: {"calibration_error": 0.05, "nrmse": 0.1},
+    )
+
+
+def test_check_pipeline_train_fn_wrong_arity_raises():
+    """PipelineError when train_fn has wrong number of parameters."""
+
+    def bad_train(approx, sim):  # only 2 args, should be 4
+        pass
+
+    with pytest.raises(PipelineError, match="train_fn must accept 4"):
+        check_pipeline(
+            simulator=_FakeSimulator(),
+            adapter=canonical_adapter(),
+            search_space=_FakeSearchSpace(),
+            build_approximator_fn=lambda hp: _FakeApproximator(),
+            train_fn=bad_train,
+        )
+
+
+def test_check_pipeline_validate_fn_wrong_arity_raises():
+    """PipelineError when validate_fn has wrong number of parameters."""
+
+    def bad_validate(approx):  # only 1 arg, should be 3
+        return {}
+
+    with pytest.raises(PipelineError, match="validate_fn must accept 3"):
+        check_pipeline(
+            simulator=_FakeSimulator(),
+            adapter=canonical_adapter(),
+            search_space=_FakeSearchSpace(),
+            build_approximator_fn=lambda hp: _FakeApproximator(),
+            validate_fn=bad_validate,
+        )
+
+
+def test_check_pipeline_build_fn_wrong_arity_raises():
+    """PipelineError when build_approximator_fn has wrong number of parameters."""
+
+    def bad_builder(a, b):  # 2 args, should be 1
+        return _FakeApproximator()
+
+    with pytest.raises(PipelineError, match="build_approximator_fn must accept 1"):
+        check_pipeline(
+            simulator=_FakeSimulator(),
+            adapter=canonical_adapter(),
+            search_space=_FakeSearchSpace(),
+            build_approximator_fn=bad_builder,
+        )
+
+
+def test_check_pipeline_train_fn_error_propagates():
+    """PipelineError wraps exceptions from custom train_fn."""
+
+    def exploding_train(approx, sim, hp, cb):
+        raise RuntimeError("train exploded")
+
+    with pytest.raises(PipelineError, match="Training step failed.*train exploded"):
+        check_pipeline(
+            simulator=_FakeSimulator(),
+            adapter=canonical_adapter(),
+            search_space=_FakeSearchSpace(),
+            build_approximator_fn=lambda hp: _FakeApproximator(),
+            train_fn=exploding_train,
+            validate_fn=lambda approx, vd, n: {"calibration_error": 0.05, "nrmse": 0.1},
+        )
+
+
+def test_check_pipeline_validate_fn_error_propagates():
+    """PipelineError wraps exceptions from custom validate_fn."""
+
+    def exploding_validate(approx, vd, n):
+        raise RuntimeError("validate exploded")
+
+    with pytest.raises(PipelineError, match="Validation step failed"):
+        check_pipeline(
+            simulator=_FakeSimulator(),
+            adapter=canonical_adapter(),
+            search_space=_FakeSearchSpace(),
+            build_approximator_fn=lambda hp: _FakeApproximator(),
+            train_fn=lambda approx, sim, hp, cb: None,
+            validate_fn=exploding_validate,
+        )

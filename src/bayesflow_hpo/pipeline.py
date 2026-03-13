@@ -7,6 +7,7 @@ are wasted.
 
 from __future__ import annotations
 
+import inspect
 import logging
 import math
 from typing import Any
@@ -48,7 +49,16 @@ class _MockTrial:
 
 
 class _TrackingDict(dict):
-    """Dict wrapper that records which keys are read via ``__getitem__``/``get``."""
+    """Dict wrapper that records which keys are accessed.
+
+    Tracks ``__getitem__``, ``get``, ``__contains__``, and ``pop``
+    so that unused-key detection works regardless of how the builder
+    accesses parameters.
+
+    Note: ``__iter__``, ``items()``, and ``values()`` are intentionally
+    **not** overridden because ``dict(tracking_dict)`` calls ``__iter__``
+    internally, which would falsely mark all keys as accessed.
+    """
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -61,6 +71,42 @@ class _TrackingDict(dict):
     def get(self, key, default=None):
         self.accessed_keys.add(key)
         return super().get(key, default)
+
+    def __contains__(self, key):
+        self.accessed_keys.add(key)
+        return super().__contains__(key)
+
+    def pop(self, key, *args):
+        self.accessed_keys.add(key)
+        return super().pop(key, *args)
+
+
+def _check_hook_arity(fn: Any, expected: int, name: str) -> None:
+    """Raise ``PipelineError`` if *fn* doesn't accept *expected* positional args."""
+    try:
+        sig = inspect.signature(fn)
+    except (ValueError, TypeError):
+        return  # Can't inspect (e.g. built-in) — skip check.
+
+    # Count parameters that can accept a positional argument.
+    positional_kinds = {
+        inspect.Parameter.POSITIONAL_ONLY,
+        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+    }
+    has_var_positional = any(
+        p.kind == inspect.Parameter.VAR_POSITIONAL for p in sig.parameters.values()
+    )
+    if has_var_positional:
+        return  # *args — can't determine arity statically.
+
+    n_positional = sum(
+        1 for p in sig.parameters.values() if p.kind in positional_kinds
+    )
+    if n_positional != expected:
+        raise PipelineError(
+            f"{name} must accept {expected} positional argument(s), "
+            f"but its signature has {n_positional}: {sig}"
+        )
 
 
 def check_pipeline(
@@ -126,6 +172,14 @@ def check_pipeline(
     if objective_metrics is None:
         objective_metrics = ["calibration_error", "nrmse"]
 
+    # --- Step 0: Validate hook signatures ---
+    if build_approximator_fn is not None:
+        _check_hook_arity(build_approximator_fn, 1, "build_approximator_fn")
+    if train_fn is not None:
+        _check_hook_arity(train_fn, 4, "train_fn")
+    if validate_fn is not None:
+        _check_hook_arity(validate_fn, 3, "validate_fn")
+
     # --- Step 1: Sample dummy hparams ---
     try:
         raw_hparams = search_space.sample(_MockTrial())
@@ -172,6 +226,13 @@ def check_pipeline(
         raise PipelineError(f"Validation dataset generation failed: {exc}") from exc
 
     # --- Step 4: Compile ---
+    if train_fn is None and "initial_lr" not in raw_hparams:
+        raise PipelineError(
+            "Search space does not sample 'initial_lr', which is required "
+            "for the default compile step (Adam + CosineDecay). Either add "
+            "'initial_lr' to your search space (e.g. via TrainingSpace) or "
+            "provide a custom train_fn that compiles with its own optimizer."
+        )
     initial_lr = float(hparams.get("initial_lr", 1e-3))
     decay_steps = batches_per_epoch * epochs
     optimizer = _make_cosine_decay_optimizer(initial_lr, decay_steps)

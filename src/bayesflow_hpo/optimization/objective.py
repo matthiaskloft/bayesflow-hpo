@@ -447,8 +447,6 @@ class GenericObjective:
                     trial=trial,
                     approximator=approximator,
                     validation_data=config.validation_data,
-                    param_keys=config.validation_data.param_keys,
-                    data_keys=config.validation_data.data_keys,
                     interval=config.intermediate_validation_interval,
                     warmup=config.intermediate_validation_warmup,
                     n_posterior_samples=config.n_intermediate_posterior_samples,
@@ -478,29 +476,21 @@ class GenericObjective:
         inference_time = 0.0
         try:
             if config.validation_data is not None:
+                actual_validate = (
+                    config.validate_fn
+                    if config.validate_fn is not None
+                    else default_validate_fn
+                )
                 t_val_start = time.perf_counter()
-                if config.validate_fn is not None:
-                    raw = config.validate_fn(
-                        approximator,
-                        config.validation_data,
-                        config.n_posterior_samples,
-                    )
-                    metrics_summary = _validate_metric_keys(
-                        raw, config.objective_metrics,
-                    )
-                    inference_time = time.perf_counter() - t_val_start
-                else:
-                    from bayesflow_hpo.validation.pipeline import (
-                        run_validation_pipeline,
-                    )
-
-                    validation_result = run_validation_pipeline(
-                        approximator=approximator,
-                        validation_data=config.validation_data,
-                        n_posterior_samples=config.n_posterior_samples,
-                    )
-                    metrics_summary = dict(validation_result.summary)
-                    inference_time = validation_result.timing.get("inference", 0.0)
+                raw = actual_validate(
+                    approximator,
+                    config.validation_data,
+                    config.n_posterior_samples,
+                )
+                inference_time = time.perf_counter() - t_val_start
+                metrics_summary = _validate_metric_keys(
+                    raw, config.objective_metrics,
+                )
 
                 trial.set_user_attr(
                     "inference_time_s", round(inference_time, 2),

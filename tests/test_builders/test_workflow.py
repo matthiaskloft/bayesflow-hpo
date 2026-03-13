@@ -60,6 +60,8 @@ def test_make_cosine_decay_optimizer():
 
 
 class _CompileNoArgsModel:
+    """Model whose compile() accepts no arguments (e.g. pre-configured)."""
+
     def __init__(self):
         self.compile_calls = []
 
@@ -68,23 +70,45 @@ class _CompileNoArgsModel:
 
 
 class _CompileKwargModel:
+    """Model whose compile() requires an optimizer kwarg."""
+
     def __init__(self):
         self.compile_calls = []
 
-    def compile(self, *args, **kwargs):
-        self.compile_calls.append((args, kwargs))
-        if not kwargs:
-            raise TypeError("optimizer required")
+    def compile(self, *, optimizer=None):
+        self.compile_calls.append(("kwarg", optimizer))
 
 
-def test_compile_for_compat_calls_compile_without_args():
-    model = _CompileNoArgsModel()
-    _compile_for_compat(model, object())
-    assert model.compile_calls == ["no_args"]
+class _CompilePositionalModel:
+    """Model whose compile() accepts optimizer as a positional arg only."""
+
+    def __init__(self):
+        self.compile_calls = []
+
+    def compile(self, optimizer):
+        self.compile_calls.append(("positional", optimizer))
 
 
-def test_compile_for_compat_falls_back_to_optimizer_kwarg():
+def test_compile_for_compat_prefers_optimizer_kwarg():
+    """When compile accepts optimizer=, it should be used (not no-arg)."""
     model = _CompileKwargModel()
     optimizer = object()
     _compile_for_compat(model, optimizer)
-    assert model.compile_calls[1] == ((), {"optimizer": optimizer})
+    assert len(model.compile_calls) == 1
+    assert model.compile_calls[0] == ("kwarg", optimizer)
+
+
+def test_compile_for_compat_falls_back_to_positional():
+    """When compile only accepts positional optimizer, use that."""
+    model = _CompilePositionalModel()
+    optimizer = object()
+    _compile_for_compat(model, optimizer)
+    assert len(model.compile_calls) == 1
+    assert model.compile_calls[0] == ("positional", optimizer)
+
+
+def test_compile_for_compat_falls_back_to_no_args():
+    """When compile doesn't accept an optimizer at all, call without args."""
+    model = _CompileNoArgsModel()
+    _compile_for_compat(model, object())
+    assert model.compile_calls == ["no_args"]

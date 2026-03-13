@@ -41,18 +41,13 @@ def _compile_for_compat(candidate: Any, optimizer: Any) -> None:
     """Try common compile signatures without raising on incompatible variants.
 
     BayesFlow's ``compile()`` signature varies across versions and model
-    types.  This helper tries all three and silently moves on if none
-    match, since compilation is optional for some model types.
+    types.  This helper tries the optimizer-accepting variants first to
+    ensure the optimizer is actually applied, then falls back to no-arg
+    compile only when the model doesn't accept an optimizer at all.
     """
     compile_fn = getattr(candidate, "compile", None)
     if compile_fn is None:
         return
-
-    try:
-        compile_fn()
-        return
-    except TypeError:
-        pass
 
     try:
         compile_fn(optimizer=optimizer)
@@ -62,6 +57,12 @@ def _compile_for_compat(candidate: Any, optimizer: Any) -> None:
 
     try:
         compile_fn(optimizer)
+        return
+    except TypeError:
+        pass
+
+    try:
+        compile_fn()
     except TypeError:
         return
 
