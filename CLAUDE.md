@@ -49,10 +49,10 @@ src/bayesflow_hpo/
 │   └── summary/        # Summary network spaces (5 types)
 │       ├── deep_set.py, set_transformer.py, fusion_transformer.py
 │       └── time_series_network.py, time_series_transformer.py
+├── pipeline.py         # check_pipeline() pre-flight validation
+├── types.py            # BuildApproximatorFn, TrainFn, ValidateFn type aliases
 ├── builders/           # Construct BayesFlow objects from trial params
-│   ├── workflow.py     # build_workflow(), WorkflowBuildConfig
-│   ├── inference.py    # build_inference_network()
-│   ├── summary.py      # build_summary_network()
+│   ├── workflow.py     # build_continuous_approximator(), _compile_for_compat()
 │   ├── adapter.py      # Adapter-related build logic
 │   └── registry.py     # Builder registries for custom networks
 ├── optimization/       # Optuna study management + trial logic
@@ -89,6 +89,8 @@ src/bayesflow_hpo/
 ## Gotchas
 
 - `KERAS_BACKEND=torch` must be set before importing; tests fail silently otherwise
-- `optimize()` auto-infers `param_keys`/`data_keys` from the adapter; explicit kwargs override inference
+- `optimize()` auto-infers `param_keys`/`data_keys` from the adapter; `search_space` is required
+- Three optional hooks (`build_approximator_fn`, `train_fn`, `validate_fn`) replace build/train/validate steps while reusing the full trial lifecycle
+- `check_pipeline()` runs automatically at the start of `optimize()` to catch interface errors early
 - Budget-rejected trials don't count toward `n_trials`, so actual total trials can exceed `max_total_trials`
 - Validation dataset keys must match adapter keys or you get a runtime error
