@@ -391,6 +391,13 @@ class GenericObjective:
             return self._penalty()
 
         # --- Step 5: COMPILE with Adam + CosineDecay ---
+        if config.train_fn is None and "initial_lr" not in params:
+            logger.warning(
+                "Trial #%d: 'initial_lr' not in hparams, defaulting to 1e-3. "
+                "Add 'initial_lr' to your search space or provide a custom "
+                "train_fn.",
+                trial.number,
+            )
         initial_lr = float(params.get("initial_lr", 1e-3))
         decay_steps = config.batches_per_epoch * config.epochs
         optimizer = _make_cosine_decay_optimizer(initial_lr, decay_steps)

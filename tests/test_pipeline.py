@@ -217,7 +217,7 @@ def test_check_pipeline_train_fn_wrong_arity_raises():
     def bad_train(approx, sim):  # only 2 args, should be 4
         pass
 
-    with pytest.raises(PipelineError, match="train_fn must accept 4"):
+    with pytest.raises(PipelineError, match="train_fn must accept exactly 4"):
         check_pipeline(
             simulator=_FakeSimulator(),
             adapter=canonical_adapter(),
@@ -233,7 +233,7 @@ def test_check_pipeline_validate_fn_wrong_arity_raises():
     def bad_validate(approx):  # only 1 arg, should be 3
         return {}
 
-    with pytest.raises(PipelineError, match="validate_fn must accept 3"):
+    with pytest.raises(PipelineError, match="validate_fn must accept exactly 3"):
         check_pipeline(
             simulator=_FakeSimulator(),
             adapter=canonical_adapter(),
@@ -249,7 +249,7 @@ def test_check_pipeline_build_fn_wrong_arity_raises():
     def bad_builder(a, b):  # 2 args, should be 1
         return _FakeApproximator()
 
-    with pytest.raises(PipelineError, match="build_approximator_fn must accept 1"):
+    with pytest.raises(PipelineError, match="build_approximator_fn must accept exactly 1"):
         check_pipeline(
             simulator=_FakeSimulator(),
             adapter=canonical_adapter(),

@@ -73,7 +73,10 @@ class _TrackingDict(dict):
         return super().get(key, default)
 
     def __contains__(self, key):
-        self.accessed_keys.add(key)
+        # Only track if the key actually exists — defensive checks like
+        # ``if "optional" in hparams`` should not suppress unused warnings.
+        if super().__contains__(key):
+            self.accessed_keys.add(key)
         return super().__contains__(key)
 
     def pop(self, key, *args):
@@ -104,8 +107,9 @@ def _check_hook_arity(fn: Any, expected: int, name: str) -> None:
     )
     if n_positional != expected:
         raise PipelineError(
-            f"{name} must accept {expected} positional argument(s), "
-            f"but its signature has {n_positional}: {sig}"
+            f"{name} must accept exactly {expected} positional argument(s) "
+            f"(hooks are called positionally), but its signature has "
+            f"{n_positional}: {sig}"
         )
 
 
