@@ -139,7 +139,7 @@ Called automatically at the start of `optimize()`. Validates hook signatures, ap
 
 ### Multi-objective optimization
 
-Mean-aggregated or full Pareto-front optimization:
+Single-metric, mean-aggregated, or full Pareto-front optimization:
 
 ```python
 # Mean of multiple metrics
@@ -151,7 +151,7 @@ study = hpo.optimize(..., objective_metrics=["calibration_error", "nrmse"], obje
 
 ### Validation metrics
 
-14 built-in metrics with a registry for custom ones:
+13 built-in metrics with a registry for custom ones:
 
 | Category | Metrics |
 |---|---|
