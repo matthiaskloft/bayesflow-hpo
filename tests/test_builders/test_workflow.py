@@ -1,122 +1,114 @@
-"""Tests for workflow builder behavior."""
+"""Tests for approximator builder behavior."""
 
 from bayesflow_hpo.builders.workflow import (
-    WorkflowBuildConfig,
-    _compile_candidate_for_compat,
-    build_workflow,
+    _compile_for_compat,
+    _make_cosine_decay_optimizer,
+    build_continuous_approximator,
 )
 
 
-class FakeBasicWorkflow:
+class _FakeInferenceSpace:
+    def build(self, params):
+        return object()
+
+
+class _FakeSummarySpace:
+    def build(self, params):
+        return object()
+
+
+class _FakeSearchSpace:
+    def __init__(self, summary=False):
+        self.inference_space = _FakeInferenceSpace()
+        self.summary_space = _FakeSummarySpace() if summary else None
+
+
+class _FakeContinuousApproximator:
     def __init__(self, **kwargs):
         self.kwargs = kwargs
 
 
-_BW_PATH = "bayesflow_hpo.builders.workflow.bf.BasicWorkflow"
+_CA_PATH = "bayesflow_hpo.builders.workflow.bf.ContinuousApproximator"
 
 
-class _CompileNoArgsWorkflow:
+def test_build_continuous_approximator_creates_approx(monkeypatch):
+    monkeypatch.setattr(_CA_PATH, _FakeContinuousApproximator)
+
+    approx = build_continuous_approximator(
+        hparams={"initial_lr": 1e-3},
+        adapter=object(),
+        search_space=_FakeSearchSpace(),
+    )
+    assert isinstance(approx, _FakeContinuousApproximator)
+    assert approx.kwargs["summary_network"] is None
+
+
+def test_build_continuous_approximator_with_summary(monkeypatch):
+    monkeypatch.setattr(_CA_PATH, _FakeContinuousApproximator)
+
+    approx = build_continuous_approximator(
+        hparams={"initial_lr": 1e-3},
+        adapter=object(),
+        search_space=_FakeSearchSpace(summary=True),
+    )
+    assert approx.kwargs["summary_network"] is not None
+
+
+def test_make_cosine_decay_optimizer():
+    opt = _make_cosine_decay_optimizer(1e-3, 1000)
+    assert opt is not None
+
+
+class _CompileNoArgsModel:
+    """Model whose compile() accepts no arguments (e.g. pre-configured)."""
+
     def __init__(self):
         self.compile_calls = []
 
     def compile(self):
-        self.compile_calls.append(((), {}))
+        self.compile_calls.append("no_args")
 
 
-class _CompileOptimizerKwargWorkflow:
+class _CompileKwargModel:
+    """Model whose compile() requires an optimizer kwarg."""
+
     def __init__(self):
         self.compile_calls = []
 
-    def compile(self, *args, **kwargs):
-        self.compile_calls.append((args, kwargs))
-        if not kwargs:
-            raise TypeError("optimizer required")
+    def compile(self, *, optimizer=None):
+        self.compile_calls.append(("kwarg", optimizer))
 
 
-class _ApproxModel:
+class _CompilePositionalModel:
+    """Model whose compile() accepts optimizer as a positional arg only."""
+
     def __init__(self):
         self.compile_calls = []
 
-    def compile(self, *args, **kwargs):
-        self.compile_calls.append((args, kwargs))
-        if not kwargs:
-            raise TypeError("optimizer required")
+    def compile(self, optimizer):
+        self.compile_calls.append(("positional", optimizer))
 
 
-class _WorkflowWithApproxOnly:
-    def __init__(self, **kwargs):
-        self.kwargs = kwargs
-        self.approximator = _ApproxModel()
-
-
-
-def test_build_workflow_passes_optimizer_and_lr(monkeypatch):
-    monkeypatch.setattr(_BW_PATH, FakeBasicWorkflow)
-
-    wf = build_workflow(
-        simulator=object(),
-        adapter=object(),
-        inference_network=object(),
-        summary_network=None,
-        params={"initial_lr": 1e-3},
-        config=WorkflowBuildConfig(),
-    )
-    assert wf.kwargs["initial_learning_rate"] == 1e-3
-    assert wf.kwargs["optimizer"] is not None
-
-
-def test_build_workflow_uses_custom_optimizer(monkeypatch):
-    monkeypatch.setattr(_BW_PATH, FakeBasicWorkflow)
-
-    sentinel = object()
-    wf = build_workflow(
-        simulator=object(),
-        adapter=object(),
-        inference_network=object(),
-        summary_network=None,
-        params={"initial_lr": 1e-3},
-        config=WorkflowBuildConfig(optimizer=sentinel),
-    )
-    assert wf.kwargs["optimizer"] is sentinel
-
-
-def test_build_workflow_config_defaults():
-    config = WorkflowBuildConfig()
-    assert config.batches_per_epoch == 50
-    assert config.optimizer is None
-    assert config.inference_conditions is None
-
-
-def test_compile_candidate_for_compat_calls_compile_without_args():
-    workflow = _CompileNoArgsWorkflow()
+def test_compile_for_compat_prefers_optimizer_kwarg():
+    """When compile accepts optimizer=, it should be used (not no-arg)."""
+    model = _CompileKwargModel()
     optimizer = object()
+    _compile_for_compat(model, optimizer)
+    assert len(model.compile_calls) == 1
+    assert model.compile_calls[0] == ("kwarg", optimizer)
 
-    _compile_candidate_for_compat(workflow, optimizer)
 
-    assert workflow.compile_calls == [((), {})]
-
-
-def test_compile_candidate_for_compat_falls_back_to_optimizer_kwarg():
-    workflow = _CompileOptimizerKwargWorkflow()
+def test_compile_for_compat_falls_back_to_positional():
+    """When compile only accepts positional optimizer, use that."""
+    model = _CompilePositionalModel()
     optimizer = object()
-
-    _compile_candidate_for_compat(workflow, optimizer)
-
-    assert workflow.compile_calls[0] == ((), {})
-    assert workflow.compile_calls[1] == ((), {"optimizer": optimizer})
+    _compile_for_compat(model, optimizer)
+    assert len(model.compile_calls) == 1
+    assert model.compile_calls[0] == ("positional", optimizer)
 
 
-def test_build_workflow_compiles_approximator_for_compat(monkeypatch):
-    monkeypatch.setattr(_BW_PATH, _WorkflowWithApproxOnly)
-
-    wf = build_workflow(
-        simulator=object(),
-        adapter=object(),
-        inference_network=object(),
-        summary_network=None,
-        params={"initial_lr": 1e-3},
-        config=WorkflowBuildConfig(),
-    )
-
-    assert wf.approximator.compile_calls[0] == ((), {})
-    assert "optimizer" in wf.approximator.compile_calls[1][1]
+def test_compile_for_compat_falls_back_to_no_args():
+    """When compile doesn't accept an optimizer at all, call without args."""
+    model = _CompileNoArgsModel()
+    _compile_for_compat(model, object())
+    assert model.compile_calls == ["no_args"]

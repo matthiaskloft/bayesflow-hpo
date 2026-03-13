@@ -56,9 +56,9 @@ class CheckpointPool:
         self,
         trial_number: int,
         objective_value: float,
-        workflow: Any,
+        approximator: Any,
     ) -> bool:
-        """Save *workflow* weights if they're in the current top-k.
+        """Save *approximator* weights if they're in the current top-k.
 
         Returns ``True`` when the checkpoint was saved (or the pool was
         updated), ``False`` otherwise.
@@ -72,7 +72,6 @@ class CheckpointPool:
         dest = self.pool_dir / f"trial_{trial_number:04d}"
         try:
             dest.mkdir(parents=True, exist_ok=True)
-            approximator = getattr(workflow, "approximator", workflow)
             approximator.save_weights(str(dest / "weights.weights.h5"))
         except Exception:
             logger.warning(
