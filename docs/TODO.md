@@ -9,26 +9,6 @@ archived in the [Resolved](#resolved-archive) section at the bottom.
 
 ## Robustness
 
-### 1. `_compile_for_compat` silently returns on total failure
-
-**File:** `builders/workflow.py:40-67`
-
-**Issue:** If all three compile signatures fail with `TypeError`, the function
-returns without raising.  The approximator is left **uncompiled**, which can
-cause cryptic failures during training.
-
-**Fix:** Log a warning when no compile signature succeeds so the caller
-(and the user) know the model is uncompiled.
-
-### 2. `loguniform_int` can exceed upper bound after rounding
-
-**File:** `utils.py:43`
-
-**Issue:** `int(np.round(np.exp(log_val)))` can exceed `high` when the
-exponential lands just above `high - 0.5`.
-
-**Fix:** Clamp the result: `return int(np.clip(np.round(np.exp(log_val)), low, high))`.
-
 ### 3. `normalize_param_count` edge-case inconsistency
 
 **File:** `objectives.py:92-99`
@@ -64,29 +44,6 @@ adapters (e.g. custom transforms) have no fallback.
 
 **Fix:** Add optional `param_keys` / `data_keys` parameters that override
 inference when provided.
-
-### 6. `check_pipeline` uses very different defaults from `optimize()`
-
-**File:** `pipeline.py:124-128`
-
-**Issue:** The dry-run defaults (`sims_per_condition=5`, `batches_per_epoch=1`,
-`epochs=1`) are intentionally small for speed, but a config that passes
-`check_pipeline` can still fail under `optimize()`'s larger defaults (e.g.
-memory-wise).  The asymmetry is not documented.
-
-**Fix:** Add a note to the `check_pipeline` docstring explaining that it uses
-intentionally minimal defaults and is not a full fidelity check.
-
-### 7. Missing `py.typed` marker
-
-**File:** `src/bayesflow_hpo/` (package root)
-
-**Issue:** CLAUDE.md declares "Full type hints (mypy-compatible)" but the PEP 561
-`py.typed` marker file is missing.  mypy and pyright will not treat the package
-as typed.
-
-**Fix:** Create an empty `src/bayesflow_hpo/py.typed` and add it to
-`pyproject.toml` package data.
 
 ---
 
@@ -128,79 +85,9 @@ to ignore warnings when their builder iterates the dict.
 
 ---
 
-## Type Safety
-
-### 11. `TrainFn` callback list is unparameterized
-
-**File:** `types.py:23`
-
-**Issue:** `list` without a type parameter (`list[Any]` or
-`list[keras.callbacks.Callback]`).
-
-**Fix:** Change to `list[Any]` for consistency with the rest of the module.
-
-### 12. `_check_hook_arity` parameter `fn` is typed as `Any`
-
-**File:** `pipeline.py:87`
-
-**Issue:** `fn: Any` defeats static type checking on the helper.
-
-**Fix:** Type as `Callable[..., Any]`.
-
----
-
-## Documentation
-
-### 13. `builders/adapter.py` deprecation notice lacks version and migration guide
-
-**File:** `builders/adapter.py`
-
-**Issue:** The module docstring says "removed" but gives no version number or
-migration path.
-
-**Fix:** Add "Deprecated since v0.2.0" and a one-line pointer to
-`bayesflow.Adapter`.
-
-### 14. `utils.py` `rng` parameter doesn't document `None` fallback behavior
-
-**File:** `utils.py:31-32, 66-67`
-
-**Issue:** The docstring for `rng` says "Optional NumPy random generator" but
-does not mention that `None` uses the global `np.random` module, which is
-non-deterministic across runs.
-
-**Fix:** Add "When ``None``, uses the global ``np.random`` module (non-deterministic)."
-
-### 15. `PipelineError` has a one-line docstring
-
-**File:** `pipeline.py:28-29`
-
-**Issue:** No guidance on common causes or how to debug.
-
-**Fix:** Expand with a brief "Common causes" list (missing adapter transforms,
-incompatible hook signatures, etc.).
-
-### 16. CLAUDE.md architecture tree does not mention `py.typed` or `__init__` exports
-
-**File:** `CLAUDE.md:35-79`
-
-**Issue:** The tree is accurate for modules but does not mention the
-`__init__.py` re-export strategy or which symbols are intentionally private.
-
-**Fix:** Add a brief "Public API" note to the Key Patterns section.
-
 ---
 
 ## Validation & Results
-
-### 17. `validation/pipeline.py` uses `time.time()` instead of `time.perf_counter()`
-
-**File:** `validation/pipeline.py:72, 74, 77, 99`
-
-**Issue:** Uses `time.time()` for profiling, which is affected by system clock
-adjustments.  `validation/data.py` correctly uses `time.perf_counter()`.
-
-**Fix:** Replace all `time.time()` calls with `time.perf_counter()`.
 
 ### 18. `inference.py` silently skips missing data keys
 
@@ -212,15 +99,6 @@ drops keys not present in the simulation batch.  When a user passes wrong
 instead of a clear "missing key" message.
 
 **Fix:** Validate all `data_keys` exist in `sim_data` before calling `sample()`.
-
-### 19. `make_coverage_metric` float-to-int truncation
-
-**File:** `validation/registry.py:298`
-
-**Issue:** `int(level * 100)` truncates instead of rounding.  For
-`level=0.975`, the key becomes `"coverage_97"` instead of `"coverage_98"`.
-
-**Fix:** Use `round(level * 100)` instead of `int(level * 100)`.
 
 ### 20. `sbc_tests.py` returns NaN silently when scikit-learn is missing
 
@@ -370,5 +248,68 @@ Resolved by the `validate_fn` hook.
 
 Changed `float(...)` to `int(...)` for `max_time`, `s0`, and `s1`,
 matching their `IntDimension` declarations and BayesFlow's expected types.
+
+</details>
+
+<details>
+<summary>Issues fixed in the package review PR (2026-03-14)</summary>
+
+### ~~1. `_compile_for_compat` silently returns on total failure~~ — RESOLVED
+
+**File:** `builders/workflow.py:40-67`
+
+Now logs a warning when no compile signature succeeds.
+
+### ~~2. `loguniform_int` can exceed upper bound after rounding~~ — RESOLVED
+
+**File:** `utils.py:43`
+
+Clamped result with `np.clip()`.  Also added `alpha > 0` validation.
+
+### ~~6. `check_pipeline` uses very different defaults from `optimize()`~~ — RESOLVED
+
+**File:** `pipeline.py:124-128`
+
+Docstring now explains minimal defaults are intentional.
+
+### ~~7. Missing `py.typed` marker~~ — RESOLVED
+
+Created `src/bayesflow_hpo/py.typed` and added to `pyproject.toml`.
+
+### ~~11. `TrainFn` callback list is unparameterized~~ — RESOLVED
+
+**File:** `types.py:23`
+
+Changed to `list[Any]`.
+
+### ~~12. `_check_hook_arity` parameter `fn` is typed as `Any`~~ — RESOLVED
+
+**File:** `pipeline.py:87`
+
+Changed to `Callable[..., Any]`.
+
+### ~~13. `builders/adapter.py` deprecation notice lacks version~~ — RESOLVED
+
+Added "Deprecated since v0.2.0" with migration pointer.
+
+### ~~14. `utils.py` `rng` parameter doesn't document `None` fallback~~ — RESOLVED
+
+Docstring now describes `None` → global `np.random` behavior.
+
+### ~~15. `PipelineError` has a one-line docstring~~ — RESOLVED
+
+Expanded with common causes and debugging guidance.
+
+### ~~16. CLAUDE.md architecture tree does not mention public API~~ — RESOLVED
+
+Added "Public API" note to Key Patterns section.
+
+### ~~17. `validation/pipeline.py` uses `time.time()`~~ — RESOLVED
+
+Replaced with `time.perf_counter()`.
+
+### ~~19. `make_coverage_metric` float-to-int truncation~~ — RESOLVED
+
+Changed `int(level * 100)` to `round(level * 100)`.
 
 </details>

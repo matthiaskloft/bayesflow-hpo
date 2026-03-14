@@ -114,14 +114,18 @@ def _check_hook_arity(fn: Callable[..., Any], expected: int, name: str) -> None:
         logger.debug("%s uses *args — skipping arity check for %r", name, fn)
         return
 
-    n_positional = sum(
-        1 for p in sig.parameters.values() if p.kind in positional_kinds
+    positional_params = [
+        p for p in sig.parameters.values() if p.kind in positional_kinds
+    ]
+    n_required = sum(
+        1 for p in positional_params if p.default is inspect.Parameter.empty
     )
-    if n_positional != expected:
+    n_positional = len(positional_params)
+    if not (n_required <= expected <= n_positional):
         raise PipelineError(
             f"{name} must accept exactly {expected} positional argument(s) "
-            f"(hooks are called positionally), but its signature has "
-            f"{n_positional}: {sig}"
+            f"(hooks are called positionally), but its signature requires "
+            f"{n_required} and allows at most {n_positional}: {sig}"
         )
 
 
