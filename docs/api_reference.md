@@ -199,6 +199,7 @@ values = objective(trial: optuna.Trial)  # tuple of floats
 ```python
 create_study(study_name, directions, storage, load_if_exists, sampler, pruner,
              metric_names, warm_start_from, warm_start_top_k) -> optuna.Study
+resume_study(study_name, storage) -> optuna.Study
 optimize_until(study, objective, n_trained, max_total_trials, show_progress_bar) -> None
 warm_start_study(target_study, source_study, top_k, metric_index) -> int
 ```
@@ -206,7 +207,7 @@ warm_start_study(target_study, source_study, top_k, metric_index) -> int
 ### Callbacks
 
 ```python
-OptunaReportCallback(trial, monitor="loss", report_frequency=1)
+OptunaReportCallback(trial, monitor="loss", report_frequency=10)
 MovingAverageEarlyStopping(monitor="loss", window=5, patience=3, restore_best_weights=True)
 PeriodicValidationCallback(trial, approximator, validation_data, ...)
 ```
@@ -298,8 +299,8 @@ summarize_study(study, select_by=0, top_k=5) -> str
 plot_pareto_front(study, ax=None) -> matplotlib.axes.Axes
 plot_optimization_history(study, ax=None) -> matplotlib.axes.Axes
 plot_metric_scatter(study, x_metric, y_metric, ax=None, show_iso_lines=None) -> matplotlib.axes.Axes
-plot_metric_panels(study, metrics=None, ax=None) -> matplotlib.axes.Axes | np.ndarray
-plot_param_importance(study, top_k=10, ax=None, target_name=None) -> matplotlib.axes.Axes
+plot_metric_panels(study, metrics=None, axes=None) -> matplotlib.axes.Axes | np.ndarray
+plot_param_importance(study, ax=None, top_k=10, *, target_name=None) -> matplotlib.axes.Axes
 get_workflow_metadata(config, model_type, validation_results=None, extra=None) -> dict
 save_workflow_with_metadata(approximator, path, metadata) -> Path
 load_workflow_with_metadata(path) -> tuple[Any, dict]
@@ -323,9 +324,9 @@ list_registered_network_spaces() -> dict[str, list[str]]
 get_param_count(model) -> int
 normalize_param_count(param_count) -> float
 denormalize_param_count(normalized) -> int
-extract_objective_values(metrics: dict, param_count: int) -> tuple[float, float]
-extract_multi_objective_values(metrics, param_count, metric_keys, mode, cost_metric, ...) -> tuple[float, ...]
-compute_inference_time_ratio(inference_time_s, sim_time_per_sim, n_sims) -> float
+extract_objective_values(metrics, cost_score, objective_metric="calibration_error") -> tuple[float, float]
+extract_multi_objective_values(metrics, cost_score, objective_metrics, objective_mode="mean") -> tuple[float, ...]
+compute_inference_time_ratio(inference_time, sim_time_per_sim, n_sims) -> float
 loguniform_int(low, high, alpha=1.0, rng=None) -> int
 loguniform_float(low, high, alpha=1.0, rng=None) -> float
 ```
