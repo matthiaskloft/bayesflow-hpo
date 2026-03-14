@@ -7,13 +7,13 @@ Items marked **(pre-existing)** were not introduced by the pruning PR.
 
 ## Error Handling
 
-### Broad `except Exception` in `_run_lightweight_validation` (pre-existing) — PARTIALLY FIXED
+### ~~Broad `except Exception` in `_run_lightweight_validation` (pre-existing)~~ — RESOLVED
 
 **File:** `optimization/validation_callback.py:186-215`
 
 **Original issue:** Catch block swallowed all exceptions at `DEBUG` level.
 
-**Status:** Now logs at `WARNING` level (line 210) and tracks consecutive failures with a warning after 3 (lines 157-161). Still returns `None` on failure rather than raising, but this is intentional — intermediate validation failures should not crash the trial.
+**Status:** Now logs at `WARNING` level with `exc_info=True` (line 210), re-raises `TrialPruned` (line 207-208), and tracks consecutive failures with a warning after 3 (lines 157-161). Returning `None` on failure is intentional — intermediate validation failures should not crash the trial.
 
 ### ~~Final validation not wrapped in try-except (pre-existing)~~ — RESOLVED
 
@@ -47,17 +47,21 @@ Fixed: Warning now includes a failure breakdown with pruned count, per-reason co
 
 ## Pruning Robustness
 
-### `OptunaReportCallback` stores per-epoch user attrs on every trial (pre-existing) — OPEN
+### ~~`OptunaReportCallback` stores per-epoch user attrs on every trial (pre-existing)~~ — RESOLVED
 
 **File:** `optimization/callbacks.py`
 
-Stores `epoch_{N}_loss` for every trial at `report_frequency` intervals. With 200 epochs and 100+ trials, this bloats the SQLite database. The `report_frequency` parameter exists but defaults to `10` and is not configurable from `optimize()`.
+**Original issue:** `report_frequency` defaulted to `10` and was not configurable from `optimize()`.
 
-### `MedianPruner` docstring in `create_study` is misleading — OPEN
+**Status:** `report_frequency` is now exposed as a parameter on `optimize()` (`api.py:118`) and threaded through `ObjectiveConfig` to `OptunaReportCallback`. Users can increase the frequency to reduce database bloat.
+
+### ~~`MedianPruner` docstring in `create_study` is misleading~~ — RESOLVED
 
 **File:** `optimization/study.py`
 
-The `pruner` docstring doesn't mention that `MedianPruner` is only used for single-objective studies. Multi-objective studies use the custom median strategy in `PeriodicValidationCallback`.
+**Original issue:** The `pruner` docstring didn't mention that `MedianPruner` is only used for single-objective studies.
+
+**Status:** The `pruner` docstring now explicitly states **"Single-objective only."** and explains that multi-objective studies ignore this parameter, with pruning handled by `PeriodicValidationCallback`'s custom median-based strategy.
 
 ---
 
