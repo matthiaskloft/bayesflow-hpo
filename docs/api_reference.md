@@ -201,7 +201,7 @@ create_study(study_name, directions, storage, load_if_exists, sampler, pruner,
              metric_names, warm_start_from, warm_start_top_k) -> optuna.Study
 resume_study(study_name, storage) -> optuna.Study
 optimize_until(study, objective, n_trained, max_total_trials, show_progress_bar) -> None
-warm_start_study(target_study, source_study, top_k, metric_index) -> int
+warm_start_study(target_study, source_study, top_k=25) -> int
 ```
 
 ### Callbacks
