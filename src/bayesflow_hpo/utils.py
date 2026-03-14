@@ -28,19 +28,23 @@ def loguniform_int(
         Shape parameter controlling the skew (default 1.0 = standard
         log-uniform).
     rng
-        Optional NumPy random generator or RandomState.
+        Optional NumPy random generator or RandomState.  When ``None``,
+        uses the global ``np.random`` module (non-deterministic across runs).
     """
     if low <= 0:
         raise ValueError(f"low must be positive, got {low}")
     if high < low:
         raise ValueError(f"high must be >= low, got low={low}, high={high}")
+    if alpha <= 0:
+        raise ValueError(f"alpha must be positive, got {alpha}")
     random = rng if rng is not None else np.random
     log_low = np.log(low)
     log_high = np.log(high)
     # Power transform of uniform sample controls skew.
     u = random.uniform(0, 1) ** (1.0 / alpha)
     log_val = log_low + u * (log_high - log_low)
-    return int(np.round(np.exp(log_val)))
+    # Clamp to [low, high] to guard against rounding beyond bounds.
+    return int(np.clip(np.round(np.exp(log_val)), low, high))
 
 
 def loguniform_float(
@@ -63,12 +67,15 @@ def loguniform_float(
     alpha
         Shape parameter controlling the skew (default 1.0).
     rng
-        Optional NumPy random generator or RandomState.
+        Optional NumPy random generator or RandomState.  When ``None``,
+        uses the global ``np.random`` module (non-deterministic across runs).
     """
     if low <= 0:
         raise ValueError(f"low must be positive, got {low}")
     if high < low:
         raise ValueError(f"high must be >= low, got low={low}, high={high}")
+    if alpha <= 0:
+        raise ValueError(f"alpha must be positive, got {alpha}")
     random = rng if rng is not None else np.random
     log_low = np.log(low)
     log_high = np.log(high)

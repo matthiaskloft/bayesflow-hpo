@@ -10,6 +10,7 @@ from __future__ import annotations
 import inspect
 import logging
 import math
+from collections.abc import Callable
 from typing import Any
 
 from bayesflow_hpo.builders.workflow import (
@@ -26,7 +27,17 @@ logger = logging.getLogger(__name__)
 
 
 class PipelineError(Exception):
-    """Raised when ``check_pipeline()`` detects an interface mismatch."""
+    """Raised when ``check_pipeline()`` detects an interface mismatch.
+
+    Common causes:
+
+    - Adapter missing ``Rename``/``Concatenate`` transforms targeting
+      ``inference_variables`` or ``summary_variables``.
+    - Custom ``build_approximator_fn`` signature does not accept exactly
+      1 positional argument.
+    - Builder returns an object without ``fit`` / ``sample`` methods.
+    - ``validate_fn`` output missing required metric keys.
+    """
 
 
 class _MockTrial:
@@ -84,7 +95,7 @@ class _TrackingDict(dict):
         return super().pop(key, *args)
 
 
-def _check_hook_arity(fn: Any, expected: int, name: str) -> None:
+def _check_hook_arity(fn: Callable[..., Any], expected: int, name: str) -> None:
     """Raise ``PipelineError`` if *fn* doesn't accept *expected* positional args."""
     try:
         sig = inspect.signature(fn)
@@ -100,16 +111,21 @@ def _check_hook_arity(fn: Any, expected: int, name: str) -> None:
         p.kind == inspect.Parameter.VAR_POSITIONAL for p in sig.parameters.values()
     )
     if has_var_positional:
-        return  # *args — can't determine arity statically.
+        logger.debug("%s uses *args — skipping arity check for %r", name, fn)
+        return
 
-    n_positional = sum(
-        1 for p in sig.parameters.values() if p.kind in positional_kinds
+    positional_params = [
+        p for p in sig.parameters.values() if p.kind in positional_kinds
+    ]
+    n_required = sum(
+        1 for p in positional_params if p.default is inspect.Parameter.empty
     )
-    if n_positional != expected:
+    n_positional = len(positional_params)
+    if not (n_required <= expected <= n_positional):
         raise PipelineError(
             f"{name} must accept exactly {expected} positional argument(s) "
-            f"(hooks are called positionally), but its signature has "
-            f"{n_positional}: {sig}"
+            f"(hooks are called positionally), but its signature requires "
+            f"{n_required} and allows at most {n_positional}: {sig}"
         )
 
 
@@ -128,6 +144,11 @@ def check_pipeline(
     batches_per_epoch: int = 1,
 ) -> None:
     """Dry-run the full pipeline to catch interface errors early.
+
+    Uses intentionally minimal defaults (1 epoch, 1 batch, 5 sims) for
+    speed.  This validates interfaces and shapes but is **not** a full
+    fidelity check — a config that passes here can still OOM or diverge
+    under ``optimize()``'s larger budget.
 
     Steps:
 

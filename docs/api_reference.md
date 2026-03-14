@@ -94,9 +94,9 @@ ValidateFn = Callable[[Any, ValidationDataset, int], dict[str, float]]
 
 | Class | Purpose |
 |-------|---------|
-| `IntDimension(name, low, high, step, log, default)` | Integer hyperparameter |
-| `FloatDimension(name, low, high, log, default)` | Float hyperparameter |
-| `CategoricalDimension(name, choices, default)` | Categorical hyperparameter |
+| `IntDimension(name, low, high, step, log, enabled)` | Integer hyperparameter |
+| `FloatDimension(name, low, high, log, enabled)` | Float hyperparameter |
+| `CategoricalDimension(name, choices, enabled)` | Categorical hyperparameter |
 
 ### Inference Spaces
 

@@ -85,6 +85,7 @@ src/bayesflow_hpo/
 - **Registry pattern**: Search spaces, builders, and metrics all use name→factory registries with alias support
 - **CompositeSearchSpace**: Combines inference + summary + training sub-spaces; NetworkSelectionSpace / SummarySelectionSpace let Optuna choose network type
 - **Trial budget**: Trials exceeding `max_param_count` or `max_memory_mb` are rejected pre-training and NOT counted toward `n_trials`
+- **Public API**: `__init__.py` re-exports ~80 high-level symbols; internal helpers (e.g. `BaseSearchSpace`, `Dimension`, `MetricFn`, `sample_hyperparameters`) are accessible via submodule imports but intentionally excluded from the top-level API for stability
 
 ## Gotchas
 

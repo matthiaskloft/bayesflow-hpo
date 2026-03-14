@@ -64,6 +64,16 @@ def _compile_for_compat(candidate: Any, optimizer: Any) -> None:
     try:
         compile_fn()
     except TypeError:
+        # All three signatures failed — the approximator is left uncompiled.
+        # This is not necessarily an error (some custom approximators compile
+        # themselves), but log a warning so the caller can investigate if
+        # training fails later.
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "No compile() signature succeeded for %s — model may be uncompiled.",
+            type(candidate).__name__,
+        )
         return
 
 
