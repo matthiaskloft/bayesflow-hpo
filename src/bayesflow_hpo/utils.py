@@ -28,7 +28,8 @@ def loguniform_int(
         Shape parameter controlling the skew (default 1.0 = standard
         log-uniform).
     rng
-        Optional NumPy random generator or RandomState.
+        Optional NumPy random generator or RandomState.  When ``None``,
+        uses the global ``np.random`` module (non-deterministic across runs).
     """
     if low <= 0:
         raise ValueError(f"low must be positive, got {low}")
@@ -40,7 +41,8 @@ def loguniform_int(
     # Power transform of uniform sample controls skew.
     u = random.uniform(0, 1) ** (1.0 / alpha)
     log_val = log_low + u * (log_high - log_low)
-    return int(np.round(np.exp(log_val)))
+    # Clamp to [low, high] to guard against rounding beyond bounds.
+    return int(np.clip(np.round(np.exp(log_val)), low, high))
 
 
 def loguniform_float(
@@ -63,7 +65,8 @@ def loguniform_float(
     alpha
         Shape parameter controlling the skew (default 1.0).
     rng
-        Optional NumPy random generator or RandomState.
+        Optional NumPy random generator or RandomState.  When ``None``,
+        uses the global ``np.random`` module (non-deterministic across runs).
     """
     if low <= 0:
         raise ValueError(f"low must be positive, got {low}")

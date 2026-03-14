@@ -20,7 +20,7 @@ from bayesflow_hpo.validation.data import ValidationDataset
 BuildApproximatorFn = Callable[[dict[str, Any]], Any]
 
 # train_fn: (approximator, simulator, hparams, callbacks) -> None
-TrainFn = Callable[[Any, bf.simulators.Simulator, dict[str, Any], list], None]
+TrainFn = Callable[[Any, bf.simulators.Simulator, dict[str, Any], list[Any]], None]
 
 # validate_fn: (approximator, validation_data, n_posterior_samples) -> metrics
 ValidateFn = Callable[[Any, ValidationDataset, int], dict[str, float]]

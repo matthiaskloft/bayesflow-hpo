@@ -1,8 +1,7 @@
 """Adapter construction helpers.
 
-.. deprecated::
+.. deprecated:: 0.2.0
     ``PriorStandardize``, ``AdapterSpec``, and ``create_adapter`` have been
-    removed. Users should construct adapters directly using the
-    ``bayesflow.Adapter`` fluent API or
+    removed.  Use ``bayesflow.Adapter`` directly with its fluent API, or
     ``bayesflow.approximators.ContinuousApproximator.build_adapter()``.
 """
