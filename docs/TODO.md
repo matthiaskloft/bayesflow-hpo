@@ -7,76 +7,66 @@ Items marked **(pre-existing)** were not introduced by the pruning PR.
 
 ## Error Handling
 
-### Broad `except Exception` in `_run_lightweight_validation` (pre-existing)
+### Broad `except Exception` in `_run_lightweight_validation` (pre-existing) — PARTIALLY FIXED
 
-**File:** `optimization/validation_callback.py:188-194`
+**File:** `optimization/validation_callback.py:186-215`
 
-The catch block swallows all exceptions and logs at `DEBUG` level. If the validation pipeline has a bug, pruning silently never activates for the entire study with no visible indication. Should log at `WARNING` level and/or track consecutive failures.
+**Original issue:** Catch block swallowed all exceptions at `DEBUG` level.
 
-### Final validation not wrapped in try-except (pre-existing)
+**Status:** Now logs at `WARNING` level (line 210) and tracks consecutive failures with a warning after 3 (lines 157-161). Still returns `None` on failure rather than raising, but this is intentional — intermediate validation failures should not crash the trial.
 
-**File:** `optimization/objective.py:299-317`
+### Final validation not wrapped in try-except (pre-existing) — OPEN
 
-If the final `run_validation_pipeline` call fails (OOM, numerical error), the trial crashes after a full training run. Could fall back to training loss instead of losing the trial entirely.
+**File:** `optimization/objective.py` (step 8 in `__call__`)
 
-### `get_param_count` returns -1 on error (pre-existing)
+If the final `run_validation_pipeline` call fails (OOM, numerical error), the trial crashes after a full training run. Should fall back to training-loss-based objective values instead of losing the trial entirely.
 
-**File:** `objectives.py:27-34`
+### ~~`get_param_count` returns -1 on error~~ — RESOLVED
 
-When `count_params()` raises `ValueError`, the function returns `-1`, which `normalize_param_count` maps to `0.0` (best possible param score). A broken model silently appears as having 0 parameters on the Pareto front.
+**File:** `objectives.py:43-61`
 
-### `api.py` delete-study catches only `KeyError` (pre-existing)
+Fixed: `get_param_count` now raises `ValueError` (model not built) or `TypeError` (unsupported type) instead of returning `-1`. Callers handle exceptions appropriately.
 
-**File:** `api.py:201-204`
+### ~~`api.py` delete-study catches only `KeyError`~~ — RESOLVED
 
-`optuna.delete_study` can also raise `OperationalError` (locked/corrupted SQLite) or `RuntimeError`. These propagate as unhandled exceptions before any trials run.
+**File:** `api.py:320-329`
+
+Fixed: Now catches `KeyError` (study not found) and generic `Exception` with a `logger.warning` and `exc_info=True`, so corrupted/locked storage doesn't crash before any trials run.
 
 ---
 
 ## Reporting
 
-### `optimize_until` warning message doesn't mention pruning
+### ~~`optimize_until` warning message doesn't mention pruning~~ — RESOLVED
 
-**File:** `optimization/study.py:324-329`
+**File:** `optimization/study.py:370-421`
 
-When `max_total_trials` is exhausted, the warning says "Consider raising max_param_count or tightening the search space" — wrong advice when the cause is heavy pruning. Should differentiate budget rejection from pruning in the guidance.
+Fixed: Warning now includes a failure breakdown with pruned count, per-reason counts, and a dominant-failure-reason warning. Guidance mentions `max_total_trials`, `max_param_count`, and adjusting the search space.
 
 ---
 
 ## Pruning Robustness
 
-### `OptunaReportCallback` stores per-epoch user attrs on every trial (pre-existing)
+### `OptunaReportCallback` stores per-epoch user attrs on every trial (pre-existing) — OPEN
 
-**File:** `optimization/callbacks.py:40`
+**File:** `optimization/callbacks.py`
 
-Stores `epoch_{N}_loss` on every epoch for every trial. With 200 epochs and 100+ trials, this bloats the SQLite database. Consider reducing frequency or making it configurable.
+Stores `epoch_{N}_loss` for every trial at `report_frequency` intervals. With 200 epochs and 100+ trials, this bloats the SQLite database. The `report_frequency` parameter exists but defaults to `10` and is not configurable from `optimize()`.
 
-### `MedianPruner` docstring in `create_study` is misleading
+### `MedianPruner` docstring in `create_study` is misleading — OPEN
 
-**File:** `optimization/study.py:79-82`
+**File:** `optimization/study.py`
 
-The `pruner` docstring doesn't mention that the `MedianPruner` is only used for single-objective studies. Multi-objective studies use the custom median strategy in `PeriodicValidationCallback`.
+The `pruner` docstring doesn't mention that `MedianPruner` is only used for single-objective studies. Multi-objective studies use the custom median strategy in `PeriodicValidationCallback`.
 
 ---
 
-## Extensibility
+## ~~Extensibility~~ — RESOLVED
 
-### `optimize()` assumes `BasicWorkflow` — no hook for custom approximators
+### ~~`optimize()` assumes `BasicWorkflow`~~ — RESOLVED
 
-**File:** `api.py`, `builders/workflow.py`
+Resolved by the custom approximator hooks implementation (2026-03-14). `optimize()` now accepts `build_approximator_fn`, `train_fn`, and `validate_fn` hooks. The trial lifecycle operates on raw `Approximator` objects, not `BasicWorkflow`.
 
-`optimize()` internally calls `build_workflow()` which always constructs a `BasicWorkflow`. Packages with custom approximators (e.g. `bayesflow-irt`'s `EquivariantIRTApproximator` with batch×items merging) cannot use the high-level API and must write their own Optuna objective from scratch, duplicating budget rejection, early stopping, checkpoint management, and metric logging.
+### ~~`run_validation_pipeline` assumes flat posterior shape~~ — RESOLVED
 
-**Concrete case:** `bayesflow-irt/examples/04_2PL_HPO.ipynb` reimplements a minimal objective because the IRT approximator requires a custom summary network (`EquivariantIRTSummary`) and per-item posterior shapes `(batch, n_samples, I, param_dim)`.
-
-**Proposed fix:** Accept optional `build_fn` and `validate_fn` callables in `optimize()` (or `GenericObjective`):
-- `build_fn(params, adapter, search_space) -> approximator` — replaces `build_workflow()`
-- `validate_fn(approximator, validation_data) -> dict[str, float]` — replaces `run_validation_pipeline()`
-
-Default to the current `BasicWorkflow` path when not provided. This lets domain packages supply only the custom pieces while reusing the full trial lifecycle (budget rejection, pruning callbacks, checkpoint pool, metric logging).
-
-### `run_validation_pipeline` assumes flat posterior shape
-
-**File:** `validation/pipeline.py`, `validation/inference.py`
-
-`make_bayesflow_infer_fn` returns draws of shape `(n_sims, n_samples)` or `(n_sims, n_samples, n_params)`. Models with structured posteriors (e.g. per-item `(n_sims, n_samples, I)`) cannot use the pipeline without first flattening items into the batch dimension. A pluggable `validate_fn` (see above) would resolve this.
+Resolved by the `validate_fn` hook. Users with non-standard posterior shapes (e.g. per-item `(n_sims, n_samples, I)`) can supply a custom `validate_fn` that handles their format.

@@ -14,9 +14,9 @@ def loguniform_int(
     """Sample an integer from a generalized log-uniform distribution.
 
     The standard log-uniform is ``alpha=1``.  ``alpha > 1`` shifts
-    probability mass toward the lower end of the range; ``alpha < 1``
-    shifts it toward the upper end.  The CDF is ``U^(1/alpha)`` where
-    ``U ~ Uniform(0, 1)``.
+    probability mass toward the upper end of the range; ``alpha < 1``
+    shifts it toward the lower end.  The transform is ``U^(1/alpha)``
+    where ``U ~ Uniform(0, 1)``.
 
     Parameters
     ----------

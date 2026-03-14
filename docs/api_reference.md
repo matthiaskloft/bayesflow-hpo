@@ -6,31 +6,85 @@ Complete list of public symbols exported from `bayesflow_hpo`.
 
 ### `optimize(...) -> optuna.Study`
 
-One-call convenience function that creates a search space, generates validation data, builds an objective, and runs the study.
+One-call convenience function that generates validation data, runs `check_pipeline()` pre-flight validation, and executes a full HPO study.
 
 ```python
 def optimize(
-    simulator, adapter, param_keys, data_keys,
-    validation_data=None, validation_conditions=None, sims_per_condition=200,
-    search_space=None, inference_conditions=None,
-    n_trials=100, epochs=200, batches_per_epoch=50,
-    max_param_count=2_000_000, max_memory_mb=None,
-    metrics=None, objective_metric="calibration_error",
-    train_fn=None,
-    storage=None, study_name="bayesflow_hpo",
-    directions=None, warm_start_from=None,
-    warm_start_top_k=20, warm_start_metric_index=0,
-    show_progress_bar=True,
+    simulator, adapter, search_space,
+    # Custom approximator hooks (all optional)
+    build_approximator_fn=None, train_fn=None, validate_fn=None,
+    # Validation data
+    validation_conditions=None, sims_per_condition=200, n_posterior_samples=500,
+    # Objectives
+    objective_metrics=None, objective_mode="pareto", cost_metric="inference_time",
+    # Training
+    epochs=200, batches_per_epoch=50,
+    early_stopping_patience=5, early_stopping_window=7,
+    # Budget
+    max_param_count=1_000_000, max_memory_mb=None,
+    # Study
+    n_trials=50, max_total_trials=None,
+    study_name="bayesflow_hpo", storage=DEFAULT_STORAGE, resume=False,
+    # Optional
+    directions=None, warm_start_from=None, warm_start_top_k=25,
+    checkpoint_pool=None, show_progress_bar=True,
 ) -> optuna.Study
 ```
 
-Defaults to `CouplingFlowSpace + DeepSetSpace + TrainingSpace` when no search space is provided.
-
 | Parameter | Description |
 |-----------|-------------|
-| `metrics` | List of metric names for validation (resolved via registry). Defaults to `DEFAULT_METRICS`. |
-| `objective_metric` | Key in the validation summary used as the HPO objective. |
-| `train_fn` | Custom training function `(workflow, params, callbacks) -> None`. Defaults to `fit_online`. |
+| `simulator` | BayesFlow simulator for online training and validation data generation. |
+| `adapter` | BayesFlow adapter for data preprocessing. `param_keys`/`data_keys` are auto-inferred. |
+| `search_space` | **Required.** `CompositeSearchSpace` defining tunable dimensions. |
+| `build_approximator_fn` | Optional `(hparams) -> Approximator`. Must return an **uncompiled** approximator. Defaults to `build_continuous_approximator()`. |
+| `train_fn` | Optional `(approximator, simulator, hparams, callbacks) -> None`. Defaults to `default_train_fn()`. |
+| `validate_fn` | Optional `(approximator, validation_data, n_posterior_samples) -> dict[str, float]`. Defaults to `default_validate_fn()`. |
+| `validation_conditions` | Condition grid (e.g. `{"N": [50, 100, 200]}`). |
+| `sims_per_condition` | Simulations per condition grid point (default 200). |
+| `n_posterior_samples` | Posterior draws for validation (default 500). |
+| `objective_metrics` | Metric keys to optimize. Default `["calibration_error", "nrmse"]`. |
+| `objective_mode` | `"pareto"` (default) — each metric is its own objective. `"mean"` — arithmetic mean of metrics. |
+| `cost_metric` | Cost objective: `"inference_time"` (default) or `"param_count"`. |
+| `epochs` | Max training epochs per trial (default 200). |
+| `batches_per_epoch` | Online simulation batches per epoch (default 50). |
+| `early_stopping_patience` | Moving-average patience for early stopping (default 5). |
+| `early_stopping_window` | Moving-average window size (default 7). |
+| `max_param_count` | Reject trials exceeding this param count pre-training (default 1 000 000). |
+| `max_memory_mb` | Optional peak-memory budget in MB. Disabled by default. |
+| `n_trials` | Number of *trained* trials to collect (default 50). |
+| `max_total_trials` | Hard cap on non-rejected trials. Defaults to `3 * n_trials`. |
+| `resume` | If `True`, continue a previously persisted study. |
+| `checkpoint_pool` | Optional `CheckpointPool` for persisting best trial weights. |
+
+### `check_pipeline(...)`
+
+Pre-flight validation that catches interface errors before launching expensive studies. Called automatically at the start of `optimize()`.
+
+```python
+def check_pipeline(
+    simulator, adapter, search_space,
+    build_approximator_fn=None, train_fn=None, validate_fn=None,
+    objective_metrics=("calibration_error", "nrmse"),
+    sims_per_condition=5, n_posterior_samples=2,
+    validation_conditions=None, epochs=1, batches_per_epoch=1,
+) -> None
+```
+
+Raises `PipelineError` on builder failures, missing metric keys, or signature mismatches.
+
+### `infer_keys_from_adapter(adapter) -> dict`
+
+Walks the adapter's transform list to infer `param_keys`, `data_keys`, and `inference_conditions`.
+
+---
+
+## Type Aliases
+
+```python
+BuildApproximatorFn = Callable[[dict[str, Any]], Any]
+TrainFn = Callable[[Any, bf.simulators.Simulator, dict[str, Any], list], None]
+ValidateFn = Callable[[Any, ValidationDataset, int], dict[str, float]]
+```
 
 ---
 
@@ -92,21 +146,19 @@ list_summary_spaces() -> list[str]
 ## Builders
 
 ```python
-build_inference_network(params, search_space) -> bf.networks.InferenceNetwork
-build_summary_network(params, search_space) -> bf.networks.SummaryNetwork | None
-build_workflow(simulator, adapter, inference_network, summary_network, params, config) -> bf.BasicWorkflow
+build_continuous_approximator(hparams, adapter, search_space) -> ContinuousApproximator
 ```
 
-### WorkflowBuildConfig
+Builds an **uncompiled** `ContinuousApproximator` from sampled hyperparameters. Handles inference + optional summary network construction.
+
+### Default Hook Wrappers
 
 ```python
-@dataclass
-class WorkflowBuildConfig:
-    inference_conditions: list[str] | None = None
-    checkpoint_name: str = "bayesflow_hpo_trial"
-    batches_per_epoch: int = 50
-    optimizer: Any | None = None
+default_train_fn(approximator, simulator, hparams, callbacks) -> None
+default_validate_fn(approximator, validation_data, n_posterior_samples) -> dict[str, float]
 ```
+
+Public default implementations used by `optimize()` when no custom hooks are provided.
 
 ---
 
@@ -114,42 +166,55 @@ class WorkflowBuildConfig:
 
 ### ObjectiveConfig
 
-See [Optimization docs](optimization.md) for full field listing. Key fields:
-
 | Field | Default | Description |
 |-------|---------|-------------|
-| `metrics` | `None` | Metric names for validation (defaults to `DEFAULT_METRICS`) |
-| `objective_metric` | `"calibration_error"` | Summary key used as HPO objective |
-| `train_fn` | `None` | Custom training function (defaults to `fit_online`) |
-| `training_failure_penalty` | `(1.0, 1.5)` | Return value when training fails |
+| `simulator` | *(required)* | BayesFlow simulator |
+| `adapter` | *(required)* | BayesFlow adapter |
+| `search_space` | *(required)* | Composite search space |
+| `validation_data` | `None` | Pre-generated `ValidationDataset` |
+| `epochs` | `200` | Max training epochs per trial |
+| `batches_per_epoch` | `50` | Online batches per epoch |
+| `early_stopping_patience` | `5` | Moving-average patience |
+| `early_stopping_window` | `7` | Moving-average window |
+| `max_param_count` | `1_000_000` | Pre-training param budget |
+| `max_memory_mb` | `None` | Peak-memory budget (disabled) |
+| `n_posterior_samples` | `500` | Posterior draws for final validation |
+| `objective_metrics` | `["calibration_error", "nrmse"]` | Metric keys to optimize |
+| `objective_mode` | `"pareto"` | `"pareto"` or `"mean"` |
+| `cost_metric` | `"inference_time"` | Cost objective (`"inference_time"` or `"param_count"`) |
+| `checkpoint_pool` | `None` | Optional `CheckpointPool` |
+| `build_approximator_fn` | `None` | Custom build hook |
+| `train_fn` | `None` | Custom training hook |
+| `validate_fn` | `None` | Custom validation hook |
 
 ### GenericObjective
 
 ```python
 objective = GenericObjective(config: ObjectiveConfig)
-quality_metric, param_score = objective(trial: optuna.Trial)
+values = objective(trial: optuna.Trial)  # tuple of floats
 ```
 
 ### Study Management
 
 ```python
 create_study(study_name, directions, storage, load_if_exists, sampler, pruner,
-             warm_start_from, warm_start_top_k, warm_start_metric_index) -> optuna.Study
+             metric_names, warm_start_from, warm_start_top_k) -> optuna.Study
 resume_study(study_name, storage) -> optuna.Study
-warm_start_study(target_study, source_study, top_k, metric_index) -> int
+optimize_until(study, objective, n_trained, max_total_trials, show_progress_bar) -> None
+warm_start_study(target_study, source_study, top_k=25) -> int
 ```
 
 ### Callbacks
 
 ```python
-OptunaReportCallback(trial, monitor="loss", report_frequency=1)
+OptunaReportCallback(trial, monitor="loss", report_frequency=10)
 MovingAverageEarlyStopping(monitor="loss", window=5, patience=3, restore_best_weights=True)
+PeriodicValidationCallback(trial, approximator, validation_data, ...)
 ```
 
 ### Constraints
 
 ```python
-estimate_param_count(params) -> int
 estimate_peak_memory_mb(params, batch_size=None, dtype_bytes=4) -> float
 exceeds_memory_budget(params, max_memory_mb, batch_size=None) -> bool
 ```
@@ -229,9 +294,13 @@ aggregate_condition_rows(condition_rows: list[dict]) -> dict[str, float]
 
 ```python
 get_pareto_trials(study) -> list[optuna.trial.FrozenTrial]
-trials_to_dataframe(study, include_pruned=False) -> pd.DataFrame
+trials_to_dataframe(study, trained_only=True, include_pruned=False, extra_attrs=None) -> pd.DataFrame
+summarize_study(study, select_by=0, top_k=5) -> str
 plot_pareto_front(study, ax=None) -> matplotlib.axes.Axes
-plot_param_importance(study, ax=None, top_k=10) -> matplotlib.axes.Axes
+plot_optimization_history(study, ax=None) -> matplotlib.axes.Axes
+plot_metric_scatter(study, x_metric, y_metric, ax=None, show_iso_lines=None) -> matplotlib.axes.Axes
+plot_metric_panels(study, metrics=None, axes=None) -> matplotlib.axes.Axes | np.ndarray
+plot_param_importance(study, ax=None, top_k=10, *, target_name=None) -> matplotlib.axes.Axes
 get_workflow_metadata(config, model_type, validation_results=None, extra=None) -> dict
 save_workflow_with_metadata(approximator, path, metadata) -> Path
 load_workflow_with_metadata(path) -> tuple[Any, dict]
@@ -255,7 +324,9 @@ list_registered_network_spaces() -> dict[str, list[str]]
 get_param_count(model) -> int
 normalize_param_count(param_count) -> float
 denormalize_param_count(normalized) -> int
-extract_objective_values(metrics: dict, param_count: int) -> tuple[float, float]
+extract_objective_values(metrics, cost_score, objective_metric="calibration_error") -> tuple[float, float]
+extract_multi_objective_values(metrics, cost_score, objective_metrics, objective_mode="mean") -> tuple[float, ...]
+compute_inference_time_ratio(inference_time, sim_time_per_sim, n_sims) -> float
 loguniform_int(low, high, alpha=1.0, rng=None) -> int
 loguniform_float(low, high, alpha=1.0, rng=None) -> float
 ```
