@@ -1,7 +1,17 @@
 # Implementation Plan: Custom Approximator Hooks
 
 **Spec:** `docs/superpowers/specs/2026-03-13-custom-approximator-hooks-design.md`
-**Status:** Ready for implementation
+**Status:** DONE (all 7 phases implemented, 2026-03-14)
+
+| Phase | Status | Notes |
+|-------|--------|-------|
+| Phase 1: Type aliases & public default wrappers | DONE | `types.py`, `build_continuous_approximator()`, `default_train_fn()`, `default_validate_fn()` |
+| Phase 2: `check_pipeline()` pre-flight validation | DONE | `pipeline.py` with `PipelineError`, `_MockTrial`, `_TrackingDict`, arity checks |
+| Phase 3: Refactor `GenericObjective.__call__()` lifecycle | DONE | 11-step lifecycle, `_validate_metric_keys()`, hook integration |
+| Phase 4: Update `CheckpointPool` | DONE | `workflow` → `approximator` rename |
+| Phase 5: Update `optimize()` signature & orchestration | DONE | `search_space` required, old params removed, hooks wired, `check_pipeline()` called |
+| Phase 6: Update tests | DONE | `test_pipeline.py`, updated `test_api.py`, `test_objective.py` |
+| Phase 7: Cleanup & final exports | DONE | `build_workflow()`/`WorkflowBuildConfig` deleted, all new symbols exported |
 
 ## Overview
 
