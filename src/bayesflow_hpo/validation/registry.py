@@ -295,7 +295,7 @@ def make_coverage_metric(
         cal_errors: list[float] = []
 
         for level in levels:
-            level_int = int(level * 100)
+            level_int = round(level * 100)
 
             if side == "two-sided":
                 alpha = 1 - level

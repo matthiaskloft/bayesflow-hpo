@@ -191,30 +191,90 @@ incompatible hook signatures, etc.).
 
 ---
 
+## Validation & Results
+
+### 17. `validation/pipeline.py` uses `time.time()` instead of `time.perf_counter()`
+
+**File:** `validation/pipeline.py:72, 74, 77, 99`
+
+**Issue:** Uses `time.time()` for profiling, which is affected by system clock
+adjustments.  `validation/data.py` correctly uses `time.perf_counter()`.
+
+**Fix:** Replace all `time.time()` calls with `time.perf_counter()`.
+
+### 18. `inference.py` silently skips missing data keys
+
+**File:** `validation/inference.py:32`
+
+**Issue:** `{k: sim_data[k] for k in data_keys if k in sim_data}` silently
+drops keys not present in the simulation batch.  When a user passes wrong
+`data_keys`, `approximator.sample()` fails with a cryptic BayesFlow error
+instead of a clear "missing key" message.
+
+**Fix:** Validate all `data_keys` exist in `sim_data` before calling `sample()`.
+
+### 19. `make_coverage_metric` float-to-int truncation
+
+**File:** `validation/registry.py:298`
+
+**Issue:** `int(level * 100)` truncates instead of rounding.  For
+`level=0.975`, the key becomes `"coverage_97"` instead of `"coverage_98"`.
+
+**Fix:** Use `round(level * 100)` instead of `int(level * 100)`.
+
+### 20. `sbc_tests.py` returns NaN silently when scikit-learn is missing
+
+**File:** `validation/sbc_tests.py:66-70`
+
+**Issue:** C2ST returns `{"sbc_c2st_accuracy": NaN}` with no warning when
+`sklearn` is not installed.  Users may not realize the metric was skipped.
+
+**Fix:** Add a `logger.warning(...)` when sklearn is unavailable.
+
+### 21. `sbc_tests.py` uses deprecated `np.random.RandomState`
+
+**File:** `validation/sbc_tests.py:76`
+
+**Issue:** Uses `np.random.RandomState(random_state)` while the rest of the
+codebase uses `np.random.default_rng()`.
+
+**Fix:** Replace with `np.random.default_rng(random_state)` for consistency.
+
+### 22. `get_pareto_trials` / `summarize_study` no bounds check on `select_by`
+
+**File:** `results/extraction.py:229, 251`
+
+**Issue:** `select_by` is a user-facing int index into `trial.values` with no
+bounds checking.  Out-of-range values cause an `IndexError` with no context.
+
+**Fix:** Validate `0 <= select_by < len(study.directions)` at function entry.
+
+---
+
 ## Testing Gaps
 
-### 17. No test for `warm_start_study`
+### 23. No test for `warm_start_study`
 
 **File:** `optimization/study.py:169-218`
 
 **Issue:** Warm-start logic (ranking, trial copying, edge cases) has no unit
 tests.
 
-### 18. No test for `_training_loss_fallback`
+### 24. No test for `_training_loss_fallback`
 
 **File:** `optimization/objective.py:281-334`
 
 **Issue:** The validation-failure fallback path is critical but not directly
 tested.
 
-### 19. No test for `load_validation_dataset` round-trip
+### 25. No test for `load_validation_dataset` round-trip
 
 **File:** `validation/data.py:214-244`
 
 **Issue:** `save_validation_dataset` → `load_validation_dataset` round-trip
 is not tested.  Serialization bugs would go unnoticed.
 
-### 20. No test for `make_condition_grid` edge cases
+### 26. No test for `make_condition_grid` edge cases
 
 **File:** `validation/data.py:149-182`
 

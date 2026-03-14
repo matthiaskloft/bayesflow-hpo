@@ -69,12 +69,12 @@ def run_validation_pipeline(
 
     for cond_id, sim_batch in enumerate(validation_data.simulations):
         # --- Inference ---
-        t0 = time.time()
+        t0 = time.perf_counter()
         draws = infer_fn(sim_batch, n_posterior_samples)
-        timing["inference"] += time.time() - t0
+        timing["inference"] += time.perf_counter() - t0
 
         # --- Metrics per parameter ---
-        t1 = time.time()
+        t1 = time.perf_counter()
         if multi_param:
             if draws.ndim != 3:
                 raise ValueError(
@@ -96,7 +96,7 @@ def run_validation_pipeline(
             row = compute_condition_metrics(draws, true_values, cond_id, metric_fns)
             param_condition_rows[param_key].append(row)
 
-        timing["metrics"] += time.time() - t1
+        timing["metrics"] += time.perf_counter() - t1
         cleanup_trial()
 
     # --- Assemble result ---
