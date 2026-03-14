@@ -253,13 +253,6 @@ bounds checking.  Out-of-range values cause an `IndexError` with no context.
 
 ## Search Spaces
 
-### ~~27. ConsistencyModel `build()` casts `s0`, `s1`, `max_time` to `float` instead of `int`~~ — RESOLVED
-
-**File:** `search_spaces/inference/consistency.py:123-130`
-
-Fixed: Changed `float(...)` to `int(...)` for `max_time`, `s0`, and `s1`,
-matching their `IntDimension` declarations and BayesFlow's expected types.
-
 ### 28. `IntDimension` allows `log=True` + `step` simultaneously
 
 **File:** `search_spaces/base.py:49`
@@ -370,5 +363,12 @@ Resolved by custom approximator hooks (2026-03-14).
 ### ~~`run_validation_pipeline` assumes flat posterior shape~~ — RESOLVED
 
 Resolved by the `validate_fn` hook.
+
+### ~~ConsistencyModel `build()` casts `s0`, `s1`, `max_time` to `float` instead of `int`~~ — RESOLVED
+
+**File:** `search_spaces/inference/consistency.py:123-130`
+
+Changed `float(...)` to `int(...)` for `max_time`, `s0`, and `s1`,
+matching their `IntDimension` declarations and BayesFlow's expected types.
 
 </details>

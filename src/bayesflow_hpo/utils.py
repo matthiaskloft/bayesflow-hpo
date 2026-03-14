@@ -35,6 +35,8 @@ def loguniform_int(
         raise ValueError(f"low must be positive, got {low}")
     if high < low:
         raise ValueError(f"high must be >= low, got low={low}, high={high}")
+    if alpha <= 0:
+        raise ValueError(f"alpha must be positive, got {alpha}")
     random = rng if rng is not None else np.random
     log_low = np.log(low)
     log_high = np.log(high)
@@ -72,6 +74,8 @@ def loguniform_float(
         raise ValueError(f"low must be positive, got {low}")
     if high < low:
         raise ValueError(f"high must be >= low, got low={low}, high={high}")
+    if alpha <= 0:
+        raise ValueError(f"alpha must be positive, got {alpha}")
     random = rng if rng is not None else np.random
     log_low = np.log(low)
     log_high = np.log(high)

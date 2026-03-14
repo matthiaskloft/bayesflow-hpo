@@ -111,7 +111,8 @@ def _check_hook_arity(fn: Callable[..., Any], expected: int, name: str) -> None:
         p.kind == inspect.Parameter.VAR_POSITIONAL for p in sig.parameters.values()
     )
     if has_var_positional:
-        return  # *args — can't determine arity statically.
+        logger.debug("%s uses *args — skipping arity check for %r", name, fn)
+        return
 
     n_positional = sum(
         1 for p in sig.parameters.values() if p.kind in positional_kinds
