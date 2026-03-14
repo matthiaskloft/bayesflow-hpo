@@ -6,6 +6,8 @@ from bayesflow_hpo.objectives import FAILED_TRIAL_CAL_ERROR, FAILED_TRIAL_COST
 from bayesflow_hpo.optimization.objective import (
     GenericObjective,
     ObjectiveConfig,
+    _extract_best_training_loss,
+    _training_loss_fallback,
     _validate_metric_keys,
 )
 
@@ -752,3 +754,234 @@ def test_objective_custom_validate_fn_called_over_default(monkeypatch):
     assert len(validate_calls) == 1
     assert len(values) == 3
     assert values[0] == pytest.approx(0.05)  # calibration_error
+
+
+# --- Validation failure fallback tests ---
+
+
+def test_extract_best_training_loss_from_callback():
+    """Extracts best_ma_loss from a MovingAverageEarlyStopping callback."""
+    from bayesflow_hpo.optimization.callbacks import MovingAverageEarlyStopping
+
+    cb = MovingAverageEarlyStopping()
+    cb.best_ma_loss = 0.25
+    assert _extract_best_training_loss([object(), cb]) == 0.25
+
+
+def test_extract_best_training_loss_none_when_missing():
+    """Returns None when no MovingAverageEarlyStopping in callbacks."""
+    assert _extract_best_training_loss([object()]) is None
+
+
+def test_extract_best_training_loss_none_when_inf():
+    """Returns None when best_ma_loss is still inf (no improvement)."""
+    from bayesflow_hpo.optimization.callbacks import MovingAverageEarlyStopping
+
+    cb = MovingAverageEarlyStopping()
+    # best_ma_loss defaults to np.inf
+    assert _extract_best_training_loss([cb]) is None
+
+
+def test_training_loss_fallback_pareto_param_count():
+    """Fallback in pareto mode with param_count cost uses normalized params."""
+    penalty = (1.0, 1.0, 1e6)
+    values = _training_loss_fallback(
+        best_training_loss=0.3,
+        objective_metrics=["calibration_error", "nrmse"],
+        objective_mode="pareto",
+        param_count=50_000,
+        max_param_count=1_000_000,
+        cost_metric="param_count",
+        penalty=penalty,
+    )
+    assert len(values) == 3
+    assert values[0] == pytest.approx(0.3)
+    assert values[1] == pytest.approx(0.3)
+    # Cost should be a real normalized value, not the penalty
+    assert values[2] < 1e6
+    assert values[2] > 0.0
+
+
+def test_training_loss_fallback_pareto_inference_time():
+    """Fallback with inference_time cost uses penalty cost (no inference ran)."""
+    from bayesflow_hpo.objectives import FAILED_TRIAL_COST
+
+    penalty = (1.0, 1.0, FAILED_TRIAL_COST)
+    values = _training_loss_fallback(
+        best_training_loss=0.3,
+        objective_metrics=["calibration_error", "nrmse"],
+        objective_mode="pareto",
+        param_count=50_000,
+        max_param_count=1_000_000,
+        cost_metric="inference_time",
+        penalty=penalty,
+    )
+    assert len(values) == 3
+    assert values[0] == pytest.approx(0.3)
+    assert values[1] == pytest.approx(0.3)
+    assert values[2] == FAILED_TRIAL_COST
+
+
+def test_training_loss_fallback_mean():
+    """Fallback in mean mode returns (clamped_loss, cost)."""
+    penalty = (1.0, 1e6)
+    values = _training_loss_fallback(
+        best_training_loss=0.15,
+        objective_metrics=["calibration_error", "nrmse"],
+        objective_mode="mean",
+        param_count=50_000,
+        max_param_count=1_000_000,
+        cost_metric="param_count",
+        penalty=penalty,
+    )
+    assert len(values) == 2
+    assert values[0] == pytest.approx(0.15)
+    assert values[1] < 1e6
+
+
+def test_training_loss_fallback_clamps_above_one():
+    """Training loss > 1 is clamped to 1.0."""
+    values = _training_loss_fallback(
+        best_training_loss=2.5,
+        objective_metrics=["calibration_error"],
+        objective_mode="pareto",
+        param_count=50_000,
+        max_param_count=1_000_000,
+        cost_metric="param_count",
+        penalty=(1.0, 1e6),
+    )
+    assert values[0] == pytest.approx(1.0)
+
+
+def test_training_loss_fallback_none_returns_penalty():
+    """When training loss is None, falls back to full penalty."""
+    penalty = (1.0, 1.0, 1e6)
+    values = _training_loss_fallback(
+        best_training_loss=None,
+        objective_metrics=["calibration_error", "nrmse"],
+        objective_mode="pareto",
+        param_count=50_000,
+        max_param_count=1_000_000,
+        cost_metric="param_count",
+        penalty=penalty,
+    )
+    assert values == penalty
+
+
+def test_objective_validation_failure_uses_training_loss_fallback(monkeypatch):
+    """End-to-end: validation failure falls back to training loss, not penalty."""
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.estimate_peak_memory_mb",
+        lambda params: 1.0,
+    )
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.cleanup_trial",
+        lambda: None,
+    )
+
+    fake_approx = _FakeApproximator(param_count=10_000)
+
+    class _FakeSimulator:
+        def sample(self, shape):
+            return {}
+
+    class _FakeAdapter:
+        def __call__(self, data):
+            return data
+
+    class _FakeValidationData:
+        param_keys = ["theta"]
+        data_keys = ["x"]
+        simulations = []
+
+    def _train_with_loss(approximator, simulator, hparams, callbacks):
+        """Simulate training by setting best_ma_loss on early stopping cb."""
+        from bayesflow_hpo.optimization.callbacks import MovingAverageEarlyStopping
+
+        for cb in callbacks:
+            if isinstance(cb, MovingAverageEarlyStopping):
+                cb.best_ma_loss = 0.42
+                break
+
+    def _raise_validate(approx, vd, n):
+        raise RuntimeError("OOM during validation")
+
+    objective = GenericObjective(
+        ObjectiveConfig(
+            simulator=_FakeSimulator(),
+            adapter=_FakeAdapter(),
+            search_space=_FakeSearchSpace(),
+            epochs=1,
+            batches_per_epoch=1,
+            validation_data=_FakeValidationData(),
+            build_approximator_fn=lambda hp: fake_approx,
+            train_fn=_train_with_loss,
+            validate_fn=_raise_validate,
+        )
+    )
+
+    trial = _FakeTrial()
+    values = objective(trial)
+
+    # Should use training loss (0.42) for metrics, not penalty (1.0)
+    assert len(values) == 3
+    assert values[0] == pytest.approx(0.42)
+    assert values[1] == pytest.approx(0.42)
+    # Default cost_metric is "inference_time" — no inference ran, so
+    # cost falls back to FAILED_TRIAL_COST.
+    assert values[2] == FAILED_TRIAL_COST
+    assert "validation_error" in trial.user_attrs
+    assert trial.user_attrs["validation_fallback"] == "training_loss"
+
+
+def test_objective_validation_failure_without_training_loss_sets_penalty_attr(
+    monkeypatch,
+):
+    """When training loss is unavailable, validation_fallback is 'penalty'."""
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.estimate_peak_memory_mb",
+        lambda params: 1.0,
+    )
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.cleanup_trial",
+        lambda: None,
+    )
+
+    fake_approx = _FakeApproximator(param_count=10_000)
+
+    class _FakeSimulator:
+        def sample(self, shape):
+            return {}
+
+    class _FakeAdapter:
+        def __call__(self, data):
+            return data
+
+    class _FakeValidationData:
+        param_keys = ["theta"]
+        data_keys = ["x"]
+        simulations = []
+
+    def _raise_validate(approx, vd, n):
+        raise RuntimeError("OOM during validation")
+
+    objective = GenericObjective(
+        ObjectiveConfig(
+            simulator=_FakeSimulator(),
+            adapter=_FakeAdapter(),
+            search_space=_FakeSearchSpace(),
+            epochs=1,
+            batches_per_epoch=1,
+            validation_data=_FakeValidationData(),
+            build_approximator_fn=lambda hp: fake_approx,
+            train_fn=lambda approx, sim, hp, cb: None,  # no loss set
+            validate_fn=_raise_validate,
+        )
+    )
+
+    trial = _FakeTrial()
+    values = objective(trial)
+
+    # No training loss available → full penalty
+    assert values == (FAILED_TRIAL_CAL_ERROR, FAILED_TRIAL_CAL_ERROR, FAILED_TRIAL_COST)
+    assert trial.user_attrs["validation_fallback"] == "penalty"

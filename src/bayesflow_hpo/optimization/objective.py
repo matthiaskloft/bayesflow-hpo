@@ -263,6 +263,77 @@ class ObjectiveConfig:
             )
 
 
+def _extract_best_training_loss(callbacks: list[Any]) -> float | None:
+    """Extract the best moving-average loss from training callbacks.
+
+    Looks for a :class:`MovingAverageEarlyStopping` callback and returns
+    its ``best_ma_loss``.  Returns ``None`` if no such callback exists
+    or the value is non-finite.
+    """
+    for cb in callbacks:
+        if isinstance(cb, MovingAverageEarlyStopping):
+            val = cb.best_ma_loss
+            if math.isfinite(val):
+                return val
+    return None
+
+
+def _training_loss_fallback(
+    best_training_loss: float | None,
+    objective_metrics: list[str],
+    objective_mode: str,
+    param_count: int,
+    max_param_count: int,
+    cost_metric: str,
+    penalty: tuple[float, ...],
+) -> tuple[float, ...]:
+    """Build objective values from training loss when validation fails.
+
+    Uses the best moving-average training loss (clamped to [0, 1]) as a
+    proxy for each metric objective, paired with a cost score.  When
+    ``cost_metric`` is ``"param_count"``, the real normalized param count
+    is used; when ``"inference_time"``, the penalty cost is used since
+    no inference was performed.  Falls back to full penalty values if
+    the training loss is unavailable.
+
+    Parameters
+    ----------
+    best_training_loss
+        Best moving-average training loss, or ``None`` if unavailable.
+    objective_metrics
+        Metric keys being optimized.
+    objective_mode
+        ``"pareto"`` or ``"mean"``.
+    param_count
+        Actual parameter count from the built model.
+    max_param_count
+        Budget cap for param-count normalization.
+    cost_metric
+        ``"inference_time"`` or ``"param_count"``.
+    penalty
+        Full penalty tuple to return if training loss is unavailable.
+    """
+    if best_training_loss is None:
+        return penalty
+
+    # Clamp to [0, 1] — training loss is not directly comparable to
+    # calibration metrics, but a lower loss is a reasonable proxy for
+    # better performance.  Clamping ensures the value fits the same
+    # scale as the metric objectives.
+    clamped_loss = max(0.0, min(1.0, best_training_loss))
+
+    if cost_metric == "param_count":
+        cost_score = normalize_param_count(param_count, max_count=max_param_count)
+    else:
+        # No inference was performed, so use the penalty cost value.
+        cost_score = FAILED_TRIAL_COST
+
+    if objective_mode == "pareto":
+        return tuple([clamped_loss] * len(objective_metrics)) + (cost_score,)
+    # "mean" mode
+    return (clamped_loss, cost_score)
+
+
 def _log_trial_summary(
     trial: optuna.Trial,
     values: tuple[float, ...],
@@ -503,6 +574,9 @@ class GenericObjective:
         training_time = time.perf_counter() - t_train_start
         trial.set_user_attr("training_time_s", round(training_time, 2))
 
+        # Extract best training loss for potential validation fallback.
+        best_training_loss = _extract_best_training_loss(callbacks)
+
         # --- Step 8: VALIDATE ---
         inference_time = 0.0
         try:
@@ -549,9 +623,22 @@ class GenericObjective:
                 trial.number, exc,
             )
             trial.set_user_attr("validation_error", str(exc))
-            values = self._penalty()
+            values = _training_loss_fallback(
+                best_training_loss,
+                config.objective_metrics,
+                config.objective_mode,
+                param_count_actual,
+                config.max_param_count,
+                config.cost_metric,
+                self._penalty(),
+            )
+            trial.set_user_attr(
+                "validation_fallback",
+                "training_loss" if best_training_loss is not None else "penalty",
+            )
             _log_trial_summary(
-                trial, values, -1, training_time, self._metric_label,
+                trial, values, param_count_actual,
+                training_time, self._metric_label,
             )
             cleanup_trial()
             return values
