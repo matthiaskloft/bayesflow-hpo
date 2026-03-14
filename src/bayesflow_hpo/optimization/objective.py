@@ -257,6 +257,10 @@ class ObjectiveConfig:
                 f"Unknown cost_metric: {self.cost_metric!r}. "
                 f"Expected 'inference_time' or 'param_count'."
             )
+        if self.report_frequency < 1:
+            raise ValueError(
+                f"report_frequency must be >= 1, got {self.report_frequency}."
+            )
 
 
 def _log_trial_summary(

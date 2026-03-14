@@ -60,3 +60,16 @@ def test_optuna_report_callback_default_frequency_is_10():
     assert set(trial.user_attrs.keys()) == {
         "epoch_0_loss", "epoch_10_loss", "epoch_20_loss",
     }
+
+
+def test_optuna_report_callback_frequency_one_records_every_epoch():
+    """report_frequency=1 records every epoch."""
+    trial = _TrialStub()
+    callback = OptunaReportCallback(
+        trial=trial, monitor="loss", report_frequency=1,
+    )
+
+    for epoch in range(5):
+        callback.on_epoch_end(epoch=epoch, logs={"loss": float(epoch)})
+
+    assert len(trial.user_attrs) == 5
