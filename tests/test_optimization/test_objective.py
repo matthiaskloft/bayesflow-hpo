@@ -408,6 +408,20 @@ def test_objective_config_rejects_invalid_mode():
         )
 
 
+def test_objective_config_rejects_invalid_report_frequency():
+    """ObjectiveConfig rejects report_frequency < 1."""
+    with pytest.raises(ValueError, match="report_frequency must be >= 1"):
+        ObjectiveConfig(
+            simulator=object(),
+            adapter=object(),
+            search_space=_FakeSearchSpace(),
+            epochs=1,
+            batches_per_epoch=1,
+            validation_data=None,
+            report_frequency=0,
+        )
+
+
 def test_objective_config_rejects_invalid_cost_metric():
     """ObjectiveConfig eagerly validates cost_metric."""
     with pytest.raises(ValueError, match="Unknown cost_metric"):

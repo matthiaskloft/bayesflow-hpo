@@ -150,6 +150,32 @@ def test_optimize_default_objective_mode():
     assert config.objective_mode == "pareto"
 
 
+def test_optimize_forwards_report_frequency():
+    """report_frequency is forwarded to ObjectiveConfig."""
+    config = _patched_optimize(report_frequency=25)
+    assert config.report_frequency == 25
+
+
+def test_optimize_default_report_frequency():
+    """Default report_frequency is 10."""
+    config = _patched_optimize()
+    assert config.report_frequency == 10
+
+
+def test_optimize_rejects_invalid_report_frequency():
+    """optimize() fails fast on report_frequency < 1 before any setup."""
+    from conftest import canonical_adapter
+
+    with pytest.raises(ValueError, match="report_frequency must be >= 1"):
+        optimize(
+            simulator=MagicMock(),
+            adapter=canonical_adapter(),
+            search_space=_make_fake_search_space(),
+            storage=None,
+            report_frequency=0,
+        )
+
+
 def test_optimize_calls_check_pipeline():
     """check_pipeline() is called at start of optimize()."""
     adapter = canonical_adapter()
