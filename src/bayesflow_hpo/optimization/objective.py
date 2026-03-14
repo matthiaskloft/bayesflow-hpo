@@ -276,14 +276,17 @@ def _training_loss_fallback(
     objective_mode: str,
     param_count: int,
     max_param_count: int,
+    cost_metric: str,
     penalty: tuple[float, ...],
 ) -> tuple[float, ...]:
     """Build objective values from training loss when validation fails.
 
     Uses the best moving-average training loss (clamped to [0, 1]) as a
-    proxy for each metric objective, paired with the real cost score
-    derived from param count.  Falls back to full penalty values if the
-    training loss is unavailable.
+    proxy for each metric objective, paired with a cost score.  When
+    ``cost_metric`` is ``"param_count"``, the real normalized param count
+    is used; when ``"inference_time"``, the penalty cost is used since
+    no inference was performed.  Falls back to full penalty values if
+    the training loss is unavailable.
 
     Parameters
     ----------
@@ -297,6 +300,8 @@ def _training_loss_fallback(
         Actual parameter count from the built model.
     max_param_count
         Budget cap for param-count normalization.
+    cost_metric
+        ``"inference_time"`` or ``"param_count"``.
     penalty
         Full penalty tuple to return if training loss is unavailable.
     """
@@ -308,7 +313,12 @@ def _training_loss_fallback(
     # better performance.  Clamping ensures the value fits the same
     # scale as the metric objectives.
     clamped_loss = max(0.0, min(1.0, best_training_loss))
-    cost_score = normalize_param_count(param_count, max_count=max_param_count)
+
+    if cost_metric == "param_count":
+        cost_score = normalize_param_count(param_count, max_count=max_param_count)
+    else:
+        # No inference was performed, so use the penalty cost value.
+        cost_score = FAILED_TRIAL_COST
 
     if objective_mode == "pareto":
         return tuple([clamped_loss] * len(objective_metrics)) + (cost_score,)
@@ -608,10 +618,12 @@ class GenericObjective:
                 config.objective_mode,
                 param_count_actual,
                 config.max_param_count,
+                config.cost_metric,
                 self._penalty(),
             )
             trial.set_user_attr(
-                "validation_fallback", "training_loss",
+                "validation_fallback",
+                "training_loss" if best_training_loss is not None else "penalty",
             )
             _log_trial_summary(
                 trial, values, param_count_actual,
