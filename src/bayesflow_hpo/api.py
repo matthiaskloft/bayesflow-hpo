@@ -114,6 +114,8 @@ def optimize(
     batches_per_epoch: int = 50,
     early_stopping_patience: int = 5,
     early_stopping_window: int = 7,
+    # Logging
+    report_frequency: int = 10,
     # Budget
     max_param_count: int = 1_000_000,
     max_memory_mb: float | None = None,
@@ -196,6 +198,11 @@ def optimize(
         Moving-average patience epochs for early stopping (default 5).
     early_stopping_window
         Moving-average window size for early stopping (default 7).
+    report_frequency
+        How often (in epochs) the ``OptunaReportCallback`` stores
+        ``epoch_{N}_loss`` user attributes on each trial.  Higher
+        values reduce SQLite bloat at the cost of coarser loss
+        curves.  Default 10.
     max_param_count
         Trials with actual parameter count above this value are
         rejected before training (default 1 000 000).
@@ -290,6 +297,7 @@ def optimize(
             objective_metrics=objective_metrics,
             objective_mode=objective_mode,
             cost_metric=cost_metric,
+            report_frequency=report_frequency,
             build_approximator_fn=build_approximator_fn,
             train_fn=train_fn,
             validate_fn=validate_fn,

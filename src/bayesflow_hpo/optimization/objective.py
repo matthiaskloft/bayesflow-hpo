@@ -202,6 +202,9 @@ class ObjectiveConfig:
     cost_metric
         Which cost objective to use as the last Optuna objective.
         ``"inference_time"`` (default) or ``"param_count"``.
+    report_frequency
+        How often (in epochs) the ``OptunaReportCallback`` stores
+        ``epoch_{N}_loss`` user attributes on each trial (default 10).
     checkpoint_pool
         Optional :class:`CheckpointPool` to persist the best trial
         weights.  When ``None`` a default pool of size 5 is created.
@@ -238,6 +241,7 @@ class ObjectiveConfig:
     objective_mode: str = "pareto"
     cost_metric: str = "inference_time"
     checkpoint_pool: CheckpointPool | None = None
+    report_frequency: int = 10
     build_approximator_fn: BuildApproximatorFn | None = None
     train_fn: TrainFn | None = None
     validate_fn: ValidateFn | None = None
@@ -454,7 +458,10 @@ class GenericObjective:
                 patience=config.early_stopping_patience,
                 restore_best_weights=True,
             ),
-            OptunaReportCallback(trial, monitor="loss"),
+            OptunaReportCallback(
+                trial, monitor="loss",
+                report_frequency=config.report_frequency,
+            ),
         ]
 
         if config.validation_data is not None:

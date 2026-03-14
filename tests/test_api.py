@@ -150,6 +150,18 @@ def test_optimize_default_objective_mode():
     assert config.objective_mode == "pareto"
 
 
+def test_optimize_forwards_report_frequency():
+    """report_frequency is forwarded to ObjectiveConfig."""
+    config = _patched_optimize(report_frequency=25)
+    assert config.report_frequency == 25
+
+
+def test_optimize_default_report_frequency():
+    """Default report_frequency is 10."""
+    config = _patched_optimize()
+    assert config.report_frequency == 10
+
+
 def test_optimize_calls_check_pipeline():
     """check_pipeline() is called at start of optimize()."""
     adapter = canonical_adapter()
