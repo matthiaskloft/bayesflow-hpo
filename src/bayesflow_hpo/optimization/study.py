@@ -93,12 +93,17 @@ def create_study(
         multivariate=True, n_startup_trials=25)``.
     pruner
         Optuna pruner.  Default ``MedianPruner(n_startup_trials=5,
-        n_warmup_steps=1, interval_steps=1)``.  For single-objective
-        studies, pruning uses this pruner via ``trial.should_prune()``.
-        For multi-objective studies (the default), the Optuna pruner is
-        **not** used; instead,
-        :class:`~bayesflow_hpo.optimization.validation_callback.PeriodicValidationCallback`
-        applies a custom median-based strategy.
+        n_warmup_steps=1, interval_steps=1)``.
+
+        **Single-objective only.**  This pruner is consulted via
+        ``trial.should_prune()`` only in single-objective studies.
+        In multi-objective studies (the default, with two or more
+        directions), Optuna does not support ``trial.report()``
+        so this parameter is ignored; pruning is instead handled by
+        :class:`~bayesflow_hpo.optimization.validation_callback.PeriodicValidationCallback`,
+        which applies a custom median-based strategy that compares
+        each trial's intermediate score against the median of
+        completed trials.
     warm_start_from
         Optional source study to seed initial trials from.
     warm_start_top_k
@@ -120,8 +125,10 @@ def create_study(
         )
 
     if pruner is None:
-        # The step counter is managed by PeriodicValidationCallback, so
-        # we set warmup/interval to 1 and let the callback decide timing.
+        # Only used for single-objective studies (trial.should_prune()).
+        # For multi-objective, PeriodicValidationCallback handles pruning.
+        # The step counter is managed by the callback, so we set
+        # warmup/interval to 1 and let the callback decide timing.
         pruner = optuna.pruners.MedianPruner(
             n_startup_trials=5,
             n_warmup_steps=1,
