@@ -15,11 +15,11 @@ Items marked **(pre-existing)** were not introduced by the pruning PR.
 
 **Status:** Now logs at `WARNING` level (line 210) and tracks consecutive failures with a warning after 3 (lines 157-161). Still returns `None` on failure rather than raising, but this is intentional — intermediate validation failures should not crash the trial.
 
-### Final validation not wrapped in try-except (pre-existing) — OPEN
+### ~~Final validation not wrapped in try-except (pre-existing)~~ — RESOLVED
 
 **File:** `optimization/objective.py` (step 8 in `__call__`)
 
-If the final `run_validation_pipeline` call fails (OOM, numerical error), the trial crashes after a full training run. Should fall back to training-loss-based objective values instead of losing the trial entirely.
+Fixed: When final validation fails (OOM, numerical error), the trial now falls back to training-loss-based objective values instead of returning worst-case penalty values. The best moving-average training loss (from `MovingAverageEarlyStopping`) is clamped to [0, 1] and used as a proxy for each metric objective, paired with the real param-count-based cost score. If no training loss is available, falls back to full penalty values. The trial is flagged with `validation_fallback=training_loss` in user attrs.
 
 ### ~~`get_param_count` returns -1 on error~~ — RESOLVED
 
