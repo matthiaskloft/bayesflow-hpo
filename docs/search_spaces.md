@@ -8,13 +8,13 @@ All dimensions are defined in `search_spaces/base.py`:
 
 | Type | Fields | Example |
 |------|--------|---------|
-| `IntDimension` | name, low, high, step, log, default | `IntDimension("depth", 2, 12, default=True)` |
-| `FloatDimension` | name, low, high, log, default | `FloatDimension("dropout", 0.0, 0.3, default=True)` |
-| `CategoricalDimension` | name, choices, default | `CategoricalDimension("activation", ["relu", "silu"])` |
+| `IntDimension` | name, low, high, step, log, enabled | `IntDimension("depth", 2, 12, enabled=True)` |
+| `FloatDimension` | name, low, high, log, enabled | `FloatDimension("dropout", 0.0, 0.3, enabled=True)` |
+| `CategoricalDimension` | name, choices, enabled | `CategoricalDimension("activation", ["relu", "silu"])` |
 
-The `default` flag controls whether a dimension is tuned:
-- `default=True` — always included in the search
-- `default=False` — only included when `include_optional=True`
+The `enabled` flag controls whether a dimension is tuned:
+- `enabled=True` — always included in the search
+- `enabled=False` — only included when `include_optional=True`
 
 ## Inference Network Spaces
 
