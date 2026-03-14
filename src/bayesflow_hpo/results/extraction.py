@@ -56,7 +56,6 @@ DEFAULT_RESULT_ATTRS = [
     "inference_time_s",
     "inference_time_ratio",
     "calibration_error",
-    "mean_cal_error",
     "nrmse",
     "correlation",
     "rmse",

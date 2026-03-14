@@ -28,12 +28,17 @@ import bayesflow_hpo as hpo
 study = hpo.optimize(
     simulator=simulator,          # your BayesFlow simulator
     adapter=adapter,              # your BayesFlow adapter
+    search_space=hpo.CompositeSearchSpace(
+        inference_space=hpo.FlowMatchingSpace(),
+        summary_space=hpo.DeepSetSpace(),
+        training_space=hpo.TrainingSpace(),
+    ),
     validation_conditions={"N": [50, 100, 200]},
     n_trials=50,
 )
 ```
 
-`optimize()` automatically infers `param_keys` and `data_keys` from adapter transforms, so in most cases you don't need to pass them explicitly.
+`optimize()` automatically infers `param_keys` and `data_keys` from adapter transforms, generates a fixed validation dataset, and runs `check_pipeline()` to catch interface errors before GPU hours are wasted.
 
 ## How it works
 
@@ -50,9 +55,11 @@ study = hpo.optimize(
                                  Each trial:
                                  1. Sample hyperparameters
                                  2. Budget check (reject if too large)
-                                 3. Build & train workflow
-                                 4. Validate on fixed dataset
-                                 5. Report metrics to Optuna
+                                 3. Build approximator
+                                 4. Compile with Adam + CosineDecay
+                                 5. Train
+                                 6. Validate on fixed dataset
+                                 7. Report metrics to Optuna
 ```
 
 ## Features
@@ -78,9 +85,61 @@ space = CompositeSearchSpace(inference_space=CouplingFlowSpace(), training_space
 study = hpo.optimize(..., search_space=space)
 ```
 
+### Custom approximator hooks
+
+Three optional hooks let you replace the build, train, and validate steps while reusing the full trial lifecycle (budget rejection, early stopping, checkpoint management, cost scoring):
+
+```python
+def build_my_approximator(hparams):
+    """Return an uncompiled approximator."""
+    return MyCustomApproximator(
+        depth=hparams["depth"],
+        hidden_dim=hparams["hidden_dim"],
+        adapter=adapter,
+    )
+
+def my_validate(approximator, validation_data, n_posterior_samples):
+    """Return dict[str, float] of metric values."""
+    loss = approximator.evaluate(validation_data)
+    return {"calibration_error": loss}
+
+study = hpo.optimize(
+    simulator=simulator,
+    adapter=adapter,
+    search_space=search_space,
+    build_approximator_fn=build_my_approximator,
+    validate_fn=my_validate,
+    objective_metrics=["calibration_error"],
+    n_trials=30,
+)
+```
+
+The default implementations are importable so you can inspect, copy, or extend them:
+
+- `hpo.build_continuous_approximator(hparams, adapter, search_space)`
+- `hpo.default_train_fn(approximator, simulator, hparams, callbacks)`
+- `hpo.default_validate_fn(approximator, validation_data, n_posterior_samples)`
+
+### Pre-flight validation
+
+`check_pipeline()` dry-runs the full build → compile → train → validate lifecycle with minimal cost to catch interface errors early:
+
+```python
+hpo.check_pipeline(
+    simulator=simulator,
+    adapter=adapter,
+    search_space=search_space,
+    build_approximator_fn=build_my_approximator,
+    validate_fn=my_validate,
+    objective_metrics=["calibration_error"],
+)
+```
+
+Called automatically at the start of `optimize()`. Validates hook signatures, approximator interfaces, and metric key coverage.
+
 ### Multi-objective optimization
 
-Single-metric (default), mean-aggregated, or full Pareto-front optimization:
+Single-metric, mean-aggregated, or full Pareto-front optimization:
 
 ```python
 # Mean of multiple metrics
@@ -92,11 +151,11 @@ study = hpo.optimize(..., objective_metrics=["calibration_error", "nrmse"], obje
 
 ### Validation metrics
 
-14 built-in metrics with a registry for custom ones:
+13 built-in metrics with a registry for custom ones:
 
 | Category | Metrics |
 |---|---|
-| Calibration | `calibration_error`, `mean_cal_error`, `coverage`, `coverage_left`, `coverage_right` |
+| Calibration | `calibration_error`, `coverage`, `coverage_left`, `coverage_right` |
 | Accuracy | `rmse`, `nrmse`, `mae`, `bias`, `correlation` |
 | Diagnostics | `contraction`, `z_score`, `log_gamma` |
 | SBC | `sbc` (KS test, chi-squared, C2ST) |
@@ -104,7 +163,6 @@ study = hpo.optimize(..., objective_metrics=["calibration_error", "nrmse"], obje
 ```python
 # Register a custom metric
 hpo.register_metric("my_metric", my_metric_fn)
-study = hpo.optimize(..., metrics=["calibration_error", "my_metric"])
 ```
 
 ### Budget constraints
