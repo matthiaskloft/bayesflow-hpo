@@ -162,6 +162,20 @@ def test_optimize_default_report_frequency():
     assert config.report_frequency == 10
 
 
+def test_optimize_rejects_invalid_report_frequency():
+    """optimize() fails fast on report_frequency < 1 before any setup."""
+    from conftest import canonical_adapter
+
+    with pytest.raises(ValueError, match="report_frequency must be >= 1"):
+        optimize(
+            simulator=MagicMock(),
+            adapter=canonical_adapter(),
+            search_space=_make_fake_search_space(),
+            storage=None,
+            report_frequency=0,
+        )
+
+
 def test_optimize_calls_check_pipeline():
     """check_pipeline() is called at start of optimize()."""
     adapter = canonical_adapter()

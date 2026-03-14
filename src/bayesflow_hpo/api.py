@@ -243,6 +243,12 @@ def optimize(
     if objective_metrics is None:
         objective_metrics = ["calibration_error", "nrmse"]
 
+    # --- Early validation ---
+    if report_frequency < 1:
+        raise ValueError(
+            f"report_frequency must be >= 1, got {report_frequency}."
+        )
+
     # --- Derive keys from adapter ---
     adapter_keys = infer_keys_from_adapter(adapter)
     param_keys = adapter_keys["param_keys"]
