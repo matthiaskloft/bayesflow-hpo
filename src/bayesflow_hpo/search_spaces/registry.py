@@ -147,7 +147,7 @@ def _resolve_summary_name(name: str) -> str:
     return SUMMARY_ALIASES.get(key, key)
 
 
-def get_inference_space(name: str):
+def get_inference_space(name: str) -> SearchSpace:
     """Construct an inference search space from a short name."""
     resolved = _resolve_inference_name(name)
     factory = INFERENCE_SPACE_FACTORIES.get(resolved)
@@ -156,7 +156,7 @@ def get_inference_space(name: str):
     raise KeyError(f"Unknown inference space: {name}")
 
 
-def get_summary_space(name: str):
+def get_summary_space(name: str) -> SearchSpace:
     """Construct a summary search space from a short name."""
     resolved = _resolve_summary_name(name)
     factory = SUMMARY_SPACE_FACTORIES.get(resolved)

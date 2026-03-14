@@ -121,12 +121,12 @@ class ConsistencyModelSpace(BaseSearchSpace):
             },
         }
         if "cm_max_time" in params:
-            kwargs["max_time"] = float(params["cm_max_time"])
+            kwargs["max_time"] = int(params["cm_max_time"])
         if "cm_sigma2" in params:
             kwargs["sigma2"] = float(params["cm_sigma2"])
         if "cm_s0" in params:
-            kwargs["s0"] = float(params["cm_s0"])
+            kwargs["s0"] = int(params["cm_s0"])
         if "cm_s1" in params:
-            kwargs["s1"] = float(params["cm_s1"])
+            kwargs["s1"] = int(params["cm_s1"])
 
         return bf.networks.ConsistencyModel(**kwargs)

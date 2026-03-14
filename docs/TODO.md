@@ -251,6 +251,39 @@ bounds checking.  Out-of-range values cause an `IndexError` with no context.
 
 ---
 
+## Search Spaces
+
+### ~~27. ConsistencyModel `build()` casts `s0`, `s1`, `max_time` to `float` instead of `int`~~ — RESOLVED
+
+**File:** `search_spaces/inference/consistency.py:123-130`
+
+Fixed: Changed `float(...)` to `int(...)` for `max_time`, `s0`, and `s1`,
+matching their `IntDimension` declarations and BayesFlow's expected types.
+
+### 28. `IntDimension` allows `log=True` + `step` simultaneously
+
+**File:** `search_spaces/base.py:49`
+
+**Issue:** Optuna's `trial.suggest_int()` raises `ValueError` when both
+`log=True` and `step` (other than 1) are set.  No current space triggers this,
+but the data model permits it, so a user customizing dimensions could hit a
+runtime error.
+
+**Fix:** Add validation in `BaseSearchSpace.sample()` or `IntDimension.__post_init__`.
+
+### 29. `FusionTransformerSpace` missing `mlp_width` and `bidirectional` dimensions
+
+**File:** `search_spaces/summary/fusion_transformer.py`
+
+**Issue:** `SetTransformerSpace` and `TimeSeriesTransformerSpace` expose
+`mlp_width` (optional) and `TimeSeriesNetworkSpace` exposes `bidirectional`,
+but `FusionTransformerSpace` has neither.  Inconsistent across transformer-based
+summary spaces.
+
+**Fix:** Add `ft_mlp_width` and `ft_bidirectional` as optional dimensions.
+
+---
+
 ## Testing Gaps
 
 ### 23. No test for `warm_start_study`
