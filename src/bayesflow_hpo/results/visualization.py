@@ -213,7 +213,7 @@ def plot_pareto_front(
     ax.set_xlabel(xlabel or obj_cols[0])
     ax.set_ylabel(ylabel or "Parameter count")
     ax.set_title("Pareto front")
-    ax.legend()
+    ax.legend(loc="best", framealpha=0.8)
     return ax
 
 
@@ -256,7 +256,7 @@ def plot_optimization_history(
     ax.set_xlabel("Trial")
     ax.set_ylabel(obj_cols[0])
     ax.set_title("Optimization history")
-    ax.legend()
+    ax.legend(loc="best", framealpha=0.8)
     return ax
 
 
@@ -339,7 +339,7 @@ def plot_metric_scatter(
     ax.set_xlabel(x_metric)
     ax.set_ylabel(y_metric)
     ax.set_title(f"{x_metric} vs {y_metric}")
-    ax.legend()
+    ax.legend(loc="best", framealpha=0.8, fontsize="small")
     return ax
 
 
@@ -655,6 +655,11 @@ def plot_pareto_projections(
 
         ax.set_xlabel(obj_cols[i])
         ax.set_ylabel(obj_cols[j])
+        # Apply param_count formatter on axes showing param-related metrics
+        if "param" in obj_cols[i].lower():
+            ax.xaxis.set_major_formatter(_param_count_formatter())
+        if "param" in obj_cols[j].lower():
+            ax.yaxis.set_major_formatter(_param_count_formatter())
         ax.set_title(f"{obj_cols[i]} vs {obj_cols[j]}")
         ax.legend(loc="best", framealpha=0.8, fontsize="small")
 
