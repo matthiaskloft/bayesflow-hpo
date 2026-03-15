@@ -40,7 +40,7 @@ Continuous normalizing flow via flow matching (`FlowMatching`).
 | Dimension | Type | Range | Default |
 |-----------|------|-------|---------|
 | `fm_subnet_width` | int | [32, 256], log | yes |
-| `fm_subnet_depth` | int | [1, 4] | yes |
+| `fm_subnet_depth` | int | [1, 6] | yes |
 | `fm_dropout` | float | [0.0, 0.2] | yes |
 | `fm_activation` | cat | mish, silu | yes |
 | `fm_use_ot` | cat | True, False | no |
@@ -55,7 +55,7 @@ Score-based diffusion model (`DiffusionModel`).
 | Dimension | Type | Range | Default |
 |-----------|------|-------|---------|
 | `dm_subnet_width` | int | [32, 256], log | yes |
-| `dm_subnet_depth` | int | [1, 4] | yes |
+| `dm_subnet_depth` | int | [1, 6] | yes |
 | `dm_dropout` | float | [0.0, 0.2] | yes |
 | `dm_activation` | cat | mish, silu | yes |
 | `dm_noise_schedule` | cat | edm, cosine | no |
@@ -68,7 +68,7 @@ Consistency model (`ConsistencyModel`).
 | Dimension | Type | Range | Default |
 |-----------|------|-------|---------|
 | `cm_subnet_width` | int | [32, 256], log | yes |
-| `cm_subnet_depth` | int | [1, 4] | yes |
+| `cm_subnet_depth` | int | [1, 6] | yes |
 | `cm_dropout` | float | [0.0, 0.2] | yes |
 | `cm_max_time` | int | [50, 500] | no |
 | `cm_sigma2` | float | [0.1, 2.0] | no |
@@ -84,7 +84,7 @@ Stable variant of the consistency model (`StableConsistencyModel`).
 | Dimension | Type | Range | Default |
 |-----------|------|-------|---------|
 | `scm_subnet_width` | int | [32, 256], log | yes |
-| `scm_subnet_depth` | int | [1, 4] | yes |
+| `scm_subnet_depth` | int | [1, 6] | yes |
 | `scm_dropout` | float | [0.0, 0.2] | yes |
 | `scm_sigma` | float | [0.1, 2.0] | no |
 
@@ -96,7 +96,7 @@ Permutation-invariant summary via DeepSets (`DeepSet`).
 
 | Dimension | Type | Range | Default |
 |-----------|------|-------|---------|
-| `ds_summary_dim` | int | [4, 32], log | yes |
+| `ds_summary_dim` | int | [4, 64], step 4 | yes |
 | `ds_depth` | int | [1, 4] | yes |
 | `ds_width` | int | [32, 256], log | yes |
 | `ds_dropout` | float | [0.0, 0.3] | yes |
@@ -146,7 +146,7 @@ Transformer-based temporal summary (`TimeSeriesTransformer`).
 | `tst_num_layers` | int | [1, 4] | yes |
 | `tst_dropout` | float | [0.0, 0.3] | yes |
 | `tst_mlp_width` | int | [64, 512], log | no |
-| `tst_time_embed` | cat | time2vec, sinusoidal | no |
+| `tst_time_embed` | cat | time2vec, lstm, gru | no |
 
 ### FusionTransformerSpace
 

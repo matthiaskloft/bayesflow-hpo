@@ -69,7 +69,7 @@ samples the corresponding network-specific dimensions.
 | Dimension | Range | Sampled? | Fallback |
 |-----------|-------|----------|----------|
 | `fm_subnet_width` | 32--256, step 32 | Always | -- |
-| `fm_subnet_depth` | 1--4 | Always | -- |
+| `fm_subnet_depth` | 1--6 | Always | -- |
 | `fm_dropout` | 0.0--0.2 | Always | -- |
 | `fm_activation` | mish, silu | Optional | `"mish"` |
 | `fm_use_ot` | True, False | Optional | `False` |
@@ -79,7 +79,7 @@ samples the corresponding network-specific dimensions.
 
 | Dimension | Range | Sampled? | Fallback |
 |-----------|-------|----------|----------|
-| `ds_summary_dim` | 4--64 | Always | -- |
+| `ds_summary_dim` | 4--64, step 4 | Always | -- |
 | `ds_depth` | 1--4 | Always | -- |
 | `ds_width` | 32--256, step 32 | Always | -- |
 | `ds_dropout` | 0.0--0.3 | Always | -- |

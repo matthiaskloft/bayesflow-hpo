@@ -4,49 +4,10 @@ Tracked items for ongoing development. Updated by contributors and Claude Code s
 
 ## Open
 
-### 1. Prettify `summarize_study()` output
-**File:** `results/extraction.py`
-
-Current output is too wide and prints raw floats (e.g. `0.05454749016213018`).
-- Round floats contextually: dropout to 2 decimals, learning rate to scientific notation or 4 sig figs, widths/depths as integers
-- Tighten the top-k leaderboard: narrower columns, abbreviate long metric names
-- Keep it readable in an 80-char terminal
-
-### 2. New `trial_table()` function for full trial export
-**File:** `results/extraction.py` (new function)
-
-A function that returns a formatted DataFrame of the k best trials (default = all),
-including objective values, all search space hyperparameters, and optionally
-further user-attribute metrics. Must be `.to_csv()`-savable.
-
-```python
-def trial_table(
-    study: optuna.Study,
-    top_k: int | None = None,       # None = all trials
-    select_by: int = 0,             # objective index to rank by
-    metrics: list[str] | None = None,  # extra user_attrs to include
-    trained_only: bool = True,
-) -> pd.DataFrame
-```
-
-Differences from `trials_to_dataframe()`: ranked, top-k filtered, includes
-objective columns alongside hyperparameters, and rounds floats for display.
-
-### 3. Split reporting into focused functions
-**File:** `results/extraction.py`
-
-`summarize_study()` currently mixes trial counts, Pareto info, leaderboard, and
-hyperparameters in one 60-char-wide text block. Proposal:
-
-| Function | Purpose |
-|---|---|
-| `summarize_study()` | **Keep** — compact overview: trial counts + best trial + its objectives (no leaderboard, no hyperparameters) |
-| `trial_table()` | **New** (TODO #2) — full ranked table of top-k trials with objectives, hyperparams, metrics; CSV-savable |
-| `best_config()` | **New** — returns the hyperparameter dict of a specific trial (or best by `select_by`), pretty-printed with rounding |
-| `compare_trials()` | **New** — side-by-side comparison of 2–5 specific trials (objectives + hyperparams diff) |
-
-This keeps `summarize_study()` as the quick "how did the study go?" answer,
-while detailed inspection uses dedicated functions.
+### 1–3. Reporting bundle: `trial_table()`, `best_config()`, `compare_trials()`, slim `summarize_study()`
+**Plan:** [`dev/plans/plan-reporting-bundle.md`](plans/plan-reporting-bundle.md)
+**Files:** `results/extraction.py`, `results/__init__.py`, `__init__.py`, `tests/test_results/test_extraction.py`
+**Status:** Planned (3 phases)
 
 ### 4. Rework plotting for 2D and 3D objectives
 **File:** `results/visualization.py`
@@ -71,23 +32,12 @@ Add a convenience `plot_study(study)` that auto-detects 2D vs 3D and produces
 the standard panel.
 
 ### 5. Review search space defaults against BayesFlow
-**Files:** `search_spaces/summary/deep_set.py`, `search_spaces/inference/flow_matching.py`, all search spaces
+**Status: mostly done — see Done section. Remaining minor items below.**
 
-Audit from quickstart run output:
-```
-ds_dropout   : 0.05454749016213018   (continuous float, no step)
-fm_dropout   : 0.004116898859160489  (continuous float, no step)
-ds_summary_dim: 63                   (Int, no step — should it be powers of 2 or step=8?)
-```
-
-Known issues found:
-- **`fm_subnet_depth`** high=4, but BayesFlow FlowMatching TIME_MLP default is depth=5. The search space can never reach the framework default. **Fix: raise high to 5 or 6.**
-- **Dropout dimensions** (ds, fm, cf, etc.): continuous float produces ugly values. Consider adding `step=0.01` or `step=0.05` for cleaner output and faster convergence.
-- **`ds_summary_dim`**: range 4–64 with no step. Consider `step=8` or powers of 2 for more meaningful exploration.
-
-Run a full audit across all search spaces (coupling_flow, diffusion, consistency,
-set_transformer, fusion_transformer, time_series_*) to check every dimension
-against BayesFlow source defaults.
+Remaining optional improvements (not blocking):
+- **Dropout dimensions** (ds, fm, cf, etc.): continuous float produces ugly values (e.g. `0.05454749016213018`). Consider adding `step=0.01` or `step=0.05` for cleaner output and faster convergence. Left as-is because continuous sampling is standard Optuna practice for regularization parameters.
+- **`cf_permutation`** choices are `["random", "orthogonal"]` but BayesFlow also accepts `"swap"` and `None`. Missing options narrow the search but are rarely useful.
+- **Subnet widths** all cap at 256 (the BayesFlow default). Cannot explore wider architectures. This is intentional to keep search spaces tractable.
 
 ### 6. Quickstart: add model selection and retraining workflow
 **File:** `examples/quickstart.ipynb`
@@ -104,6 +54,13 @@ Add cells for:
 5. Save the final workflow with `save_workflow_with_metadata()`
 
 ## Done
+
+### Review search space defaults against BayesFlow (2026-03-15)
+Full audit of all 11 search spaces against BayesFlow 2.x source defaults. Fixes applied:
+- **`subnet_depth` high 4→6** in FlowMatchingSpace, DiffusionModelSpace, ConsistencyModelSpace, StableConsistencyModelSpace — BayesFlow `TIME_MLP_DEFAULT_CONFIG` uses 5 layers, so the old cap of 4 excluded the framework default
+- **`tst_time_embed` choices**: replaced invalid `"sinusoidal"` (would raise `ValueError`) with valid BayesFlow options `["time2vec", "lstm", "gru"]`
+- **`ds_summary_dim`**: added `step=4` for consistency with other summary network spaces (SetTransformer etc. use `step=8`)
+- Updated docstrings in all changed search spaces and both docs files (`search_spaces.md`, `defaults.md`)
 
 ### Remove multi_objective.ipynb (2026-03-15)
 Removed the `examples/multi_objective.ipynb` notebook and updated README examples table.
