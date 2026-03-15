@@ -87,6 +87,10 @@ src/bayesflow_hpo/
 - **Trial budget**: Trials exceeding `max_param_count` or `max_memory_mb` are rejected pre-training and NOT counted toward `n_trials`
 - **Public API**: `__init__.py` re-exports ~80 high-level symbols; internal helpers (e.g. `BaseSearchSpace`, `Dimension`, `MetricFn`, `sample_hyperparameters`) are accessible via submodule imports but intentionally excluded from the top-level API for stability
 
+## Project TODOs
+
+See [`dev/TODO.md`](dev/TODO.md) for open and completed project tasks.
+
 ## Gotchas
 
 - `KERAS_BACKEND=torch` must be set before importing; tests fail silently otherwise
