@@ -68,6 +68,8 @@ from bayesflow_hpo.registration import (
     register_custom_summary_network,
 )
 from bayesflow_hpo.results import (
+    best_config,
+    compare_trials,
     get_pareto_trials,
     get_workflow_metadata,
     load_workflow_with_metadata,
@@ -78,6 +80,7 @@ from bayesflow_hpo.results import (
     plot_pareto_front,
     save_workflow_with_metadata,
     summarize_study,
+    trial_table,
     trials_to_dataframe,
 )
 from bayesflow_hpo.search_spaces import (
@@ -166,6 +169,8 @@ __all__ = [
     "register_custom_inference_network",
     "register_custom_summary_network",
     # Results
+    "best_config",
+    "compare_trials",
     "get_pareto_trials",
     "get_workflow_metadata",
     "load_workflow_with_metadata",
@@ -176,6 +181,7 @@ __all__ = [
     "plot_pareto_front",
     "save_workflow_with_metadata",
     "summarize_study",
+    "trial_table",
     "trials_to_dataframe",
     # Search spaces
     "CategoricalDimension",
