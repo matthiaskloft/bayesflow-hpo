@@ -52,18 +52,18 @@ class FlowMatchingSpace(BaseSearchSpace):
     )
     activation: CategoricalDimension = field(
         default_factory=lambda: CategoricalDimension(
-            "fm_activation", choices=["mish", "silu"], default=False
+            "fm_activation", choices=["mish", "silu"], enabled=False
         )
     )
 
     use_optimal_transport: CategoricalDimension = field(
         default_factory=lambda: CategoricalDimension(
-            "fm_use_ot", choices=[True, False], default=False
+            "fm_use_ot", choices=[True, False], enabled=False
         )
     )
     time_alpha: FloatDimension = field(
         default_factory=lambda: FloatDimension(
-            "fm_time_alpha", low=0.0, high=2.0, default=False
+            "fm_time_alpha", low=0.0, high=2.0, enabled=False
         )
     )
 

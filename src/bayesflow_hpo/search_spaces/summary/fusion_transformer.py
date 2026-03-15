@@ -47,7 +47,7 @@ class FusionTransformerSpace(BaseSearchSpace):
 
     template_type: CategoricalDimension = field(
         default_factory=lambda: CategoricalDimension(
-            "ft_template_type", choices=["lstm", "gru"], default=False
+            "ft_template_type", choices=["lstm", "gru"], enabled=False
         )
     )
 
