@@ -239,6 +239,32 @@ def optimize(
     -------
     optuna.Study
         The optimized Optuna study.
+
+    Notes
+    -----
+    **Trial counting.**  Each trial ends in one of four states:
+
+    - **trained** — completed training and validation successfully.
+      Only these count toward ``n_trials``.
+    - **rejected** — skipped before training because the sampled model
+      exceeded the parameter or memory budget, or failed to build.
+      These are cheap (no GPU time) and do not count toward
+      ``n_trials`` or ``max_total_trials``.
+    - **failed** — started training but crashed with an unrecoverable
+      error.  Counts toward ``max_total_trials`` but not ``n_trials``.
+    - **pruned** — stopped early by intermediate validation because
+      the trial looked unpromising.  Counts toward
+      ``max_total_trials`` but not ``n_trials``.
+
+    Because rejected trials are free, the optimizer keeps sampling
+    until it reaches ``n_trials`` trained trials.  Two safety caps
+    prevent runaway loops:
+
+    - ``max_total_trials`` (default ``3 * n_trials``) caps
+      non-rejected trials (trained + failed + pruned).
+    - A hard cap of ``5 * max_total_trials`` on *all* trials
+      (including rejected) catches cases where the entire search
+      space is infeasible.
     """
     if objective_metrics is None:
         objective_metrics = ["calibration_error", "nrmse"]

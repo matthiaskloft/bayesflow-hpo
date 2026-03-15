@@ -1,10 +1,4 @@
-"""Training hyperparameter search space.
-
-Separates optimizer/training knobs from network architecture.  The
-:meth:`defaults` method returns fixed values for dimensions that are
-*not* being tuned, ensuring the parameter dict always has a ``batch_size``
-key regardless of ``include_optional``.
-"""
+"""Training hyperparameter search space."""
 
 from __future__ import annotations
 
@@ -13,6 +7,7 @@ from typing import Any
 
 from bayesflow_hpo.search_spaces.base import (
     BaseSearchSpace,
+    Dimension,
     FloatDimension,
     IntDimension,
 )
@@ -20,18 +15,9 @@ from bayesflow_hpo.search_spaces.base import (
 
 @dataclass
 class TrainingSpace(BaseSearchSpace):
-    """Search space for optimizer/training knobs.
+    """Search space for optimizer/training knobs."""
 
-    Default dimensions
-    ------------------
-    initial_lr : float
-        Initial learning rate (1e-4--5e-3, log scale).
-
-    Optional dimensions (enabled via ``include_optional=True``)
-    -----------------------------------------------------------
-    batch_size : int
-        Training batch size (32--1024, step 32). Defaults to 256.
-    """
+    include_optional: bool = False
 
     initial_lr: FloatDimension = field(
         default_factory=lambda: FloatDimension(
@@ -40,17 +26,18 @@ class TrainingSpace(BaseSearchSpace):
     )
     batch_size: IntDimension = field(
         default_factory=lambda: IntDimension(
-            "batch_size", low=32, high=1024, step=32, enabled=False
+            "batch_size", low=32, high=1024, step=32, default=False
         )
     )
+    @property
+    def dimensions(self) -> list[Dimension]:
+        return [self.initial_lr, self.batch_size]
+
+    def sample(self, trial: Any) -> dict[str, Any]:
+        return BaseSearchSpace.sample(self, trial)
 
     def defaults(self) -> dict[str, Any]:
-        """Return fixed defaults for optional dimensions that are not tuned.
-
-        These values are applied *before* any actively-tuned parameters,
-        so they act as fallback defaults in the merged parameter dict.
-        When ``include_optional=True``, the tuned value overwrites these.
-        """
+        """Defaults when optional dimensions are not tuned."""
         return {
             "batch_size": 256,
         }

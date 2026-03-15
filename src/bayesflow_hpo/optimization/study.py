@@ -237,6 +237,24 @@ def _count_pruned(study: optuna.Study, since_trial: int = 0) -> int:
     )
 
 
+def _count_budget_rejected(study: optuna.Study, since_trial: int = 0) -> int:
+    """Count trials rejected by budget checks since a given trial number."""
+    return sum(
+        1
+        for t in study.trials
+        if t.number >= since_trial and "rejected_reason" in t.user_attrs
+    )
+
+
+def _count_failed(study: optuna.Study, since_trial: int = 0) -> int:
+    """Count trials that crashed during training since a given trial number."""
+    return sum(
+        1
+        for t in study.trials
+        if t.number >= since_trial and t.state == TrialState.FAIL
+    )
+
+
 def _count_failure_reasons(
     study: optuna.Study,
     since_trial: int = 0,
@@ -334,6 +352,16 @@ def optimize_until(
     total_before = len(study.trials)
     non_rejected_before = _count_non_rejected(study)
 
+    logger.info(
+        "Starting HPO: target %d trained trials "
+        "(max %d non-rejected, hard cap %d).\n"
+        "  trained  = completed training + validation successfully\n"
+        "  rejected = skipped before training (model too large or failed to build)\n"
+        "  failed   = crashed during training\n"
+        "  pruned   = stopped early by intermediate validation (unpromising)",
+        n_trained, max_total_trials, hard_cap,
+    )
+
     def _non_rejected_now() -> int:
         return _count_non_rejected(study) - non_rejected_before
 
@@ -358,30 +386,35 @@ def optimize_until(
 
         # --- Live progress summary after each batch ---
         trained_now = count_trained_trials(study) - trained_before
-        total_now = len(study.trials) - total_before
+        rejected = _count_budget_rejected(study, since_trial=total_before)
+        failed = _count_failed(study, since_trial=total_before)
         pruned = _count_pruned(study, since_trial=total_before)
-        rejected = total_now - trained_now - pruned
         best = _best_objective_so_far(study)
         best_str = f"{best:.4f}" if best is not None else "n/a"
         parts = [f"{trained_now}/{n_trained} trained"]
-        if pruned:
-            parts.append(f"{pruned} pruned")
         if rejected:
             parts.append(f"{rejected} rejected")
-        parts += [f"{total_now} total", f"best: {best_str}"]
+        if failed:
+            parts.append(f"{failed} failed")
+        if pruned:
+            parts.append(f"{pruned} pruned")
+        parts.append(f"best: {best_str}")
         logger.info("Progress: %s", " | ".join(parts))
 
     # --- Final summary ---
     trained_now = count_trained_trials(study) - trained_before
-    total_now = len(study.trials) - total_before
+    rejected = _count_budget_rejected(study, since_trial=total_before)
+    failed = _count_failed(study, since_trial=total_before)
     pruned = _count_pruned(study, since_trial=total_before)
-    rejected = total_now - trained_now - pruned
-    if rejected > 0 or pruned > 0:
-        parts = [f"{trained_now} trained", f"{total_now} total"]
-        if pruned:
-            parts.append(f"{pruned} pruned")
+    total_now = len(study.trials) - total_before
+    if rejected > 0 or failed > 0 or pruned > 0:
+        parts = [f"{trained_now} trained"]
         if rejected:
             parts.append(f"{rejected} rejected")
+        if failed:
+            parts.append(f"{failed} failed")
+        if pruned:
+            parts.append(f"{pruned} pruned")
         logger.info("Completed %s.", ", ".join(parts))
 
     # --- Failure reason breakdown ---

@@ -10,35 +10,18 @@ import bayesflow as bf
 from bayesflow_hpo.search_spaces.base import (
     BaseSearchSpace,
     CategoricalDimension,
+    Dimension,
     FloatDimension,
     IntDimension,
+    validate_required_params,
 )
 
 
 @dataclass
 class FusionTransformerSpace(BaseSearchSpace):
-    """Search space for `bf.networks.FusionTransformer`.
+    """Search space for `bf.networks.FusionTransformer`."""
 
-    Default dimensions
-    ------------------
-    ft_summary_dim : int
-        Output summary dimensionality (8--64, step 8).
-    ft_embed_dim : int
-        Embedding width (32--256, step 32).
-    ft_num_heads : int
-        Number of attention heads (1, 2, 4, or 8).
-    ft_num_layers : int
-        Number of transformer layers (1--4).
-    ft_template_dim : int
-        Template network width (32--256, step 32).
-    ft_dropout : float
-        Dropout rate (0.0--0.3).
-
-    Optional dimensions (enabled via ``include_optional=True``)
-    -----------------------------------------------------------
-    ft_template_type : str
-        Template recurrent cell type (``"lstm"`` or ``"gru"``).
-    """
+    include_optional: bool = False
 
     summary_dim: IntDimension = field(
         default_factory=lambda: IntDimension("ft_summary_dim", low=8, high=64, step=8)
@@ -65,37 +48,48 @@ class FusionTransformerSpace(BaseSearchSpace):
 
     template_type: CategoricalDimension = field(
         default_factory=lambda: CategoricalDimension(
-            "ft_template_type", choices=["lstm", "gru"], enabled=False
+            "ft_template_type", choices=["lstm", "gru"], default=False
         )
     )
 
+    @property
+    def dimensions(self) -> list[Dimension]:
+        return [
+            self.summary_dim,
+            self.embed_dim,
+            self.num_heads,
+            self.num_layers,
+            self.template_dim,
+            self.dropout,
+            self.template_type,
+        ]
+
+    def sample(self, trial: Any) -> dict[str, Any]:
+        return BaseSearchSpace.sample(self, trial)
+
     def build(self, params: dict[str, Any]) -> bf.networks.FusionTransformer:
-        """Construct a ``bf.networks.FusionTransformer`` from sampled parameters.
-
-        Parameters
-        ----------
-        params
-            Hyperparameter dict from :meth:`sample`.
-
-        Returns
-        -------
-        bf.networks.FusionTransformer
-            Configured fusion transformer summary network.
-        """
-        self._validate(params)
+        validate_required_params(
+            params,
+            [
+                "ft_summary_dim",
+                "ft_embed_dim",
+                "ft_num_heads",
+                "ft_num_layers",
+                "ft_template_dim",
+                "ft_dropout",
+            ],
+            "FusionTransformerSpace.build",
+        )
 
         num_layers = int(params["ft_num_layers"])
         embed_dim = int(params["ft_embed_dim"])
         num_heads = int(params["ft_num_heads"])
 
-        kwargs: dict[str, Any] = {
-            "summary_dim": int(params["ft_summary_dim"]),
-            "embed_dims": tuple([embed_dim] * num_layers),
-            "num_heads": tuple([num_heads] * num_layers),
-            "template_dim": int(params["ft_template_dim"]),
-            "dropout": float(params["ft_dropout"]),
-        }
-        if "ft_template_type" in params:
-            kwargs["template_type"] = params["ft_template_type"]
-
-        return bf.networks.FusionTransformer(**kwargs)
+        return bf.networks.FusionTransformer(
+            summary_dim=int(params["ft_summary_dim"]),
+            embed_dims=tuple([embed_dim] * num_layers),
+            num_heads=tuple([num_heads] * num_layers),
+            template_dim=int(params["ft_template_dim"]),
+            dropout=float(params["ft_dropout"]),
+            template_type=params.get("ft_template_type", "lstm"),
+        )
