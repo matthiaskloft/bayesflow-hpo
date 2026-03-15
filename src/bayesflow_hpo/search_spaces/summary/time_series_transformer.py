@@ -37,7 +37,7 @@ class TimeSeriesTransformerSpace(BaseSearchSpace):
     tst_mlp_width : int
         Feed-forward MLP width (64--512, step 64).
     tst_time_embed : str
-        Time embedding type (``"time2vec"`` or ``"sinusoidal"``).
+        Time embedding type (``"time2vec"``, ``"lstm"``, or ``"gru"``).
     """
 
     summary_dim: IntDimension = field(
@@ -65,7 +65,7 @@ class TimeSeriesTransformerSpace(BaseSearchSpace):
     )
     time_embed: CategoricalDimension = field(
         default_factory=lambda: CategoricalDimension(
-            "tst_time_embed", choices=["time2vec", "sinusoidal"], enabled=False
+            "tst_time_embed", choices=["time2vec", "lstm", "gru"], enabled=False
         )
     )
 
