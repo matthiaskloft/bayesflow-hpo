@@ -22,7 +22,7 @@ class DeepSetSpace(BaseSearchSpace):
     Default dimensions
     ------------------
     ds_summary_dim : int
-        Output summary dimensionality (4--64).
+        Output summary dimensionality (4--64, step 4).
     ds_depth : int
         Number of DeepSet processing blocks (1--4).
     ds_width : int
@@ -49,7 +49,7 @@ class DeepSetSpace(BaseSearchSpace):
     """
 
     summary_dim: IntDimension = field(
-        default_factory=lambda: IntDimension("ds_summary_dim", low=4, high=64)
+        default_factory=lambda: IntDimension("ds_summary_dim", low=4, high=64, step=4)
     )
     depth: IntDimension = field(
         default_factory=lambda: IntDimension("ds_depth", low=1, high=4)

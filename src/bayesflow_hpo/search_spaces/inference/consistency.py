@@ -38,7 +38,7 @@ class ConsistencyModelSpace(BaseSearchSpace):
         )
     )
     subnet_depth: IntDimension = field(
-        default_factory=lambda: IntDimension("cm_subnet_depth", low=1, high=4)
+        default_factory=lambda: IntDimension("cm_subnet_depth", low=1, high=6)
     )
     dropout: FloatDimension = field(
         default_factory=lambda: FloatDimension("cm_dropout", low=0.0, high=0.2)

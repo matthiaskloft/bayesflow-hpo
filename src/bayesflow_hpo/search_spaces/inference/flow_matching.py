@@ -25,7 +25,7 @@ class FlowMatchingSpace(BaseSearchSpace):
     fm_subnet_width : int
         MLP width (32--256, step 32).
     fm_subnet_depth : int
-        MLP depth (1--4).
+        MLP depth (1--6).  BayesFlow default TimeMLP uses 5 layers.
     fm_dropout : float
         Dropout rate (0.0--0.2).
     fm_activation : str
@@ -45,7 +45,7 @@ class FlowMatchingSpace(BaseSearchSpace):
         )
     )
     subnet_depth: IntDimension = field(
-        default_factory=lambda: IntDimension("fm_subnet_depth", low=1, high=4)
+        default_factory=lambda: IntDimension("fm_subnet_depth", low=1, high=6)
     )
     dropout: FloatDimension = field(
         default_factory=lambda: FloatDimension("fm_dropout", low=0.0, high=0.2)
