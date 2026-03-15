@@ -12,36 +12,47 @@ class ObjectiveConfig:
     simulator: bf.simulators.Simulator
     adapter: bf.adapters.Adapter
     search_space: CompositeSearchSpace
-    inference_conditions: list[str] | None = None
     validation_data: ValidationDataset | None = None
     epochs: int = 200
     batches_per_epoch: int = 50
-    early_stopping_patience: int = 15
-    early_stopping_window: int = 15
-    max_param_count: int = 2_000_000
-    param_budget_penalty: tuple[float, float] = (1.0, 1.5)
+    early_stopping_patience: int = 5
+    early_stopping_window: int = 7
+    max_param_count: int = 1_000_000
     max_memory_mb: float | None = None
-    memory_budget_penalty: tuple[float, float] = (1.0, 1.5)
-    training_failure_penalty: tuple[float, float] = (1.0, 1.5)
     n_posterior_samples: int = 500
-    metrics: list[str] | None = None
-    objective_metric: str = "calibration_error"
-    train_fn: Callable[[bf.BasicWorkflow, dict, list], None] | None = None
+    n_intermediate_posterior_samples: int = 250
+    intermediate_validation_interval: int = 10
+    intermediate_validation_warmup: int = 10
+    pruning_n_startup_trials: int = 5
+    objective_metrics: list[str] = ["calibration_error", "nrmse"]
+    objective_mode: str = "pareto"
+    cost_metric: str = "inference_time"
+    checkpoint_pool: CheckpointPool | None = None
+    report_frequency: int = 10
+    build_approximator_fn: BuildApproximatorFn | None = None
+    train_fn: TrainFn | None = None
+    validate_fn: ValidateFn | None = None
 ```
 
 #### Configurable Validation Metrics
 
-`metrics` controls which metrics are computed on the fixed validation dataset. It accepts a list of metric names resolved via the [metric registry](validation.md#metric-registry). Defaults to `DEFAULT_METRICS = ["calibration_error", "coverage", "rmse", "contraction", "sbc"]`.
+`objective_metrics` controls which validation metrics are optimized. It accepts a list of metric names resolved via the [metric registry](validation.md#metric-registry). Defaults to `["calibration_error", "nrmse"]`.
 
-`objective_metric` selects which key from the validation summary drives the HPO objective. Defaults to `"calibration_error"`.
+`objective_mode` chooses whether metrics are aggregated (`"mean"`) or optimized jointly (`"pareto"`). `cost_metric` selects the cost objective (`"inference_time"` or `"param_count"`).
 
 #### Custom Training Function
 
-`train_fn` allows users to override the default training loop. The signature is `(workflow, params, callbacks) -> None`. When `None`, the objective uses `workflow.fit_online(...)`. Example:
+`train_fn` allows users to override the default training loop. The signature is `(approximator, simulator, hparams, callbacks) -> None`. When `None`, the objective uses `approximator.fit(simulator=..., epochs=..., batches_per_epoch=..., ...)`. Example:
 
 ```python
-def my_train_fn(workflow, params, callbacks):
-    workflow.fit_offline(data=my_data, epochs=100, callbacks=callbacks)
+def my_train_fn(approximator, simulator, hparams, callbacks):
+    approximator.fit(
+        simulator=simulator,
+        epochs=int(hparams["epochs"]),
+        num_batches=int(hparams["batches_per_epoch"]),  # for BF versions expecting num_batches
+        batch_size=int(hparams.get("batch_size", 256)),
+        callbacks=callbacks,
+    )
 
 config = ObjectiveConfig(..., train_fn=my_train_fn)
 ```
@@ -60,7 +71,7 @@ Callable that implements the Optuna trial loop:
 1. **Sample hyperparameters** from the composite search space via `trial.suggest_*`
 2. **Pre-filter** by estimated parameter count and peak memory
 3. **Build** inference network, summary network, and workflow
-4. **Train** using `train_fn` (default: `fit_online`) with early stopping and pruning callbacks
+4. **Train** using `train_fn` (default: `approximator.fit(simulator=...)`) with early stopping and pruning callbacks
 5. **Validate** on the fixed validation dataset using the metric registry
 6. **Return** `(objective_metric_value, normalized_param_score)`
 

@@ -17,7 +17,7 @@ Generic hyperparameter optimization for [BayesFlow 2.x](https://github.com/bayes
 - **Structured validation results** with per-condition, per-parameter, and summary tables
 - **Dry-run validation** to catch shape mismatches before a full HPO run
 - **Memory/parameter budget** pre-checks to avoid OOM trials
-- **Configurable training** (default `fit_online`, or user-provided `train_fn` for `fit_offline`/`fit_disk`)
+- **Configurable training** (default `approximator.fit(simulator=...)`, or user-provided `train_fn` for custom training loops)
 - **Warm-start** from prior Optuna studies
 - **Custom network registration** for user-defined architectures
 - **Pareto front extraction** and importance plotting
