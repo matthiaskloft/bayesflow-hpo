@@ -13,7 +13,6 @@ from bayesflow_hpo.search_spaces.base import (
     Dimension,
     FloatDimension,
     IntDimension,
-    validate_required_params,
 )
 
 
@@ -68,18 +67,7 @@ class FusionTransformerSpace(BaseSearchSpace):
         return BaseSearchSpace.sample(self, trial)
 
     def build(self, params: dict[str, Any]) -> bf.networks.FusionTransformer:
-        validate_required_params(
-            params,
-            [
-                "ft_summary_dim",
-                "ft_embed_dim",
-                "ft_num_heads",
-                "ft_num_layers",
-                "ft_template_dim",
-                "ft_dropout",
-            ],
-            "FusionTransformerSpace.build",
-        )
+        self._validate(params)
 
         num_layers = int(params["ft_num_layers"])
         embed_dim = int(params["ft_embed_dim"])

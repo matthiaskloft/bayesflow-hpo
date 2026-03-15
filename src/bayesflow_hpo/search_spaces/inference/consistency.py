@@ -12,7 +12,6 @@ from bayesflow_hpo.search_spaces.base import (
     Dimension,
     FloatDimension,
     IntDimension,
-    validate_required_params,
 )
 
 
@@ -78,11 +77,7 @@ class ConsistencyModelSpace(BaseSearchSpace):
         return BaseSearchSpace.sample(self, trial)
 
     def build(self, params: dict[str, Any]) -> bf.networks.ConsistencyModel:
-        validate_required_params(
-            params,
-            ["cm_subnet_width", "cm_subnet_depth", "cm_dropout"],
-            "ConsistencyModelSpace.build",
-        )
+        self._validate(params)
 
         width = int(params["cm_subnet_width"])
         depth = int(params["cm_subnet_depth"])

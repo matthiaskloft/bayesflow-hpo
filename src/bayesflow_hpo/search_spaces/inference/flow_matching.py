@@ -13,7 +13,6 @@ from bayesflow_hpo.search_spaces.base import (
     Dimension,
     FloatDimension,
     IntDimension,
-    validate_required_params,
 )
 
 
@@ -83,11 +82,7 @@ class FlowMatchingSpace(BaseSearchSpace):
         return BaseSearchSpace.sample(self, trial)
 
     def build(self, params: dict[str, Any]) -> bf.networks.FlowMatching:
-        validate_required_params(
-            params,
-            ["fm_subnet_width", "fm_subnet_depth", "fm_dropout"],
-            "FlowMatchingSpace.build",
-        )
+        self._validate(params)
 
         width = int(params["fm_subnet_width"])
         depth = int(params["fm_subnet_depth"])
