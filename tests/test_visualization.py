@@ -8,6 +8,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import optuna
 import pytest
+from matplotlib.colors import to_hex
 
 matplotlib.use("Agg")
 
@@ -288,9 +289,10 @@ class TestPlotMetricScatter:
             multi_objective_study, "calibration_error", "nrmse",
         )
         # Check that grey/gray lines were drawn (iso-mean)
+        gray_hex = to_hex("gray")
         lines = [
             line for line in ax.get_lines()
-            if line.get_color() in ("grey", "gray")
+            if to_hex(line.get_color()) == gray_hex
         ]
         assert len(lines) > 0
 

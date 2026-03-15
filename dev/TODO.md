@@ -4,48 +4,30 @@ Tracked items for ongoing development. Updated by contributors and Claude Code s
 
 ## Open
 
-### 1–3. Reporting bundle: `trial_table()`, `best_config()`, `compare_trials()`, slim `summarize_study()`
-**Plan:** [`dev/plans/plan-reporting-bundle.md`](plans/plan-reporting-bundle.md)
-**Files:** `results/extraction.py`, `results/__init__.py`, `__init__.py`, `tests/test_results/test_extraction.py`
-**Status:** Planned (3 phases)
-
-### 4. Rework plotting for 2D and 3D objectives
-**File:** `results/visualization.py`
-
-Current plots assume 2 objectives (quality metric + param count). We need two
-well-designed standard scenarios:
-
-**a) 2-objective (e.g. calibration_error + param_count):**
-- Pareto front scatter (exists, needs polish)
-- Optimization history (exists)
-- Param importance (exists)
-
-**b) 3-objective (e.g. calibration_error + nrmse + param_count):**
-- 3D Pareto surface or paired 2D Pareto projections
-- Metric-vs-metric scatter with param_count as color/size
-- Parallel coordinates plot for objectives
-
-Other objective counts (1, 4+) are **out of scope**.
-
-Review each existing plot function and decide: keep / rework / remove.
-Add a convenience `plot_study(study)` that auto-detects 2D vs 3D and produces
-the standard panel.
-
-### 5. Quickstart: add model selection and retraining workflow
-**File:** `examples/quickstart.ipynb`
-
-The quickstart ends after `optimize()` and `summarize_study()`. It's missing the
-critical final step: choosing a trial from the results and retraining it as the
-production model.
-
-Add cells for:
-1. Inspect study results (use `trial_table()` once available, or `trials_to_dataframe()`)
-2. Pick a trial (from Pareto front or top-k)
-3. Reconstruct the approximator from the trial's hyperparameters
-4. Retrain with full budget (more epochs, no early stopping)
-5. Save the final workflow with `save_workflow_with_metadata()`
+No open items.
 
 ## Done
+
+### Fix fragile iso-line color assertion (2026-03-15, PR #36)
+Replaced `line.get_color() in ("grey", "gray")` with
+`to_hex(line.get_color()) == to_hex("gray")` for version-safe color
+comparison. File: `tests/test_visualization.py`.
+
+### Unify metric auto-detection in plot_metric_panels (2026-03-15)
+Already resolved — `plot_metric_panels` calls `_get_metric_user_attrs()`
+at line 369. No code change needed; moved from Open to Done.
+
+### Rework plotting for 2D and 3D objectives (2026-03-15, PRs #32, #34, #35)
+Added 3-objective support (`plot_pareto_3d`, `plot_pareto_projections`,
+`plot_parallel_coordinates`) and `plot_study()` convenience entry point that
+auto-detects 2 vs 3 objectives. Polished legends, axis formatting, and added
+BayesFlow-aligned color palette (`_colors.py`). Updated quickstart to use
+`plot_study()`.
+
+### Quickstart: model selection & retraining workflow (2026-03-15, PR #33)
+Added section 4 to `examples/quickstart.ipynb` with the full HPO-to-production workflow:
+`trial_table()` → `best_config()` → `build_continuous_approximator()` → compile with
+Adam/CosineDecay → retrain with full budget → `save_workflow_with_metadata()`.
 
 ### Review search space defaults against BayesFlow (2026-03-15, PR #29)
 Full audit of all 11 search spaces against BayesFlow 2.x source defaults. Fixes applied:
