@@ -8,10 +8,10 @@
 | Phase | Status | Date | Notes |
 |-------|--------|------|-------|
 | Plan | DONE | 2026-03-15 | |
-| Phase 1: `trial_table()` | DONE | 2026-03-15 | New function, no breaking changes |
-| Phase 2: `best_config()` + `compare_trials()` | DONE | 2026-03-15 | New functions |
-| Phase 3: Slim down `summarize_study()` | DONE | 2026-03-15 | Refactor to use new helpers, prettify output |
-| Ship | TODO | | |
+| Phase 1: `trial_table()` | MERGED | 2026-03-15 | PR #30 |
+| Phase 2: `best_config()` + `compare_trials()` | MERGED | 2026-03-15 | PR #30 |
+| Phase 3: Slim down `summarize_study()` | MERGED | 2026-03-15 | PR #30 |
+| Ship | MERGED | 2026-03-15 | PR #30 |
 
 ## Summary
 
