@@ -73,11 +73,14 @@ class FusionTransformerSpace(BaseSearchSpace):
         embed_dim = int(params["ft_embed_dim"])
         num_heads = int(params["ft_num_heads"])
 
-        return bf.networks.FusionTransformer(
-            summary_dim=int(params["ft_summary_dim"]),
-            embed_dims=tuple([embed_dim] * num_layers),
-            num_heads=tuple([num_heads] * num_layers),
-            template_dim=int(params["ft_template_dim"]),
-            dropout=float(params["ft_dropout"]),
-            template_type=params.get("ft_template_type", "lstm"),
-        )
+        kwargs: dict[str, Any] = {
+            "summary_dim": int(params["ft_summary_dim"]),
+            "embed_dims": tuple([embed_dim] * num_layers),
+            "num_heads": tuple([num_heads] * num_layers),
+            "template_dim": int(params["ft_template_dim"]),
+            "dropout": float(params["ft_dropout"]),
+        }
+        if "ft_template_type" in params:
+            kwargs["template_type"] = params["ft_template_type"]
+
+        return bf.networks.FusionTransformer(**kwargs)
