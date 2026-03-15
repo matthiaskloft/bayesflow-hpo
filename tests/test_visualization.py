@@ -301,9 +301,10 @@ class TestPlotMetricScatter:
             multi_objective_study, "calibration_error", "nrmse",
             show_iso_lines=False,
         )
+        gray_hex = to_hex("gray")
         lines = [
             line for line in ax.get_lines()
-            if line.get_color() in ("grey", "gray")
+            if to_hex(line.get_color()) == gray_hex
         ]
         assert len(lines) == 0
 
