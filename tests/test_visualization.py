@@ -535,3 +535,76 @@ class TestPlotStudy:
         )
         with pytest.raises(ValueError, match="2 or 3 objectives"):
             plot_study(study)
+
+    def test_empty_2obj_study(self, empty_study):
+        """Empty study still returns a Figure with placeholder text."""
+        fig = plot_study(empty_study)
+        assert isinstance(fig, matplotlib.figure.Figure)
+        assert len(fig.axes) >= 4
+
+
+# ---------------------------------------------------------------------------
+# Phase 2: Edge-case tests
+# ---------------------------------------------------------------------------
+
+class TestPlotPareto3DEdgeCases:
+    def test_minimal_3_trials(self):
+        """3D Pareto with exactly 3 trials (minimal Pareto)."""
+        from mpl_toolkits.mplot3d import Axes3D
+
+        study = optuna.create_study(
+            directions=["minimize", "minimize", "minimize"],
+        )
+        study._metric_names = ["a", "b", "c"]
+        study.add_trial(_make_trial(0, [0.1, 0.2, 0.3], {"param_count": 100}))
+        study.add_trial(_make_trial(1, [0.3, 0.1, 0.2], {"param_count": 200}))
+        study.add_trial(_make_trial(2, [0.2, 0.3, 0.1], {"param_count": 150}))
+        ax = plot_pareto_3d(study)
+        assert isinstance(ax, Axes3D)
+        assert ax.get_title() == "3D Pareto front"
+
+
+class TestPlotProjectionsEdgeCases:
+    def test_2obj_produces_1_panel(self, multi_objective_study):
+        """2-objective study produces exactly 1 projection panel."""
+        axes = plot_pareto_projections(multi_objective_study)
+        assert len(axes) == 1
+
+
+class TestPlotParallelCoordinatesEdgeCases:
+    def test_top_k_exceeds_trial_count(self, three_objective_study):
+        """top_k >> trial count clamps gracefully."""
+        ax = plot_parallel_coordinates(three_objective_study, top_k=1000)
+        assert isinstance(ax, matplotlib.axes.Axes)
+        assert ax.get_title() == "Parallel coordinates"
+
+
+class TestColorConstantsUsed:
+    def test_pareto_front_uses_primary_color(self, multi_objective_study):
+        """Spot-check that scatter uses PRIMARY color constant."""
+        import matplotlib.colors as mcolors
+
+        from bayesflow_hpo.results import _colors as colors
+
+        ax = plot_pareto_front(multi_objective_study)
+        collections = ax.collections
+        assert len(collections) >= 1
+        facecolors = collections[0].get_facecolors()
+        expected = mcolors.to_rgba(colors.PRIMARY, alpha=colors.ALPHA_TRIAL)
+        assert facecolors[0] == pytest.approx(expected, abs=0.02)
+
+    def test_optimization_history_uses_best_line_color(
+        self, multi_objective_study,
+    ):
+        """Best-so-far line should use BEST_LINE color."""
+        import matplotlib.colors as mcolors
+
+        from bayesflow_hpo.results import _colors as colors
+
+        ax = plot_optimization_history(multi_objective_study)
+        best_line_hex = mcolors.to_hex(colors.BEST_LINE)
+        step_lines = [
+            line for line in ax.get_lines()
+            if mcolors.to_hex(line.get_color()) == best_line_hex
+        ]
+        assert len(step_lines) >= 1
