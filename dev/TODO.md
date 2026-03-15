@@ -31,15 +31,7 @@ Review each existing plot function and decide: keep / rework / remove.
 Add a convenience `plot_study(study)` that auto-detects 2D vs 3D and produces
 the standard panel.
 
-### 5. Review search space defaults against BayesFlow
-**Status: mostly done — see Done section. Remaining minor items below.**
-
-Remaining optional improvements (not blocking):
-- **Dropout dimensions** (ds, fm, cf, etc.): continuous float produces ugly values (e.g. `0.05454749016213018`). Consider adding `step=0.01` or `step=0.05` for cleaner output and faster convergence. Left as-is because continuous sampling is standard Optuna practice for regularization parameters.
-- **`cf_permutation`** choices are `["random", "orthogonal"]` but BayesFlow also accepts `"swap"` and `None`. Missing options narrow the search but are rarely useful.
-- **Subnet widths** all cap at 256 (the BayesFlow default). Cannot explore wider architectures. This is intentional to keep search spaces tractable.
-
-### 6. Quickstart: add model selection and retraining workflow
+### 5. Quickstart: add model selection and retraining workflow
 **File:** `examples/quickstart.ipynb`
 
 The quickstart ends after `optimize()` and `summarize_study()`. It's missing the
@@ -55,12 +47,17 @@ Add cells for:
 
 ## Done
 
-### Review search space defaults against BayesFlow (2026-03-15)
+### Review search space defaults against BayesFlow (2026-03-15, PR #29)
 Full audit of all 11 search spaces against BayesFlow 2.x source defaults. Fixes applied:
 - **`subnet_depth` high 4→6** in FlowMatchingSpace, DiffusionModelSpace, ConsistencyModelSpace, StableConsistencyModelSpace — BayesFlow `TIME_MLP_DEFAULT_CONFIG` uses 5 layers, so the old cap of 4 excluded the framework default
 - **`tst_time_embed` choices**: replaced invalid `"sinusoidal"` (would raise `ValueError`) with valid BayesFlow options `["time2vec", "lstm", "gru"]`
 - **`ds_summary_dim`**: added `step=4` for consistency with other summary network spaces (SetTransformer etc. use `step=8`)
 - Updated docstrings in all changed search spaces and both docs files (`search_spaces.md`, `defaults.md`)
+
+Remaining non-blocking items (intentionally left as-is):
+- Dropout dimensions use continuous float (standard Optuna practice)
+- `cf_permutation` omits `"swap"` and `None` (rarely useful)
+- Subnet widths cap at 256 (intentional to keep search tractable)
 
 ### Remove multi_objective.ipynb (2026-03-15)
 Removed the `examples/multi_objective.ipynb` notebook and updated README examples table.
