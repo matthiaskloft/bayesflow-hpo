@@ -9,6 +9,7 @@ import bayesflow as bf
 
 from bayesflow_hpo.search_spaces.base import (
     BaseSearchSpace,
+    Dimension,
     FloatDimension,
     IntDimension,
 )
@@ -16,22 +17,9 @@ from bayesflow_hpo.search_spaces.base import (
 
 @dataclass
 class StableConsistencyModelSpace(BaseSearchSpace):
-    """Search space for `bf.networks.StableConsistencyModel`.
+    """Search space for `bf.networks.StableConsistencyModel`."""
 
-    Default dimensions
-    ------------------
-    scm_subnet_width : int
-        MLP width (32--256, step 32).
-    scm_subnet_depth : int
-        MLP depth (1--4).
-    scm_dropout : float
-        Dropout rate (0.0--0.2).
-
-    Optional dimensions (enabled via ``include_optional=True``)
-    -----------------------------------------------------------
-    scm_sigma : float
-        Noise scale (0.1--2.0).
-    """
+    include_optional: bool = False
 
     subnet_width: IntDimension = field(
         default_factory=lambda: IntDimension(
@@ -51,19 +39,19 @@ class StableConsistencyModelSpace(BaseSearchSpace):
         )
     )
 
+    @property
+    def dimensions(self) -> list[Dimension]:
+        return [
+            self.subnet_width,
+            self.subnet_depth,
+            self.dropout,
+            self.sigma,
+        ]
+
+    def sample(self, trial: Any) -> dict[str, Any]:
+        return BaseSearchSpace.sample(self, trial)
+
     def build(self, params: dict[str, Any]) -> bf.networks.StableConsistencyModel:
-        """Construct a ``bf.networks.StableConsistencyModel`` from sampled parameters.
-
-        Parameters
-        ----------
-        params
-            Hyperparameter dict from :meth:`sample`.
-
-        Returns
-        -------
-        bf.networks.StableConsistencyModel
-            Configured stable consistency model.
-        """
         self._validate(params)
 
         width = int(params["scm_subnet_width"])

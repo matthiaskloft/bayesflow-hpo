@@ -9,22 +9,13 @@ import bayesflow as bf
 
 from bayesflow_hpo.search_spaces.base import (
     BaseSearchSpace,
+    Dimension,
     FloatDimension,
     IntDimension,
 )
 
 
 def _compute_total_steps(params: dict[str, Any]) -> int:
-    """Derive total training steps for the consistency model schedule.
-
-    ConsistencyModel needs ``total_steps`` at construction time to set up
-    its internal discretisation schedule.  This helper resolves the value
-    from multiple possible sources in priority order:
-
-    1. Explicit ``cm_total_steps`` (user override)
-    2. Generic ``total_steps`` from training config
-    3. ``epochs * batches_per_epoch`` (default: 200 * 50 = 10 000)
-    """
     if "cm_total_steps" in params:
         return max(1, int(params["cm_total_steps"]))
     if "total_steps" in params:
@@ -37,28 +28,9 @@ def _compute_total_steps(params: dict[str, Any]) -> int:
 
 @dataclass
 class ConsistencyModelSpace(BaseSearchSpace):
-    """Search space for `bf.networks.ConsistencyModel`.
+    """Search space for `bf.networks.ConsistencyModel`."""
 
-    Default dimensions
-    ------------------
-    cm_subnet_width : int
-        MLP width (32--256, step 32).
-    cm_subnet_depth : int
-        MLP depth (1--4).
-    cm_dropout : float
-        Dropout rate (0.0--0.2).
-
-    Optional dimensions (enabled via ``include_optional=True``)
-    -----------------------------------------------------------
-    cm_max_time : int
-        Maximum diffusion time (50--500).
-    cm_sigma2 : float
-        Noise variance (0.1--2.0).
-    cm_s0 : int
-        Initial schedule discretisation (2--30).
-    cm_s1 : int
-        Final schedule discretisation (20--100).
-    """
+    include_optional: bool = False
 
     subnet_width: IntDimension = field(
         default_factory=lambda: IntDimension(
@@ -89,24 +61,22 @@ class ConsistencyModelSpace(BaseSearchSpace):
         default_factory=lambda: IntDimension("cm_s1", low=20, high=100, enabled=False)
     )
 
+    @property
+    def dimensions(self) -> list[Dimension]:
+        return [
+            self.subnet_width,
+            self.subnet_depth,
+            self.dropout,
+            self.max_time,
+            self.sigma2,
+            self.s0,
+            self.s1,
+        ]
+
+    def sample(self, trial: Any) -> dict[str, Any]:
+        return BaseSearchSpace.sample(self, trial)
+
     def build(self, params: dict[str, Any]) -> bf.networks.ConsistencyModel:
-        """Construct a ``bf.networks.ConsistencyModel`` from sampled parameters.
-
-        ``total_steps`` is derived automatically from training config
-        (see :func:`_compute_total_steps`) because the consistency model
-        schedule depends on the total training budget.
-
-        Parameters
-        ----------
-        params
-            Hyperparameter dict from :meth:`sample`.  Should also contain
-            ``epochs`` and ``batches_per_epoch`` for step computation.
-
-        Returns
-        -------
-        bf.networks.ConsistencyModel
-            Configured consistency model.
-        """
         self._validate(params)
 
         width = int(params["cm_subnet_width"])

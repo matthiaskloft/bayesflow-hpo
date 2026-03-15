@@ -207,7 +207,6 @@ hpo.plot_param_importance(study)
 |---|---|
 | [`quickstart.ipynb`](examples/quickstart.ipynb) | Minimal end-to-end HPO run |
 | [`custom_summary_network.ipynb`](examples/custom_summary_network.ipynb) | Custom summary network registration + HPO |
-| [`multi_objective.ipynb`](examples/multi_objective.ipynb) | Two-objective optimization + warm start |
 | [`optuna_dashboard.md`](examples/optuna_dashboard.md) | Optuna dashboard integration guide |
 
 ## Contributing

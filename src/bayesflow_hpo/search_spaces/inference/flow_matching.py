@@ -10,6 +10,7 @@ import bayesflow as bf
 from bayesflow_hpo.search_spaces.base import (
     BaseSearchSpace,
     CategoricalDimension,
+    Dimension,
     FloatDimension,
     IntDimension,
 )
@@ -19,30 +20,24 @@ from bayesflow_hpo.search_spaces.base import (
 class FlowMatchingSpace(BaseSearchSpace):
     """Search space for `bf.networks.FlowMatching`.
 
-    Default dimensions
-    ------------------
+    Default ranges
+    --------------
     fm_subnet_width : int
         MLP width (32--256, step 32).
     fm_subnet_depth : int
         MLP depth (1--4).
     fm_dropout : float
         Dropout rate (0.0--0.2).
+    fm_activation : str
+        **Optional** (off by default). Falls back to BayesFlow's TimeMLP
+        default ``"mish"``.
 
     Optional dimensions (enabled via ``include_optional=True``)
     -----------------------------------------------------------
-    fm_activation : str
-        Subnet activation function. Defaults to ``"mish"`` when omitted.
-    fm_use_ot : bool
-        Whether to use optimal transport for improved training stability.
-        Increases training time (~2.5x) but may speed up inference.
-    fm_time_alpha : float
-        Power-law exponent for the time distribution during training.
-        Controls sampling bias: ``p(t) ∝ t^(1/(1+α))``. Default
-        ``α=0`` corresponds to uniform sampling.
-    fm_time_embedding_dim : int
-        Dimensionality of the Fourier time embedding in the subnet
-        (8--64, step 4). BayesFlow defaults to 32 when omitted.
+    fm_use_ot, fm_time_alpha.
     """
+
+    include_optional: bool = False
 
     subnet_width: IntDimension = field(
         default_factory=lambda: IntDimension(
@@ -77,19 +72,22 @@ class FlowMatchingSpace(BaseSearchSpace):
         )
     )
 
+    @property
+    def dimensions(self) -> list[Dimension]:
+        return [
+            self.subnet_width,
+            self.subnet_depth,
+            self.dropout,
+            self.activation,
+            self.use_optimal_transport,
+            self.time_alpha,
+            self.time_embedding_dim,
+        ]
+
+    def sample(self, trial: Any) -> dict[str, Any]:
+        return BaseSearchSpace.sample(self, trial)
+
     def build(self, params: dict[str, Any]) -> bf.networks.FlowMatching:
-        """Construct a ``bf.networks.FlowMatching`` from sampled parameters.
-
-        Parameters
-        ----------
-        params
-            Hyperparameter dict from :meth:`sample`.
-
-        Returns
-        -------
-        bf.networks.FlowMatching
-            Configured flow matching network.
-        """
         self._validate(params)
 
         width = int(params["fm_subnet_width"])
@@ -112,8 +110,6 @@ class FlowMatchingSpace(BaseSearchSpace):
         if "fm_use_ot" in params:
             kwargs["use_optimal_transport"] = bool(params["fm_use_ot"])
         if "fm_time_alpha" in params:
-            kwargs["time_power_law_alpha"] = float(
-                params["fm_time_alpha"]
-            )
+            kwargs["time_power_law_alpha"] = float(params["fm_time_alpha"])
 
         return bf.networks.FlowMatching(**kwargs)
