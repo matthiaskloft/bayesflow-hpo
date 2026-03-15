@@ -96,7 +96,7 @@ See [`dev/TODO.md`](dev/TODO.md) for open and completed project tasks.
 - `KERAS_BACKEND=torch` must be set before importing; tests fail silently otherwise
 - `optimize()` auto-infers `param_keys`/`data_keys` from the adapter; `search_space` is required
 - Three optional hooks (`build_approximator_fn`, `train_fn`, `validate_fn`) replace build/train/validate steps while reusing the full trial lifecycle
-- BayesFlow 2.0.8 may require `num_batches` in `approximator.fit(...)`; quickstart uses a compatibility `train_fn` mapping from `batches_per_epoch`
+- BayesFlow 2.0.8+ compatibility is opt-in via a custom `train_fn`: default training uses `approximator.fit(..., batches_per_epoch=...)`, so environments that require `num_batches` must provide a `train_fn` mapping `batches_per_epoch` to `num_batches`
 - `check_pipeline()` runs automatically at the start of `optimize()` to catch interface errors early
 - Budget-rejected trials don't count toward `n_trials`, so actual total trials can exceed `max_total_trials`
 - Validation dataset keys must match adapter keys or you get a runtime error

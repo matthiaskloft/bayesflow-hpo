@@ -24,7 +24,7 @@ class ObjectiveConfig:
     intermediate_validation_interval: int = 10
     intermediate_validation_warmup: int = 10
     pruning_n_startup_trials: int = 5
-    objective_metrics: list[str] = ["calibration_error", "nrmse"]
+    objective_metrics: list[str] = field(default_factory=lambda: ["calibration_error", "nrmse"])
     objective_mode: str = "pareto"
     cost_metric: str = "inference_time"
     checkpoint_pool: CheckpointPool | None = None
