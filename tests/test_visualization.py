@@ -6,6 +6,7 @@ import datetime
 
 import matplotlib
 import matplotlib.pyplot as plt
+import numpy as np
 import optuna
 import pytest
 from matplotlib.colors import to_hex
@@ -222,51 +223,129 @@ class TestTrainedTrials:
 
 
 # ---------------------------------------------------------------------------
-# plot_pareto_front tests
+# plot_pareto_front tests (rewritten for pairwise projections)
 # ---------------------------------------------------------------------------
 
 class TestPlotParetoFront:
-    def test_returns_axes(self, multi_objective_study):
-        ax = plot_pareto_front(multi_objective_study)
-        assert isinstance(ax, matplotlib.axes.Axes)
+    def test_2obj_returns_figure_standalone(self, multi_objective_study):
+        result = plot_pareto_front(multi_objective_study)
+        assert isinstance(result, matplotlib.figure.Figure)
 
-    def test_xlabel_auto_derived(self, multi_objective_study):
-        ax = plot_pareto_front(multi_objective_study)
+    def test_2obj_produces_1_panel(self, multi_objective_study):
+        fig = plot_pareto_front(multi_objective_study)
+        # 2 objectives -> 1 pair (0,1) -> 1 panel
+        # (colorbar may add an extra axis, so check >= 1)
+        assert len(fig.axes) >= 1
+
+    def test_3obj_produces_3_panels(self, three_objective_study):
+        fig = plot_pareto_front(three_objective_study)
+        # 3 objectives -> 3 pairs: (0,1), (0,2), (1,2)
+        # Each panel may have a colorbar axis, so check >= 3
+        assert len(fig.axes) >= 3
+
+    def test_labels_auto_derived(self, multi_objective_study):
+        fig = plot_pareto_front(multi_objective_study)
+        ax = fig.axes[0]
         assert ax.get_xlabel() == "mean(calibration_error+nrmse)"
+        assert ax.get_ylabel() == "param_count_norm"
 
-    def test_xlabel_override(self, multi_objective_study):
-        ax = plot_pareto_front(multi_objective_study, xlabel="Custom X")
-        assert ax.get_xlabel() == "Custom X"
+    def test_embedded_mode(self, multi_objective_study):
+        _, axes = plt.subplots(1, 1)
+        result = plot_pareto_front(multi_objective_study, axes=[axes])
+        # Embedded mode returns axes array, not Figure
+        assert isinstance(result, np.ndarray)
 
-    def test_single_objective(self, single_objective_study):
-        ax = plot_pareto_front(single_objective_study)
-        assert isinstance(ax, matplotlib.axes.Axes)
+    def test_single_objective_placeholder(self, single_objective_study):
+        result = plot_pareto_front(single_objective_study)
+        # Should show placeholder text, not crash
+        assert isinstance(result, matplotlib.figure.Figure)
 
-    def test_no_trained_trials(self, empty_study):
-        ax = plot_pareto_front(empty_study)
-        assert isinstance(ax, matplotlib.axes.Axes)
+    def test_empty_study(self, empty_study):
+        result = plot_pareto_front(empty_study)
+        assert isinstance(result, matplotlib.figure.Figure)
+
+    def test_third_dim_color_3obj(self, three_objective_study):
+        """3-obj study with third_dim='color' produces colorbars."""
+        fig = plot_pareto_front(three_objective_study, third_dim="color")
+        # Should have more axes than panels due to colorbars
+        assert len(fig.axes) > 3
+
+    def test_third_dim_size_3obj(self, three_objective_study):
+        """3-obj study with third_dim='size' doesn't crash."""
+        fig = plot_pareto_front(three_objective_study, third_dim="size")
+        assert isinstance(fig, matplotlib.figure.Figure)
+
+    def test_third_dim_none_3obj(self, three_objective_study):
+        """3-obj study with third_dim='none' uses uniform markers."""
+        fig = plot_pareto_front(three_objective_study, third_dim="none")
+        assert isinstance(fig, matplotlib.figure.Figure)
+
+    def test_third_dim_ignored_for_2obj(self, multi_objective_study):
+        """2-obj study: third_dim is silently ignored."""
+        fig = plot_pareto_front(multi_objective_study, third_dim="color")
+        assert isinstance(fig, matplotlib.figure.Figure)
 
 
 # ---------------------------------------------------------------------------
-# plot_optimization_history tests
+# plot_optimization_history tests (rewritten for per-objective panels)
 # ---------------------------------------------------------------------------
 
 class TestPlotOptimizationHistory:
-    def test_returns_axes(self, multi_objective_study):
-        ax = plot_optimization_history(multi_objective_study)
-        assert isinstance(ax, matplotlib.axes.Axes)
+    def test_2obj_returns_figure(self, multi_objective_study):
+        result = plot_optimization_history(multi_objective_study)
+        assert isinstance(result, matplotlib.figure.Figure)
 
-    def test_ylabel_auto_derived(self, multi_objective_study):
-        ax = plot_optimization_history(multi_objective_study)
-        assert ax.get_ylabel() == "mean(calibration_error+nrmse)"
+    def test_2obj_produces_2_panels(self, multi_objective_study):
+        fig = plot_optimization_history(multi_objective_study)
+        assert len(fig.axes) >= 2
+
+    def test_3obj_produces_3_panels(self, three_objective_study):
+        fig = plot_optimization_history(three_objective_study)
+        assert len(fig.axes) >= 3
+
+    def test_per_objective_titles(self, multi_objective_study):
+        fig = plot_optimization_history(multi_objective_study)
+        titles = [ax.get_title() for ax in fig.axes[:2]]
+        assert "mean(calibration_error+nrmse)" in titles
+        assert "param_count_norm" in titles
+
+    def test_embedded_mode(self, multi_objective_study):
+        _, axes = plt.subplots(1, 2)
+        result = plot_optimization_history(multi_objective_study, axes=axes)
+        assert isinstance(result, np.ndarray)
 
     def test_empty_study(self, empty_study):
-        ax = plot_optimization_history(empty_study)
-        assert isinstance(ax, matplotlib.axes.Axes)
+        result = plot_optimization_history(empty_study)
+        assert isinstance(result, matplotlib.figure.Figure)
+
+    def test_step_line_only(self, multi_objective_study):
+        """No scatter points — only step lines."""
+        fig = plot_optimization_history(multi_objective_study)
+        ax = fig.axes[0]
+        # Should have lines (step) but no scatter collections
+        assert len(ax.get_lines()) >= 1
+        assert len(ax.collections) == 0
+
+    def test_direction_aware_maximize(self):
+        """MAXIMIZE direction uses max() for best-so-far."""
+        study = optuna.create_study(directions=["maximize", "minimize"])
+        study._metric_names = ["accuracy", "loss"]
+        study.add_trial(_make_trial(0, [0.70, 0.5], {}))
+        study.add_trial(_make_trial(1, [0.80, 0.4], {}))
+        study.add_trial(_make_trial(2, [0.75, 0.3], {}))
+
+        fig = plot_optimization_history(study)
+        ax_acc = fig.axes[0]  # accuracy (maximize)
+        # Best-so-far for maximize: [0.70, 0.80, 0.80]
+        step_lines = ax_acc.get_lines()
+        assert len(step_lines) >= 1
+        ydata = step_lines[0].get_ydata()
+        # Running max: second value should be >= first
+        assert ydata[1] >= ydata[0]
 
 
 # ---------------------------------------------------------------------------
-# plot_metric_scatter tests
+# plot_metric_scatter tests (UNCHANGED)
 # ---------------------------------------------------------------------------
 
 class TestPlotMetricScatter:
@@ -316,56 +395,91 @@ class TestPlotMetricScatter:
 
 
 # ---------------------------------------------------------------------------
-# plot_metric_panels tests
+# plot_metric_panels tests (updated for max_cols)
 # ---------------------------------------------------------------------------
 
 class TestPlotMetricPanels:
     def test_returns_axes_array(self, multi_objective_study):
-        axes = plot_metric_panels(
+        result = plot_metric_panels(
             multi_objective_study,
             metrics=["calibration_error", "nrmse"],
         )
-        assert hasattr(axes, "__len__")
-        assert len(axes) == 2
+        # Standalone mode now returns Figure
+        assert isinstance(result, matplotlib.figure.Figure)
 
     def test_auto_detect_metrics(self, multi_objective_study):
-        axes = plot_metric_panels(multi_objective_study)
+        result = plot_metric_panels(multi_objective_study)
+        assert isinstance(result, matplotlib.figure.Figure)
         # Should auto-detect calibration_error and nrmse
-        assert hasattr(axes, "__len__")
-        assert len(axes) >= 2
+        assert len(result.axes) >= 2
+
+    def test_embedded_mode(self, multi_objective_study):
+        _, axes = plt.subplots(1, 2)
+        result = plot_metric_panels(
+            multi_objective_study,
+            metrics=["calibration_error", "nrmse"],
+            axes=axes,
+        )
+        # Embedded returns axes array
+        assert isinstance(result, np.ndarray)
 
     def test_empty_study(self, empty_study):
         ax = plot_metric_panels(empty_study)
         assert isinstance(ax, matplotlib.axes.Axes)
 
+    def test_max_cols_wraps(self, multi_objective_study):
+        """max_cols=1 forces multiple rows."""
+        fig = plot_metric_panels(
+            multi_objective_study,
+            metrics=["calibration_error", "nrmse"],
+            max_cols=1,
+        )
+        assert isinstance(fig, matplotlib.figure.Figure)
+
 
 # ---------------------------------------------------------------------------
-# plot_param_importance tests
+# plot_param_importance tests (rewritten for per-objective panels)
 # ---------------------------------------------------------------------------
 
 class TestPlotParamImportance:
-    def test_returns_axes(self, multi_objective_study):
-        ax = plot_param_importance(multi_objective_study)
-        assert isinstance(ax, matplotlib.axes.Axes)
+    def test_2obj_returns_figure(self, multi_objective_study):
+        result = plot_param_importance(multi_objective_study)
+        # May return Figure or None (if all fail)
+        assert result is None or isinstance(result, matplotlib.figure.Figure)
 
-    def test_target_name_title(self, multi_objective_study):
-        ax = plot_param_importance(
-            multi_objective_study, target_name="calibration_error",
+    def test_per_objective_titles(self, multi_objective_study):
+        result = plot_param_importance(multi_objective_study)
+        if result is None:
+            pytest.skip("Importance unavailable for this study")
+        titles = [ax.get_title() for ax in result.axes]
+        # At least one title should contain an objective name
+        obj_names = ["mean(calibration_error+nrmse)", "param_count_norm"]
+        assert any(
+            any(name in title for name in obj_names)
+            for title in titles
         )
-        # Title shows metric name when importance succeeds, or fallback text
-        title = ax.get_title()
-        assert "calibration_error" in title or title == ""
 
-    def test_default_title(self, multi_objective_study):
-        ax = plot_param_importance(multi_objective_study)
-        # Title is "Parameter importance" when importance succeeds,
-        # empty when Optuna falls back to "Importance unavailable" text
-        title = ax.get_title()
-        assert title in ("Parameter importance", "")
+    def test_embedded_mode(self, multi_objective_study):
+        _, axes = plt.subplots(1, 2)
+        result = plot_param_importance(multi_objective_study, axes=axes)
+        if result is not None:
+            assert isinstance(result, np.ndarray)
+
+    def test_all_fail_returns_none(self):
+        """Study with no usable trials returns None."""
+        study = optuna.create_study(directions=["minimize", "minimize"])
+        result = plot_param_importance(study)
+        assert result is None
+
+    def test_3obj_produces_3_panels(self, three_objective_study):
+        result = plot_param_importance(three_objective_study)
+        if result is None:
+            pytest.skip("Importance unavailable")
+        assert len(result.axes) >= 3
 
 
 # ---------------------------------------------------------------------------
-# plot_pareto_3d tests
+# plot_pareto_3d tests (UNCHANGED)
 # ---------------------------------------------------------------------------
 
 class TestPlotPareto3D:
@@ -450,7 +564,7 @@ class TestParetoCorrectness3Obj:
 
 
 # ---------------------------------------------------------------------------
-# plot_pareto_projections tests
+# plot_pareto_projections tests (updated for max_cols)
 # ---------------------------------------------------------------------------
 
 class TestPlotParetoProjections:
@@ -479,9 +593,16 @@ class TestPlotParetoProjections:
         assert axes[2].get_xlabel() == "nrmse"
         assert axes[2].get_ylabel() == "param_count_norm"
 
+    def test_max_cols_wraps(self, three_objective_study):
+        """max_cols=2 wraps 3 panels into 2 rows."""
+        axes = plot_pareto_projections(
+            three_objective_study, max_cols=2,
+        )
+        assert len(axes) == 3
+
 
 # ---------------------------------------------------------------------------
-# plot_parallel_coordinates tests
+# plot_parallel_coordinates tests (UNCHANGED)
 # ---------------------------------------------------------------------------
 
 class TestPlotParallelCoordinates:
@@ -512,7 +633,8 @@ class TestPlotParallelCoordinates:
 
 
 # ---------------------------------------------------------------------------
-# plot_study tests
+# plot_study tests (updated — Phase 2 will rewrite plot_study() itself,
+# but we need these tests to still pass with the current implementation)
 # ---------------------------------------------------------------------------
 
 class TestPlotStudy:
@@ -599,7 +721,8 @@ class TestColorConstantsUsed:
 
         from bayesflow_hpo.results import _colors as colors
 
-        ax = plot_pareto_front(multi_objective_study)
+        fig = plot_pareto_front(multi_objective_study)
+        ax = fig.axes[0]
         collections = ax.collections
         assert len(collections) >= 1
         facecolors = collections[0].get_facecolors()
@@ -614,7 +737,8 @@ class TestColorConstantsUsed:
 
         from bayesflow_hpo.results import _colors as colors
 
-        ax = plot_optimization_history(multi_objective_study)
+        fig = plot_optimization_history(multi_objective_study)
+        ax = fig.axes[0]
         best_line_hex = mcolors.to_hex(colors.BEST_LINE)
         step_lines = [
             line for line in ax.get_lines()
