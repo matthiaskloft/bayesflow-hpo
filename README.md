@@ -47,7 +47,8 @@ Requires Python >= 3.11 and a Keras 3 backend (PyTorch recommended: `export KERA
 - **Network selection** — let Optuna choose the best architecture via `NetworkSelectionSpace` / `SummarySelectionSpace`
 - **Custom hooks** — replace build, train, or validate steps while reusing the full trial lifecycle
 - **Pre-flight validation** — `check_pipeline()` catches interface errors before GPU hours are wasted
-- **Multi-objective** — single-metric, mean-aggregated, or full Pareto-front optimization
+- **Multi-objective** — single-metric, mean-aggregated, or full Pareto-front optimization (2-3 objectives)
+- **Rich visualization** — `plot_study()` adaptive dashboard with pairwise Pareto projections, per-objective history, and parameter importance; plus standalone `plot_pareto_3d()`, `plot_parallel_coordinates()`, and more
 - **13 built-in validation metrics** — calibration, accuracy, SBC diagnostics, plus a registry for custom metrics
 - **Budget constraints** — reject infeasible architectures before training (`max_param_count`, `max_memory_mb`)
 - **Custom network registration** — plug in your own inference/summary networks
@@ -60,6 +61,7 @@ See the [examples/](examples/) directory for complete walkthroughs:
 | Notebook | Description |
 |---|---|
 | [`getting_started.ipynb`](examples/getting_started.ipynb) | End-to-end HPO: search, train, validate, select & retrain the best model |
+| [`two_moons_optimization.ipynb`](examples/two_moons_optimization.ipynb) | Network selection (CouplingFlow vs FlowMatching) on the Two Moons benchmark |
 | [`custom_summary_network.ipynb`](examples/custom_summary_network.ipynb) | Custom summary network registration + HPO |
 | [`optuna_dashboard.md`](examples/optuna_dashboard.md) | Optuna dashboard integration guide |
 

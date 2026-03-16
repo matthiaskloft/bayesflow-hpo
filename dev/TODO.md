@@ -8,6 +8,30 @@ No open items.
 
 ## Done
 
+### Redesign plot_study() for multi-objective support (2026-03-16, PRs #43, #45)
+Two-phase redesign of the visualization module:
+- **Phase 1** (PR #43): Rewrote `plot_pareto_front()` (pairwise 2D projections with
+  `third_dim` encoding), `plot_optimization_history()` (per-objective direction-aware
+  step lines), `plot_param_importance()` (per-objective bar charts with graceful
+  degradation). Added `max_cols` wrapping to `plot_pareto_projections()` and
+  `plot_metric_panels()`. Added `_setup_grid()` shared helper for dual-mode axes.
+- **Phase 2** (PR #45): Rewrote `plot_study()` as a 3-row GridSpec orchestrator
+  (Pareto / History / Importance) supporting 2-3 objectives. Removed `_plot_study_2obj()`,
+  `select_by`, and `metrics` params. >3 objectives raises `ValueError` with
+  helpful message.
+
+### Add Two Moons network selection example (2026-03-16, PR #44)
+Added `examples/two_moons_optimization.ipynb` — demonstrates `NetworkSelectionSpace`
+letting Optuna choose between CouplingFlow and FlowMatching on the Two Moons
+benchmark. Fixed `optimize()` and `SelectionSpace.build()` for condition-only models.
+
+### Rework inference time metric (2026-03-16, PRs #37-42)
+Multi-phase rework of the inference time cost metric:
+- Changed from ratio-based to seconds-per-dataset measurement
+- Improved display: human-readable time units, per-metric logging
+- Refactored checkpoint loading, plot naming, notebook rename
+  (`quickstart.ipynb` → `getting_started.ipynb`)
+
 ### Fix fragile iso-line color assertion (2026-03-15, PR #36)
 Replaced `line.get_color() in ("grey", "gray")` with
 `to_hex(line.get_color()) == to_hex("gray")` for version-safe color
