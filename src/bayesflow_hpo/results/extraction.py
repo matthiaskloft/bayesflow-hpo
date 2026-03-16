@@ -8,6 +8,8 @@ from typing import Any
 import optuna
 import pandas as pd
 
+from bayesflow_hpo._display import DisplayDataFrame
+
 # Patterns used by _round_value() to decide how to format floats.
 _LR_PATTERNS = ("lr", "learning_rate", "initial_lr")
 _DROPOUT_PATTERNS = ("dropout",)
@@ -243,7 +245,7 @@ def trial_table(
 
         records.append(rec)
 
-    return pd.DataFrame(records)
+    return DisplayDataFrame(records)
 
 
 def _find_trial(

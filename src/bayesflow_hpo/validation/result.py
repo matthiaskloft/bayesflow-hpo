@@ -13,6 +13,8 @@ from typing import Any
 
 import pandas as pd
 
+from bayesflow_hpo._display import DisplayDataFrame
+
 
 @dataclass(frozen=True)
 class ValidationResult:
@@ -49,21 +51,21 @@ class ValidationResult:
     # Table methods
     # ------------------------------------------------------------------
 
-    def summary_table(self) -> pd.DataFrame:
+    def summary_table(self) -> DisplayDataFrame:
         """Single-row DataFrame with overall summary metrics."""
-        return pd.DataFrame([self.summary])
+        return DisplayDataFrame([self.summary])
 
-    def condition_table(self, metric: str | None = None) -> pd.DataFrame:
+    def condition_table(self, metric: str | None = None) -> DisplayDataFrame:
         """Per-condition DataFrame, optionally filtered to columns matching *metric*."""
         if metric is None:
-            return self.condition_metrics.copy()
+            return DisplayDataFrame(self.condition_metrics)
         cols = [
             c for c in self.condition_metrics.columns
             if metric in c or c == "id_cond"
         ]
-        return self.condition_metrics[cols].copy()
+        return DisplayDataFrame(self.condition_metrics[cols])
 
-    def parameter_table(self) -> pd.DataFrame | None:
+    def parameter_table(self) -> DisplayDataFrame | None:
         """Per-parameter summary (multi-parameter models only)."""
         if self.per_parameter is None:
             return None
@@ -72,7 +74,7 @@ class ValidationResult:
             row: dict[str, Any] = {"parameter": param_name}
             row.update(param_result.summary)
             rows.append(row)
-        return pd.DataFrame(rows)
+        return DisplayDataFrame(rows)
 
     # ------------------------------------------------------------------
     # Objective extraction
