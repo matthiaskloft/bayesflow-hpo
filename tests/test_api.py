@@ -74,7 +74,7 @@ def test_missing_param_keys_raises_type_error():
 
 
 def test_missing_data_keys_raises_type_error():
-    """TypeError when adapter lacks summary_variables."""
+    """TypeError when adapter lacks both summary_variables and inference_conditions."""
     adapter = make_adapter(
         [
             FakeRename("theta", "inference_variables"),
@@ -82,6 +82,18 @@ def test_missing_data_keys_raises_type_error():
     )
     with pytest.raises(TypeError, match="data_keys"):
         _patched_optimize(adapter=adapter)
+
+
+def test_inference_conditions_fallback_for_data_keys():
+    """data_keys falls back to inference_conditions when summary_variables is absent."""
+    adapter = make_adapter(
+        [
+            FakeRename("theta", "inference_variables"),
+            FakeRename("x", "inference_conditions"),
+        ]
+    )
+    # Should not raise — inference_conditions provides data_keys.
+    _patched_optimize(adapter=adapter)
 
 
 # ---------------------------------------------------------------------------

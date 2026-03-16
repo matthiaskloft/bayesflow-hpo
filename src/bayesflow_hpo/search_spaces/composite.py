@@ -110,27 +110,33 @@ class NetworkSelectionSpace:
         """Build the inference network selected during sampling.
 
         Delegates to the candidate search space whose name matches
-        ``params["_inference_network_type"]``.
+        ``params["_inference_network_type"]``.  Also accepts the plain
+        ``"inference_network_type"`` key (as returned by
+        ``best_config()`` / ``trial.params``).
 
         Parameters
         ----------
         params
-            Trial parameters (must include ``_inference_network_type``).
+            Trial parameters (must include ``_inference_network_type``
+            or ``inference_network_type``).
 
         Returns
         -------
         bf.networks.InferenceNetwork
             Constructed inference network.
         """
-        if "_inference_network_type" not in params:
+        network_type = params.get(
+            "_inference_network_type",
+            params.get("inference_network_type"),
+        )
+        if network_type is None:
             message = (
-                "Missing '_inference_network_type' in params "
-                "for NetworkSelectionSpace.build()."
+                "Missing '_inference_network_type' (or 'inference_network_type') "
+                "in params for NetworkSelectionSpace.build()."
             )
             raise ValueError(
                 message
             )
-        network_type = params["_inference_network_type"]
         if network_type not in self.candidates:
             raise KeyError(f"Unknown inference network type: {network_type}")
         return self.candidates[network_type].build(params)
@@ -169,25 +175,32 @@ class SummarySelectionSpace:
     def build(self, params: dict[str, Any]) -> Any:
         """Build the summary network selected during sampling.
 
+        Also accepts the plain ``"summary_network_type"`` key (as
+        returned by ``best_config()`` / ``trial.params``).
+
         Parameters
         ----------
         params
-            Trial parameters (must include ``_summary_network_type``).
+            Trial parameters (must include ``_summary_network_type``
+            or ``summary_network_type``).
 
         Returns
         -------
         bf.networks.SummaryNetwork
             Constructed summary network.
         """
-        if "_summary_network_type" not in params:
+        network_type = params.get(
+            "_summary_network_type",
+            params.get("summary_network_type"),
+        )
+        if network_type is None:
             message = (
-                "Missing '_summary_network_type' in params "
-                "for SummarySelectionSpace.build()."
+                "Missing '_summary_network_type' (or 'summary_network_type') "
+                "in params for SummarySelectionSpace.build()."
             )
             raise ValueError(
                 message
             )
-        network_type = params["_summary_network_type"]
         if network_type not in self.candidates:
             raise KeyError(f"Unknown summary network type: {network_type}")
         return self.candidates[network_type].build(params)
