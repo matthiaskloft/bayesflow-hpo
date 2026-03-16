@@ -173,7 +173,12 @@ def _setup_grid(
         ``Axes`` objects.
     """
     if axes is not None:
-        return None, np.atleast_1d(axes)[:n_panels]
+        flat = np.asarray(axes, dtype=object).ravel()
+        if flat.size < n_panels:
+            raise ValueError(
+                f"Expected at least {n_panels} axes, got {flat.size}."
+            )
+        return None, flat[:n_panels]
     if n_panels <= 0:
         fig, ax = plt.subplots(figsize=figsize or (5, 4))
         return fig, np.array([ax])
@@ -590,6 +595,8 @@ def plot_param_importance(
         ax.set_title(f"Importance ({obj_cols[obj_idx]})")
 
     if all_failed:
+        if fig is not None:
+            plt.close(fig)
         return None
 
     return fig if fig is not None else ax_arr
