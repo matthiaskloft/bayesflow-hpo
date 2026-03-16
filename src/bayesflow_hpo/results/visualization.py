@@ -929,37 +929,44 @@ def plot_parallel_coordinates(
 def plot_study(
     study: optuna.Study,
     *,
-    select_by: int = 0,
-    metrics: list[str] | None = None,
+    third_dim: str = "color",
+    figsize: tuple[float, float] | None = None,
 ) -> plt.Figure:
-    """Auto-detecting study overview figure.
+    """Adaptive multi-row study overview figure.
 
-    Produces a 2x2 grid using the first two objectives: Pareto front,
-    optimization history, parameter importance, and metric scatter
-    (or metric panels).
+    Produces a 3-row grid of sub-plots:
 
-    For studies with 3+ objectives, use ``plot_pareto_3d()`` and
-    ``plot_parallel_coordinates()`` separately for full-dimensional views.
+    - **Row 0 — Pareto**: all pairwise objective projections
+    - **Row 1 — History**: per-objective best-so-far step lines
+    - **Row 2 — Importance**: per-objective parameter importance
+      (dropped if all panels fail)
 
     Parameters
     ----------
     study : optuna.Study
-        Completed HPO study.
-    select_by : int
-        Objective index for sorting/selection in sub-plots.
-    metrics : list of str, optional
-        Metric names for scatter plot. Auto-detected when *None*.
+        Completed HPO study with 2 or 3 objectives.
+    third_dim : ``"color"`` | ``"size"`` | ``"none"``
+        Encoding for the omitted objective in Pareto projections
+        (3-objective studies only; ignored for 2 objectives).
+    figsize : tuple, optional
+        Explicit ``(width, height)``.  Auto-computed as
+        ``(5 * n_cols, 4.5 * n_rows)`` when *None*.
 
     Returns
     -------
     matplotlib.figure.Figure
-        The figure. Access individual axes via ``fig.axes``.
 
     Raises
     ------
     ValueError
-        If the study has fewer than 2 objectives.
+        If the study has fewer than 2 or more than 3 objectives.
+        For >3 objectives, use the standalone functions directly
+        (``plot_pareto_front``, ``plot_optimization_history``,
+        ``plot_param_importance``) which support arbitrary counts
+        via ``max_cols``.
     """
+    from matplotlib.gridspec import GridSpec
+
     n_obj = len(study.directions)
 
     if n_obj < 2:
@@ -967,44 +974,58 @@ def plot_study(
             f"plot_study requires at least 2 objectives, got {n_obj}. "
             f"Use individual plot functions for single-objective studies."
         )
+    if n_obj > 3:
+        raise ValueError(
+            f"plot_study supports 2-3 objectives, got {n_obj}. "
+            f"For >3 objectives, use plot_pareto_front(), "
+            f"plot_optimization_history(), and plot_param_importance() "
+            f"directly with max_cols wrapping."
+        )
 
-    return _plot_study_2obj(study, select_by=select_by, metrics=metrics)
+    # Layout: n_pairs Pareto panels, n_obj history + importance panels
+    n_pairs = n_obj * (n_obj - 1) // 2  # 1 for 2-obj, 3 for 3-obj
+    n_cols = max(n_pairs, n_obj)
+    n_rows = 3  # may shrink to 2 if importance fails
 
+    if figsize is None:
+        figsize = (5 * n_cols, 4.5 * n_rows)
 
-def _plot_study_2obj(
-    study: optuna.Study,
-    *,
-    select_by: int,
-    metrics: list[str] | None,
-) -> plt.Figure:
-    """2-objective study: 2x2 grid.
+    fig = plt.figure(figsize=figsize)
+    gs = GridSpec(n_rows, n_cols, figure=fig)
 
-    .. deprecated::
-        Will be replaced by a GridSpec orchestrator in Phase 2.
-    """
-    n_obj = len(study.directions)
-
-    # Build a figure with enough axes for the new multi-panel functions.
-    # Row 0 left: Pareto (1 panel for 2-obj); Row 0 right: History (1st obj)
-    # Row 1 left: Importance (1st obj); Row 1 right: metric scatter/panels
-    fig, axs = plt.subplots(2, 2, figsize=(14, 10))
-
-    # Pareto: only use first pair, embedded in single axis
-    pareto_pairs = [(i, j) for i in range(n_obj) for j in range(i + 1, n_obj)]
-    plot_pareto_front(study, axes=[axs[0, 0]] * len(pareto_pairs))
-
-    # History + Importance: use first-objective panel only in this compat shim
-    plot_optimization_history(study, axes=[axs[0, 1]] * n_obj)
-    plot_param_importance(study, axes=[axs[1, 0]] * n_obj)
-
-    # Bottom-right: metric scatter if 2+ user-attr metrics, else panels
-    user_metrics = metrics or _get_metric_user_attrs(study)
-    if len(user_metrics) >= 2:
-        plot_metric_scatter(study, user_metrics[0], user_metrics[1],
-                            ax=axs[1, 1])
+    # --- Row 0: Pareto projections ---
+    # Center-span when fewer panels than columns (e.g. 1 pair in 2-col grid)
+    if n_pairs < n_cols:
+        # Single panel spanning all columns
+        pareto_axes = np.array([fig.add_subplot(gs[0, :])])
     else:
-        plot_metric_panels(study, metrics=user_metrics or None,
-                           axes=[axs[1, 1]])
+        pareto_axes = np.array([fig.add_subplot(gs[0, col]) for col in range(n_cols)])
+    plot_pareto_front(study, axes=pareto_axes, third_dim=third_dim)
+
+    # --- Row 1: Optimization history (one per objective) ---
+    history_axes = np.array([fig.add_subplot(gs[1, col]) for col in range(n_obj)])
+    # Pad with hidden axes if n_obj < n_cols
+    for col in range(n_obj, n_cols):
+        ax = fig.add_subplot(gs[1, col])
+        ax.set_visible(False)
+    plot_optimization_history(study, axes=history_axes)
+
+    # --- Row 2: Parameter importance (one per objective, may fail) ---
+    importance_axes = np.array([fig.add_subplot(gs[2, col]) for col in range(n_obj)])
+    row2_padding: list[Any] = []
+    for col in range(n_obj, n_cols):
+        ax = fig.add_subplot(gs[2, col])
+        ax.set_visible(False)
+        row2_padding.append(ax)
+    result = plot_param_importance(study, axes=importance_axes)
+
+    if result is None:
+        # All importance panels failed — remove row 2 and shrink figure
+        for ax in importance_axes:
+            ax.remove()
+        for ax in row2_padding:
+            ax.remove()
+        fig.set_size_inches(figsize[0], figsize[1] * 2 / 3)
 
     fig.tight_layout()
     return fig

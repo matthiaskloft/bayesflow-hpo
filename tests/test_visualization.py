@@ -633,42 +633,63 @@ class TestPlotParallelCoordinates:
 
 
 # ---------------------------------------------------------------------------
-# plot_study tests (updated — Phase 2 will rewrite plot_study() itself,
-# but we need these tests to still pass with the current implementation)
+# plot_study tests (Phase 2: GridSpec orchestrator)
 # ---------------------------------------------------------------------------
 
 class TestPlotStudy:
-    def test_2obj_returns_figure_with_4_axes(self, multi_objective_study):
+    def test_2obj_returns_figure(self, multi_objective_study):
         fig = plot_study(multi_objective_study)
         assert isinstance(fig, matplotlib.figure.Figure)
-        assert len(fig.axes) >= 4
 
-    def test_3obj_uses_2x2_layout(self, three_objective_study):
-        """3+ objective studies use the same 2x2 layout as 2-obj."""
+    def test_2obj_has_pareto_history_panels(self, multi_objective_study):
+        """2-obj: 1 centered Pareto + 2 history + importance panels."""
+        fig = plot_study(multi_objective_study)
+        # At least: 1 Pareto + 2 history + possibly 2 importance
+        # (importance may fail with few trials)
+        visible = [ax for ax in fig.axes if ax.get_visible()]
+        assert len(visible) >= 3  # Pareto + 2 history minimum
+
+    def test_3obj_returns_figure(self, three_objective_study):
         fig = plot_study(three_objective_study)
         assert isinstance(fig, matplotlib.figure.Figure)
-        assert len(fig.axes) >= 4
+
+    def test_3obj_has_more_panels(self, three_objective_study):
+        """3-obj: 3 Pareto + 3 history + possibly 3 importance."""
+        fig = plot_study(three_objective_study)
+        visible = [ax for ax in fig.axes if ax.get_visible()]
+        # At least 3 Pareto (possibly with colorbars) + 3 history
+        assert len(visible) >= 6
 
     def test_single_obj_raises(self, single_objective_study):
         with pytest.raises(ValueError, match="at least 2 objectives"):
             plot_study(single_objective_study)
 
-    def test_4obj_accepted(self):
-        """4+ objective studies are accepted (use first 2 objectives)."""
-        study = optuna.create_study(
-            directions=["minimize"] * 4,
-        )
+    def test_4obj_raises(self):
+        """4+ objective studies raise ValueError with helpful message."""
+        study = optuna.create_study(directions=["minimize"] * 4)
         study.add_trial(_make_trial(0, [0.1, 0.2, 0.3, 0.4], {
             "param_count": 50000,
         }))
-        fig = plot_study(study)
-        assert isinstance(fig, matplotlib.figure.Figure)
+        with pytest.raises(ValueError, match="2-3 objectives"):
+            plot_study(study)
 
     def test_empty_2obj_study(self, empty_study):
         """Empty study still returns a Figure with placeholder text."""
         fig = plot_study(empty_study)
         assert isinstance(fig, matplotlib.figure.Figure)
-        assert len(fig.axes) >= 4
+
+    def test_third_dim_passed_through(self, three_objective_study):
+        """third_dim parameter is passed to plot_pareto_front."""
+        fig = plot_study(three_objective_study, third_dim="size")
+        assert isinstance(fig, matplotlib.figure.Figure)
+
+    def test_custom_figsize(self, multi_objective_study):
+        """Custom figsize is respected (height may shrink if importance fails)."""
+        fig = plot_study(multi_objective_study, figsize=(20, 15))
+        w, h = fig.get_size_inches()
+        assert w == pytest.approx(20, abs=1)
+        # Height may be 15 (3 rows) or 10 (2 rows if importance dropped)
+        assert h >= 9
 
 
 # ---------------------------------------------------------------------------
