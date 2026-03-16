@@ -286,9 +286,15 @@ def optimize(
             "Rename/Concatenate targeting 'inference_variables'."
         )
     if data_keys is None:
+        # Models without a summary network pass observations directly as
+        # inference_conditions (e.g. the Two Moons benchmark).  Fall back
+        # to those keys so optimize() works for condition-only adapters.
+        data_keys = adapter_keys.get("inference_conditions")
+    if data_keys is None:
         raise TypeError(
             "Could not infer data_keys: the adapter has no "
-            "Rename/Concatenate targeting 'summary_variables'."
+            "Rename/Concatenate targeting 'summary_variables' or "
+            "'inference_conditions'."
         )
 
     # --- Always build validation data internally ---
