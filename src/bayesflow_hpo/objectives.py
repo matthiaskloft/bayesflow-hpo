@@ -1,4 +1,4 @@
-"""Objective helpers and inference-time cost normalization.
+"""Objective helpers and inference-time cost computation.
 
 Utility functions for mapping raw validation metrics and model costs into
 minimize-is-better objective values for Optuna.
@@ -8,9 +8,9 @@ Key concepts:
 - **Parameter count normalization**: Maps raw param counts to [0, 1] via
   log-linear scaling so the Pareto front is meaningful when accuracy
   metrics are also in [0, 1].
-- **Inference time ratio**: Normalizes inference wall-clock time against
-  simulation cost so that "10x faster than simulation" is comparable
-  across different models and hardware.
+- **Inference time per dataset**: Reports inference cost as seconds per
+  dataset (averaged over conditions), giving an interpretable measure of
+  how long one inference call takes.
 - **Higher-is-better inversion**: Metrics like ``correlation`` are
   inverted to ``1 - value`` so all objectives can be minimized.
 """
@@ -35,8 +35,7 @@ MAX_PARAM_COUNT = 1_000_000
 FAILED_TRIAL_CAL_ERROR = 1.0
 # Cost penalty for failed trials.  Must be large enough to dominate
 # any legitimate cost score so the sampler avoids these regions.
-# When sim_time_per_sim is unavailable, the fallback is raw inference
-# seconds, which can be in the hundreds — 1e6 safely dominates.
+# 1e6 seconds (~278 hours) safely dominates any real inference time.
 FAILED_TRIAL_COST = 1e6
 
 
@@ -124,32 +123,25 @@ def _metric_to_minimize(key: str, value: float) -> float:
     return value
 
 
-def compute_inference_time_ratio(
+def compute_inference_time_per_dataset(
     inference_time: float,
-    sim_time_per_sim: float | None,
-    n_sims: int,
+    n_datasets: int,
 ) -> float:
-    """Compute the inference-to-simulation time ratio.
-
-    Returns ``inference_time / (sim_time_per_sim * n_sims)``.  When
-    simulation timing is unavailable, falls back to raw inference
-    seconds so the objective is still meaningful (just not normalized).
+    """Compute average inference time in seconds per dataset.
 
     Parameters
     ----------
     inference_time
-        Total wall-clock inference seconds across all validation sims.
-    sim_time_per_sim
-        Average seconds to simulate one observation (from
-        :class:`~bayesflow_hpo.validation.data.ValidationDataset`).
-    n_sims
-        Total number of simulations that were inferred on.
+        Total pure inference seconds across all validation datasets.
+    n_datasets
+        Number of datasets (conditions) inferred on.
+
+    Returns
+    -------
+    float
+        Seconds per dataset (``inference_time / max(n_datasets, 1)``).
     """
-    if sim_time_per_sim is not None and sim_time_per_sim > 0:
-        total_sim_time = sim_time_per_sim * max(n_sims, 1)
-        return inference_time / total_sim_time
-    # Fallback: raw seconds (still minimize-is-better).
-    return inference_time
+    return inference_time / max(n_datasets, 1)
 
 
 def extract_objective_values(
@@ -165,7 +157,8 @@ def extract_objective_values(
         Nested dict with at least ``{"summary": {objective_metric: value}}``.
     cost_score
         Pre-computed cost objective (minimize-is-better).  Typically
-        ``inference_time_ratio`` or ``normalized_param_count``.
+        ``inference_time_s`` (seconds per dataset) or
+        ``normalized_param_count``.
     objective_metric
         Key to look up inside the summary dict.
     """
@@ -201,7 +194,8 @@ def extract_multi_objective_values(
         Nested dict with at least ``{"summary": {...}}``.
     cost_score
         Pre-computed cost objective (minimize-is-better).  Typically
-        ``inference_time_ratio`` or ``normalized_param_count``.
+        ``inference_time_s`` (seconds per dataset) or
+        ``normalized_param_count``.
     objective_metrics
         List of metric keys to optimize.
     objective_mode
