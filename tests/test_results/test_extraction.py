@@ -7,6 +7,7 @@ import optuna
 import pytest
 
 from bayesflow_hpo.results.extraction import (
+    _display_col_name,
     _fmt_param_count,
     _objective_column_names,
     _round_value,
@@ -80,6 +81,24 @@ def _make_study_with_rejected(metric_names=None):
     study.add_trial(rejected)
 
     return study
+
+
+# ---------------------------------------------------------------------------
+# _display_col_name
+# ---------------------------------------------------------------------------
+
+class TestDisplayColName:
+    def test_time_metric_gets_suffix(self):
+        assert _display_col_name("training_time_s") == "training_time_s (s)"
+
+    def test_inference_time_gets_suffix(self):
+        assert _display_col_name("inference_time_s") == "inference_time_s (s)"
+
+    def test_non_time_metric_unchanged(self):
+        assert _display_col_name("calibration_error") == "calibration_error"
+
+    def test_already_has_suffix(self):
+        assert _display_col_name("time (s)") == "time (s)"
 
 
 # ---------------------------------------------------------------------------
@@ -215,6 +234,13 @@ class TestSummarizeStudy:
         study = _make_study(n_trials=3, metric_names=["cal", "cost"])
         result = summarize_study(study)
         assert "Hyperparameters" not in result
+
+    def test_time_metrics_show_unit(self):
+        study = _make_study(
+            n_trials=2, metric_names=["inference_time_s", "cost"],
+        )
+        result = summarize_study(study)
+        assert "(s)" in result
 
 
 # ---------------------------------------------------------------------------

@@ -26,6 +26,8 @@ import numpy as np
 import optuna
 from optuna.trial import TrialState
 
+from bayesflow_hpo.results.extraction import _objective_column_names
+
 logger = logging.getLogger(__name__)
 
 # Default SQLite storage file used by :func:`create_study`.
@@ -301,6 +303,29 @@ def _best_objective_so_far(
     return best
 
 
+def _best_trial_so_far(
+    study: optuna.Study,
+    select_by: int = 0,
+) -> optuna.trial.FrozenTrial | None:
+    """Return the best trained trial by the selected objective.
+
+    Returns ``None`` if no qualifying trials exist yet.
+    """
+    best_trial = None
+    best_val = None
+    for t in study.trials:
+        if (
+            t.state == TrialState.COMPLETE
+            and t.values is not None
+            and "rejected_reason" not in t.user_attrs
+        ):
+            val = t.values[select_by]
+            if best_val is None or val < best_val:
+                best_val = val
+                best_trial = t
+    return best_trial
+
+
 def _count_non_rejected(study: optuna.Study) -> int:
     """Count trials that actually attempted training (trained + pruned + failed)."""
     return sum(
@@ -389,8 +414,6 @@ def optimize_until(
         rejected = _count_budget_rejected(study, since_trial=total_before)
         failed = _count_failed(study, since_trial=total_before)
         pruned = _count_pruned(study, since_trial=total_before)
-        best = _best_objective_so_far(study)
-        best_str = f"{best:.4f}" if best is not None else "n/a"
         parts = [f"{trained_now}/{n_trained} trained"]
         if rejected:
             parts.append(f"{rejected} rejected")
@@ -398,7 +421,11 @@ def optimize_until(
             parts.append(f"{failed} failed")
         if pruned:
             parts.append(f"{pruned} pruned")
-        parts.append(f"best: {best_str}")
+        best_trial = _best_trial_so_far(study)
+        if best_trial is not None:
+            obj_cols = _objective_column_names(study)
+            for col, val in zip(obj_cols, best_trial.values):
+                parts.append(f"best {col}: {val:.4f}")
         logger.info("Progress: %s", " | ".join(parts))
 
     # --- Final summary ---

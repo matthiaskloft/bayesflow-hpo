@@ -49,6 +49,13 @@ def _round_value(key: str, value: Any) -> Any:
     return round(value, 4)
 
 
+def _display_col_name(col: str) -> str:
+    """Append a unit suffix to time-related column names for display."""
+    if any(p in col.lower() for p in _TIME_PATTERNS) and not col.endswith("(s)"):
+        return f"{col} (s)"
+    return col
+
+
 def _fmt_param_count(count: int | float) -> str:
     """Format a raw parameter count as a human-readable string."""
     count = int(count)
@@ -442,7 +449,8 @@ def summarize_study(
 
         lines.append(f"Best trial: #{best.number}")
         for col, val in zip(obj_cols, best.values):
-            lines.append(f"  {col:30s}: {_round_value(col, val)}")
+            display_col = _display_col_name(col)
+            lines.append(f"  {display_col:30s}: {_round_value(col, val)}")
         raw_params = best.user_attrs.get("param_count")
         if raw_params is not None:
             lines.append(

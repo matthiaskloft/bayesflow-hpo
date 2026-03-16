@@ -339,9 +339,27 @@ def _log_trial_summary(
     values: tuple[float, ...],
     param_count: int,
     training_time: float,
-    metric_label: str = "obj[0]",
+    objective_metrics: list[str] | None = None,
+    cost_metric_name: str | None = None,
 ) -> None:
-    """Log a concise one-line summary after a trial completes."""
+    """Log a concise one-line summary after a trial completes.
+
+    Parameters
+    ----------
+    trial
+        The Optuna trial that just completed.
+    values
+        Objective values returned by the trial.
+    param_count
+        Actual trainable parameter count.
+    training_time
+        Wall-clock training time in seconds.
+    objective_metrics
+        Metric keys being optimized (e.g. ``["calibration_error", "nrmse"]``).
+        Each metric's value is read from ``trial.user_attrs``.
+    cost_metric_name
+        Display name for the cost metric (last value in *values*).
+    """
     params_label = (
         f"{param_count / 1e6:.2f}M"
         if param_count >= 1e6
@@ -351,15 +369,21 @@ def _log_trial_summary(
     )
     parts = [
         f"Trial #{trial.number} done ({training_time:.0f}s)",
-        f"{metric_label}: {values[0]:.4f}",
         f"params: {params_label}",
     ]
-    nrmse = trial.user_attrs.get("nrmse")
-    if nrmse is not None:
-        parts.append(f"nrmse: {nrmse:.4f}")
-    corr = trial.user_attrs.get("correlation")
-    if corr is not None:
-        parts.append(f"corr: {corr:.4f}")
+    # Show each objective metric from trial user attrs.
+    if objective_metrics:
+        for key in objective_metrics:
+            val = trial.user_attrs.get(key)
+            if val is not None:
+                parts.append(f"{key}: {val:.4f}")
+    # Show the cost metric (last objective value).
+    if cost_metric_name and values:
+        cost_val = values[-1]
+        if cost_metric_name == "inference_time_s":
+            parts.append(f"{cost_metric_name}: {cost_val:.2f}s")
+        else:
+            parts.append(f"{cost_metric_name}: {cost_val:.4f}")
     logger.info(" | ".join(parts))
 
 
@@ -404,6 +428,13 @@ class GenericObjective:
         if cfg.objective_mode == "pareto":
             return cfg.objective_metrics[0]
         return f"mean({'+'.join(cfg.objective_metrics)})"
+
+    @property
+    def _cost_metric_name(self) -> str:
+        """Display name for the cost metric in logs."""
+        if self.config.cost_metric == "inference_time":
+            return "inference_time_s"
+        return "param_count_norm"
 
     @property
     def n_objectives(self) -> int:
@@ -638,7 +669,9 @@ class GenericObjective:
             )
             _log_trial_summary(
                 trial, values, param_count_actual,
-                training_time, self._metric_label,
+                training_time,
+                objective_metrics=config.objective_metrics,
+                cost_metric_name=self._cost_metric_name,
             )
             cleanup_trial()
             return values
@@ -687,7 +720,9 @@ class GenericObjective:
 
         # --- Step 11: Per-trial summary log ---
         _log_trial_summary(
-            trial, values, param_count, training_time, self._metric_label,
+            trial, values, param_count, training_time,
+            objective_metrics=config.objective_metrics,
+            cost_metric_name=self._cost_metric_name,
         )
 
         cleanup_trial()
