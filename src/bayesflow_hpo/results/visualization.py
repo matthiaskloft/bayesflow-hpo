@@ -9,7 +9,6 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 import optuna
-from matplotlib.gridspec import GridSpec
 
 from bayesflow_hpo.results import _colors as c
 from bayesflow_hpo.results.extraction import _objective_column_names
@@ -724,6 +723,16 @@ def plot_parallel_coordinates(
         for t in trained
     ])
 
+    # Invert and log-transform the cost metric (last axis) so that
+    # "better" (lower cost) maps to higher normalized values, consistent
+    # with the other axes where lower values are better and map to the
+    # bottom of the plot.
+    cost_col = n_axes - 1
+    display_labels = list(obj_cols)
+    data[:, cost_col] = np.log1p(np.abs(data[:, cost_col]))
+    data[:, cost_col] = -data[:, cost_col]
+    display_labels[cost_col] = f"-log({obj_cols[cost_col]})"
+
     # Normalize each axis to [0, 1]
     col_min = np.nanmin(data, axis=0)
     col_max = np.nanmax(data, axis=0)
@@ -731,7 +740,7 @@ def plot_parallel_coordinates(
     col_range[col_range == 0] = 1.0
     normed = (data - col_min) / col_range
 
-    # Color by select_by objective
+    # Color by select_by objective (use original data for non-cost axes)
     color_vals = data[:, select_by]
     val_min, val_max = color_vals.min(), color_vals.max()
     if val_max > val_min:
@@ -753,7 +762,7 @@ def plot_parallel_coordinates(
         ax.axvline(i, color=c.SECONDARY, linewidth=0.5, alpha=0.5)
 
     ax.set_xticks(x_ticks)
-    ax.set_xticklabels(obj_cols, rotation=15, ha="right")
+    ax.set_xticklabels(display_labels, rotation=15, ha="right")
     ax.set_ylabel("Normalized value")
     ax.set_title("Parallel coordinates")
 
@@ -793,12 +802,12 @@ def plot_study(
 ) -> plt.Figure:
     """Auto-detecting study overview figure.
 
-    Produces a multi-panel figure tailored to the number of objectives:
+    Produces a 2x2 grid using the first two objectives: Pareto front,
+    optimization history, parameter importance, and metric scatter
+    (or metric panels).
 
-    - **2-objective**: 2x2 grid — Pareto front, optimization history,
-      parameter importance, and metric scatter (or metric panels).
-    - **3-objective**: 2x3 GridSpec — 3D Pareto (spanning 2 cols),
-      parallel coordinates, and 3 pairwise projections.
+    For studies with 3+ objectives, use ``plot_pareto_3d()`` and
+    ``plot_parallel_coordinates()`` separately for full-dimensional views.
 
     Parameters
     ----------
@@ -807,8 +816,7 @@ def plot_study(
     select_by : int
         Objective index for sorting/selection in sub-plots.
     metrics : list of str, optional
-        Metric names for scatter plot (2-obj mode). Auto-detected when
-        *None*.
+        Metric names for scatter plot. Auto-detected when *None*.
 
     Returns
     -------
@@ -818,19 +826,17 @@ def plot_study(
     Raises
     ------
     ValueError
-        If the study has fewer than 2 or more than 3 objectives.
+        If the study has fewer than 2 objectives.
     """
     n_obj = len(study.directions)
 
-    if n_obj < 2 or n_obj > 3:
+    if n_obj < 2:
         raise ValueError(
-            f"plot_study supports 2 or 3 objectives, got {n_obj}. "
-            f"Use individual plot functions for other configurations."
+            f"plot_study requires at least 2 objectives, got {n_obj}. "
+            f"Use individual plot functions for single-objective studies."
         )
 
-    if n_obj == 2:
-        return _plot_study_2obj(study, select_by=select_by, metrics=metrics)
-    return _plot_study_3obj(study, select_by=select_by)
+    return _plot_study_2obj(study, select_by=select_by, metrics=metrics)
 
 
 def _plot_study_2obj(
@@ -859,31 +865,3 @@ def _plot_study_2obj(
     return fig
 
 
-def _plot_study_3obj(
-    study: optuna.Study,
-    *,
-    select_by: int,
-) -> plt.Figure:
-    """3-objective study: 2x3 GridSpec layout.
-
-    ::
-
-        Row 0: [3D Pareto — cols 0:2]  [Parallel coords — col 2]
-        Row 1: [Proj 0v1]  [Proj 0v2]  [Proj 1v2]
-    """
-    fig = plt.figure(figsize=(18, 10))
-    gs = GridSpec(2, 3, figure=fig)
-
-    # Row 0: 3D Pareto spanning 2 cols, parallel coordinates in col 2
-    ax_3d = fig.add_subplot(gs[0, 0:2], projection="3d")
-    plot_pareto_3d(study, ax=ax_3d)
-
-    ax_pc = fig.add_subplot(gs[0, 2])
-    plot_parallel_coordinates(study, ax=ax_pc, select_by=select_by)
-
-    # Row 1: 3 projection panels
-    proj_axes = [fig.add_subplot(gs[1, k]) for k in range(3)]
-    plot_pareto_projections(study, axes=np.array(proj_axes))
-
-    fig.tight_layout()
-    return fig

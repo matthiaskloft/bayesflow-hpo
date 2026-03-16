@@ -326,7 +326,7 @@ normalize_param_count(param_count) -> float
 denormalize_param_count(normalized) -> int
 extract_objective_values(metrics, cost_score, objective_metric="calibration_error") -> tuple[float, float]
 extract_multi_objective_values(metrics, cost_score, objective_metrics, objective_mode="mean") -> tuple[float, ...]
-compute_inference_time_ratio(inference_time, sim_time_per_sim, n_sims) -> float
+compute_inference_time_per_dataset(inference_time, n_datasets) -> float
 loguniform_int(low, high, alpha=1.0, rng=None) -> int
 loguniform_float(low, high, alpha=1.0, rng=None) -> float
 ```
