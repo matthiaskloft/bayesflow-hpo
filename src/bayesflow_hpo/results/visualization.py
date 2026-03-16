@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import logging
 import math
 from typing import Any
@@ -141,122 +142,233 @@ def _get_metric_user_attrs(
     )
 
 
+def _setup_grid(
+    n_panels: int,
+    axes: Any | None,
+    *,
+    max_cols: int = 3,
+    figsize: tuple[float, float] | None = None,
+    panel_size: tuple[float, float] = (5.0, 4.5),
+) -> tuple[plt.Figure | None, np.ndarray]:
+    """Create or validate a subplot grid for multi-panel plots.
+
+    Parameters
+    ----------
+    n_panels : int
+        Number of panels to draw.
+    axes : array-like or None
+        Pre-allocated axes (embedded mode) or *None* (standalone mode).
+    max_cols : int
+        Maximum columns per row (standalone mode only).
+    figsize : tuple, optional
+        Explicit figure size. Auto-computed from *panel_size* when *None*.
+    panel_size : tuple
+        ``(width, height)`` per panel for auto-computed figsize.
+
+    Returns
+    -------
+    tuple of (fig_or_None, axes_1d)
+        *fig_or_None* is the ``Figure`` in standalone mode, ``None`` in
+        embedded mode.  *axes_1d* is a 1D array of exactly *n_panels*
+        ``Axes`` objects.
+    """
+    if axes is not None:
+        flat = np.asarray(axes, dtype=object).ravel()
+        if flat.size < n_panels:
+            raise ValueError(
+                f"Expected at least {n_panels} axes, got {flat.size}."
+            )
+        return None, flat[:n_panels]
+    if n_panels <= 0:
+        fig, ax = plt.subplots(figsize=figsize or (5, 4))
+        return fig, np.array([ax])
+    n_cols = min(max_cols, n_panels)
+    n_rows = math.ceil(n_panels / n_cols)
+    if figsize is None:
+        figsize = (panel_size[0] * n_cols, panel_size[1] * n_rows)
+    fig, ax_grid = plt.subplots(n_rows, n_cols, figsize=figsize, squeeze=False)
+    flat = ax_grid.flatten()
+    for idx in range(n_panels, len(flat)):
+        flat[idx].set_visible(False)
+    return fig, flat[:n_panels]
+
+
 # ---------------------------------------------------------------------------
 # Public plot functions
 # ---------------------------------------------------------------------------
 
 def plot_pareto_front(
     study: optuna.Study,
-    ax: Any | None = None,
+    axes: Any | None = None,
     *,
-    xlabel: str | None = None,
-    ylabel: str | None = None,
+    third_dim: str = "color",
+    max_cols: int = 3,
+    figsize: tuple[float, float] | None = None,
 ) -> Any:
-    """Plot first objective versus actual parameter count.
+    """Plot pairwise 2D Pareto projections of study objectives.
+
+    For each pair ``(i, j)`` of objectives, plots ``objective[i]`` on X
+    versus ``objective[j]`` on Y.  When the study has 3+ objectives, the
+    omitted objective for each pair is encoded via *third_dim*.
+
+    Two Pareto layers are drawn per panel:
+
+    1. A 2D non-dominated step line computed per-projection.
+    2. Study-level Pareto markers (``study.best_trials``) — these are
+       Pareto-optimal in the full N-dimensional objective space but may
+       not be non-dominated in the 2D projection.
+
+    Parameters
+    ----------
+    study : optuna.Study
+        Completed HPO study with 2+ objectives.
+    axes : array of matplotlib.axes.Axes, optional
+        Pre-allocated axes (one per pair).  When *None*, a figure is
+        created automatically (standalone mode).
+    third_dim : ``"color"`` | ``"size"`` | ``"none"``
+        Encoding for the omitted objective in 3+ objective studies.
+        Ignored for 2-objective studies (no omitted dimension).
+    max_cols : int
+        Maximum columns per row in standalone mode.
+    figsize : tuple, optional
+        Explicit figure size.  Auto-computed when *None*.
+
+    Returns
+    -------
+    matplotlib.figure.Figure (standalone) or ndarray of Axes (embedded)
+    """
+    obj_cols = _objective_column_names(study)
+    n_obj = len(obj_cols)
+
+    if n_obj < 2:
+        fig, ax_arr = _setup_grid(1, axes, max_cols=max_cols, figsize=figsize)
+        ax_arr[0].text(0.5, 0.5, "Need at least 2 objectives",
+                       ha="center", va="center", transform=ax_arr[0].transAxes)
+        return fig if fig is not None else ax_arr
+
+    # All pairwise objective combinations
+    pairs = [(i, j) for i in range(n_obj) for j in range(i + 1, n_obj)]
+
+    fig, ax_arr = _setup_grid(len(pairs), axes, max_cols=max_cols,
+                              figsize=figsize)
+
+    trials = _valid_nobj_trials(study, n_obj)
+    pareto_numbers = {t.number for t in study.best_trials}
+
+    for panel_idx, (i, j) in enumerate(pairs):
+        ax = ax_arr[panel_idx]
+        if not trials:
+            ax.text(0.5, 0.5, "No valid trials",
+                    ha="center", va="center", transform=ax.transAxes)
+            ax.set_title(f"{obj_cols[i]} vs {obj_cols[j]}")
+            continue
+
+        xi = [t.values[i] for t in trials]
+        xj = [t.values[j] for t in trials]
+
+        # Determine omitted dimension (only for 3+ objectives).
+        # When >1 dimension is omitted (4+ objectives), encode the first.
+        all_indices = set(range(n_obj))
+        omitted_indices = sorted(all_indices - {i, j})
+        omitted_idx = omitted_indices[0] if omitted_indices else None
+
+        # Scatter trials with optional 3rd-dimension encoding
+        if omitted_idx is not None and third_dim == "color":
+            omitted_vals = np.array([t.values[omitted_idx] for t in trials])
+            sc = ax.scatter(xi, xj, c=omitted_vals, cmap="viridis_r",
+                            alpha=0.6, label="Trials")
+            plt.colorbar(sc, ax=ax, label=obj_cols[omitted_idx])
+        elif omitted_idx is not None and third_dim == "size":
+            omitted_vals = np.array([t.values[omitted_idx] for t in trials])
+            sizes = _normalize_to_sizes(omitted_vals)
+            ax.scatter(xi, xj, s=sizes, color=c.PRIMARY,
+                       alpha=c.ALPHA_TRIAL, label="Trials")
+        else:
+            ax.scatter(xi, xj, color=c.PRIMARY, alpha=c.ALPHA_TRIAL,
+                       label="Trials")
+
+        # Layer 1: 2D non-dominated step line per projection
+        _draw_pareto_overlay(ax, xi, xj, draw_step=True, draw_markers=False)
+
+        # Layer 2: study-level Pareto markers (N-D optimal)
+        pareto_in = [t for t in trials if t.number in pareto_numbers]
+        if pareto_in:
+            px = [t.values[i] for t in pareto_in]
+            py = [t.values[j] for t in pareto_in]
+            ax.scatter(px, py, c=c.ACCENT, s=c.PARETO_SIZE,
+                       marker=c.PARETO_MARKER, zorder=4, label="Pareto")
+
+        ax.set_xlabel(obj_cols[i])
+        ax.set_ylabel(obj_cols[j])
+        ax.set_title(f"{obj_cols[i]} vs {obj_cols[j]}")
+        ax.legend(loc="best", framealpha=0.8, fontsize="small")
+
+    return fig if fig is not None else ax_arr
+
+
+def plot_optimization_history(
+    study: optuna.Study,
+    axes: Any | None = None,
+    *,
+    max_cols: int = 3,
+    figsize: tuple[float, float] | None = None,
+) -> Any:
+    """Plot per-objective optimization convergence as best-so-far step lines.
+
+    Creates one panel per objective.  Each panel shows a step line of the
+    running best value (respecting the objective's direction: ``min`` for
+    ``MINIMIZE``, ``max`` for ``MAXIMIZE``).
 
     Parameters
     ----------
     study : optuna.Study
         Completed HPO study.
-    ax : matplotlib.axes.Axes, optional
-        Axes to draw on. Created if *None*.
-    xlabel : str, optional
-        Override for the x-axis label. Auto-derived from study metric names
-        when *None*.
-    ylabel : str, optional
-        Override for the y-axis label. Defaults to ``"Parameter count"``.
-    """
-    if ax is None:
-        _, ax = plt.subplots(figsize=(8, 6))
+    axes : array of matplotlib.axes.Axes, optional
+        Pre-allocated axes (one per objective).  When *None*, a figure is
+        created automatically (standalone mode).
+    max_cols : int
+        Maximum columns per row in standalone mode.
+    figsize : tuple, optional
+        Explicit figure size.  Auto-computed when *None*.
 
+    Returns
+    -------
+    matplotlib.figure.Figure (standalone) or ndarray of Axes (embedded)
+    """
     obj_cols = _objective_column_names(study)
-    if len(obj_cols) < 2:
-        ax.text(0.5, 0.5, "Single-objective study",
-                ha="center", va="center", transform=ax.transAxes)
-        return ax
+    n_obj = len(obj_cols)
 
-    trained = [
-        t for t in _trained_trials(study)
-        if t.user_attrs.get("param_count", 0) > 0
-    ]
-    if not trained:
-        ax.text(0.5, 0.5, "No trained trials",
-                ha="center", va="center", transform=ax.transAxes)
-        return ax
-
-    obj_values = [t.values[0] for t in trained]
-    param_counts = [t.user_attrs["param_count"] for t in trained]
-    ax.scatter(
-        obj_values, param_counts,
-        color=c.PRIMARY, alpha=c.ALPHA_TRIAL, label="Trials",
-    )
-
-    # Pareto front from study (study-objective level)
-    pareto = [
-        t for t in study.best_trials
-        if t.values is not None
-        and "rejected_reason" not in t.user_attrs
-        and t.user_attrs.get("param_count", 0) > 0
-    ]
-    if pareto:
-        p_obj = [t.values[0] for t in pareto]
-        p_params = [t.user_attrs["param_count"] for t in pareto]
-        ax.scatter(
-            p_obj, p_params,
-            c=c.ACCENT, s=c.PARETO_SIZE, marker=c.PARETO_MARKER,
-            label="Pareto",
-        )
-
-    ax.set_yscale("log")
-    ax.yaxis.set_major_formatter(_param_count_formatter())
-    ax.set_xlabel(xlabel or obj_cols[0])
-    ax.set_ylabel(ylabel or "Parameter count")
-    ax.set_title("Pareto front")
-    ax.legend(loc="best", framealpha=0.8)
-    return ax
-
-
-def plot_optimization_history(
-    study: optuna.Study,
-    ax: Any | None = None,
-) -> Any:
-    """Plot optimization convergence (first objective vs trial number).
-
-    Shows individual trial values as a scatter and a step-line for the
-    running best.
-    """
-    if ax is None:
-        _, ax = plt.subplots(figsize=(8, 6))
+    fig, ax_arr = _setup_grid(n_obj, axes, max_cols=max_cols, figsize=figsize)
 
     trained = _trained_trials(study)
-    if not trained:
-        ax.text(0.5, 0.5, "No trained trials",
-                ha="center", va="center", transform=ax.transAxes)
-        return ax
-
-    # Sort by trial number to get chronological order
     trained.sort(key=lambda t: t.number)
-    numbers = [t.number for t in trained]
-    values = [t.values[0] for t in trained]
 
-    ax.scatter(numbers, values, color=c.PRIMARY, alpha=c.ALPHA_TRIAL,
-               label="Trials")
+    for obj_idx in range(n_obj):
+        ax = ax_arr[obj_idx]
 
-    # Best-so-far step line
-    best_so_far = []
-    running_best = float("inf")
-    for v in values:
-        running_best = min(running_best, v)
-        best_so_far.append(running_best)
-    ax.step(numbers, best_so_far, where="post", color=c.BEST_LINE,
-            label="Best so far")
+        if not trained:
+            ax.text(0.5, 0.5, "No trained trials",
+                    ha="center", va="center", transform=ax.transAxes)
+            ax.set_title(obj_cols[obj_idx])
+            continue
 
-    obj_cols = _objective_column_names(study)
-    ax.set_xlabel("Trial")
-    ax.set_ylabel(obj_cols[0])
-    ax.set_title("Optimization history")
-    ax.legend(loc="best", framealpha=0.8)
-    return ax
+        numbers = [t.number for t in trained]
+        values = [t.values[obj_idx] for t in trained]
+
+        # Direction-aware best-so-far
+        direction = study.directions[obj_idx]
+        best_func = (max if direction == optuna.study.StudyDirection.MAXIMIZE
+                     else min)
+        best_so_far = list(itertools.accumulate(values, best_func))
+
+        ax.step(numbers, best_so_far, where="post", color=c.BEST_LINE,
+                label="Best so far")
+
+        ax.set_xlabel("Trial")
+        ax.set_ylabel(obj_cols[obj_idx])
+        ax.set_title(obj_cols[obj_idx])
+
+    return fig if fig is not None else ax_arr
 
 
 def plot_metric_scatter(
@@ -346,6 +458,9 @@ def plot_metric_panels(
     study: optuna.Study,
     metrics: list[str] | None = None,
     axes: Any | None = None,
+    *,
+    max_cols: int = 3,
+    figsize: tuple[float, float] | None = None,
 ) -> Any:
     """Per-metric vs parameter count subplots with 2D Pareto fronts.
 
@@ -357,6 +472,10 @@ def plot_metric_panels(
         Metric names from ``trial.user_attrs``. Auto-detected when *None*.
     axes : array of matplotlib.axes.Axes, optional
         Pre-created axes (length must match *metrics*).
+    max_cols : int
+        Maximum columns per row in standalone mode.
+    figsize : tuple, optional
+        Explicit figure size.  Auto-computed when *None*.
     """
     trained = [
         t for t in _trained_trials(study)
@@ -374,12 +493,11 @@ def plot_metric_panels(
                 ha="center", va="center", transform=ax.transAxes)
         return ax
 
-    if axes is None:
-        fig, axes = plt.subplots(1, n, figsize=(5 * n, 5), squeeze=False)
-        axes = axes[0]
+    fig, ax_arr = _setup_grid(n, axes, max_cols=max_cols,
+                              figsize=figsize, panel_size=(5.0, 5.0))
 
     for i, metric in enumerate(metrics):
-        ax = axes[i]
+        ax = ax_arr[i]
         mvs, pcs = [], []
         for t in trained:
             mv = t.user_attrs.get(metric)
@@ -404,72 +522,84 @@ def plot_metric_panels(
         ax.set_ylabel(metric)
         ax.set_title(metric)
 
-    return axes
+    return fig if fig is not None else ax_arr
 
 
 def plot_param_importance(
     study: optuna.Study,
-    ax: Any | None = None,
+    axes: Any | None = None,
     top_k: int = 10,
     *,
-    target_name: str | None = None,
-) -> Any:
-    """Plot Optuna parameter importances.
+    max_cols: int = 3,
+    figsize: tuple[float, float] | None = None,
+) -> Any | None:
+    """Plot per-objective parameter importance bar charts.
+
+    Creates one bar chart per objective showing the top-*k* most
+    important hyperparameters according to Optuna's fANOVA importance
+    evaluator.
 
     Parameters
     ----------
     study : optuna.Study
         Completed HPO study.
-    ax : matplotlib.axes.Axes, optional
-        Axes to draw on.
+    axes : array of matplotlib.axes.Axes, optional
+        Pre-allocated axes (one per objective).  When *None*, a figure is
+        created automatically (standalone mode).
     top_k : int
-        Maximum number of parameters to show.
-    target_name : str, optional
-        Target a specific metric stored in ``trial.user_attrs`` instead of
-        the first objective value. Useful for decomposing importance by
-        individual metrics (e.g. ``"calibration_error"``).
+        Maximum number of parameters to show per panel.
+    max_cols : int
+        Maximum columns per row in standalone mode.
+    figsize : tuple, optional
+        Explicit figure size.  Auto-computed when *None*.
+
+    Returns
+    -------
+    matplotlib.figure.Figure (standalone), ndarray of Axes (embedded),
+    or *None* if **all** panels failed (signals the orchestrator to drop
+    the importance row).
     """
-    if ax is None:
-        _, ax = plt.subplots(figsize=(8, 6))
+    obj_cols = _objective_column_names(study)
+    n_obj = len(obj_cols)
 
-    try:
-        if target_name is not None:
-            def target(t: optuna.trial.FrozenTrial) -> float:
-                if "rejected_reason" in t.user_attrs:
-                    return float("inf")
-                return t.user_attrs.get(target_name, float("inf"))
-        elif len(study.directions) > 1:
-            def target(t: optuna.trial.FrozenTrial) -> float:
-                return t.values[0] if t.values else float("inf")
-        else:
-            target = None
+    fig, ax_arr = _setup_grid(n_obj, axes, max_cols=max_cols, figsize=figsize)
 
-        importance = optuna.importance.get_param_importances(
-            study, target=target,
-        )
-    except Exception:
-        ax.text(
-            0.5, 0.5, "Importance unavailable",
-            ha="center", va="center", transform=ax.transAxes,
-        )
-        return ax
+    all_failed = True
+    for obj_idx in range(n_obj):
+        ax = ax_arr[obj_idx]
+        try:
+            # Per-objective target callable; default arg captures loop var
+            target = lambda t, idx=obj_idx: (  # noqa: E731
+                t.values[idx] if t.values and len(t.values) > idx
+                else float("inf")
+            )
+            importance = optuna.importance.get_param_importances(
+                study, target=target,
+            )
+        except Exception:
+            ax.text(0.5, 0.5, "Importance unavailable",
+                    ha="center", va="center", transform=ax.transAxes)
+            ax.set_title(obj_cols[obj_idx])
+            continue
 
-    params = list(importance.keys())[:top_k]
-    values = [importance[p] for p in params]
+        all_failed = False
+        params = list(importance.keys())[:top_k]
+        values = [importance[p] for p in params]
 
-    y_pos = np.arange(len(params))
-    ax.barh(y_pos, values, align="center", color=c.PRIMARY)
-    ax.set_yticks(y_pos)
-    ax.set_yticklabels(params)
-    ax.invert_yaxis()
-    ax.set_xlabel("Importance")
-    title = (
-        f"Parameter importance ({target_name})"
-        if target_name
-        else "Parameter importance"
-    )
-    ax.set_title(title)
-    return ax
+        y_pos = np.arange(len(params))
+        ax.barh(y_pos, values, align="center", color=c.PRIMARY)
+        ax.set_yticks(y_pos)
+        ax.set_yticklabels(params)
+        ax.invert_yaxis()
+        ax.set_xlabel("Importance")
+        ax.set_title(f"Importance ({obj_cols[obj_idx]})")
+
+    if all_failed:
+        if fig is not None:
+            plt.close(fig)
+        return None
+
+    return fig if fig is not None else ax_arr
 
 
 # ---------------------------------------------------------------------------
@@ -571,6 +701,8 @@ def plot_pareto_projections(
     axes: Any | None = None,
     *,
     cost_display: str = "color",
+    max_cols: int = 3,
+    figsize: tuple[float, float] | None = None,
 ) -> Any:
     """Paired 2D Pareto projections for 3-objective studies.
 
@@ -586,18 +718,20 @@ def plot_pareto_projections(
         Pre-created axes array. Length must match number of pairs.
     cost_display : ``"color"`` or ``"size"``
         How to show the omitted third objective dimension.
+    max_cols : int
+        Maximum columns per row in standalone mode.
+    figsize : tuple, optional
+        Explicit figure size.  Auto-computed when *None*.
     """
     obj_cols = _objective_column_names(study)
     n_obj = len(obj_cols)
 
     if n_obj < 2:
-        if axes is None:
-            _, ax = plt.subplots()
-        else:
-            ax = axes[0] if hasattr(axes, "__len__") else axes
-        ax.text(0.5, 0.5, "Need at least 2 objectives",
-                ha="center", va="center", transform=ax.transAxes)
-        return np.array([ax])
+        fig, ax_arr = _setup_grid(1, axes, max_cols=max_cols, figsize=figsize,
+                                  panel_size=(6.0, 5.0))
+        ax_arr[0].text(0.5, 0.5, "Need at least 2 objectives",
+                       ha="center", va="center", transform=ax_arr[0].transAxes)
+        return ax_arr
 
     # Build pairs: for 2-obj just one pair, for 3-obj three pairs
     if n_obj >= 3:
@@ -605,16 +739,14 @@ def plot_pareto_projections(
     else:
         pairs = [(0, 1)]
 
-    if axes is None:
-        fig, axes = plt.subplots(1, len(pairs), figsize=(6 * len(pairs), 5),
-                                 squeeze=False)
-        axes = axes[0]
+    fig, ax_arr = _setup_grid(len(pairs), axes, max_cols=max_cols,
+                              figsize=figsize, panel_size=(6.0, 5.0))
 
     trials = _valid_nobj_trials(study, n_obj)
     pareto_numbers = {t.number for t in study.best_trials}
 
     for idx, (i, j) in enumerate(pairs):
-        ax = axes[idx]
+        ax = ax_arr[idx]
         if not trials:
             ax.text(0.5, 0.5, "No valid trials",
                     ha="center", va="center", transform=ax.transAxes)
@@ -662,7 +794,7 @@ def plot_pareto_projections(
         ax.set_title(f"{obj_cols[i]} vs {obj_cols[j]}")
         ax.legend(loc="best", framealpha=0.8, fontsize="small")
 
-    return axes
+    return ax_arr
 
 
 def plot_parallel_coordinates(
@@ -845,12 +977,25 @@ def _plot_study_2obj(
     select_by: int,
     metrics: list[str] | None,
 ) -> plt.Figure:
-    """2-objective study: 2x2 grid."""
+    """2-objective study: 2x2 grid.
+
+    .. deprecated::
+        Will be replaced by a GridSpec orchestrator in Phase 2.
+    """
+    n_obj = len(study.directions)
+
+    # Build a figure with enough axes for the new multi-panel functions.
+    # Row 0 left: Pareto (1 panel for 2-obj); Row 0 right: History (1st obj)
+    # Row 1 left: Importance (1st obj); Row 1 right: metric scatter/panels
     fig, axs = plt.subplots(2, 2, figsize=(14, 10))
 
-    plot_pareto_front(study, ax=axs[0, 0])
-    plot_optimization_history(study, ax=axs[0, 1])
-    plot_param_importance(study, ax=axs[1, 0])
+    # Pareto: only use first pair, embedded in single axis
+    pareto_pairs = [(i, j) for i in range(n_obj) for j in range(i + 1, n_obj)]
+    plot_pareto_front(study, axes=[axs[0, 0]] * len(pareto_pairs))
+
+    # History + Importance: use first-objective panel only in this compat shim
+    plot_optimization_history(study, axes=[axs[0, 1]] * n_obj)
+    plot_param_importance(study, axes=[axs[1, 0]] * n_obj)
 
     # Bottom-right: metric scatter if 2+ user-attr metrics, else panels
     user_metrics = metrics or _get_metric_user_attrs(study)
