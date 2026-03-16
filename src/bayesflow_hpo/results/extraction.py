@@ -89,7 +89,6 @@ DEFAULT_RESULT_ATTRS = [
     "param_count",
     "training_time_s",
     "inference_time_s",
-    "inference_time_ratio",
     "calibration_error",
     "mean_cal_error",
     "nrmse",

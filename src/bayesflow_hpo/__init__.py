@@ -37,7 +37,7 @@ except PackageNotFoundError:
 from bayesflow_hpo.api import infer_keys_from_adapter, optimize
 from bayesflow_hpo.builders import build_continuous_approximator
 from bayesflow_hpo.objectives import (
-    compute_inference_time_ratio,
+    compute_inference_time_per_dataset,
     denormalize_param_count,
     extract_multi_objective_values,
     extract_objective_values,
@@ -147,7 +147,7 @@ __all__ = [
     "default_train_fn",
     "default_validate_fn",
     # Objectives
-    "compute_inference_time_ratio",
+    "compute_inference_time_per_dataset",
     "denormalize_param_count",
     "extract_multi_objective_values",
     "extract_objective_values",

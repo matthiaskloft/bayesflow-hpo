@@ -7,7 +7,7 @@ from bayesflow_hpo.objectives import (
     MAX_PARAM_COUNT,
     MIN_PARAM_COUNT,
     _metric_to_minimize,
-    compute_inference_time_ratio,
+    compute_inference_time_per_dataset,
     extract_multi_objective_values,
     extract_objective_values,
     normalize_param_count,
@@ -188,35 +188,22 @@ def test_normalize_explicit_min_skips_auto_tighten():
     assert score == 0.0  # at the lower bound
 
 
-# --- compute_inference_time_ratio tests ---
+# --- compute_inference_time_per_dataset tests ---
 
 
-def test_inference_time_ratio_normal():
-    """Ratio = inference_time / (sim_time_per_sim * n_sims)."""
-    ratio = compute_inference_time_ratio(10.0, sim_time_per_sim=0.05, n_sims=200)
-    assert np.isclose(ratio, 1.0)  # 10 / (0.05 * 200) = 1.0
+def test_inference_time_per_dataset_normal():
+    """Average = total / n_datasets."""
+    result = compute_inference_time_per_dataset(10.0, n_datasets=5)
+    assert np.isclose(result, 2.0)
 
 
-def test_inference_time_ratio_fast_inference():
-    """Inference faster than simulation yields ratio < 1."""
-    ratio = compute_inference_time_ratio(2.0, sim_time_per_sim=0.05, n_sims=200)
-    assert ratio < 1.0
-    assert np.isclose(ratio, 0.2)
+def test_inference_time_per_dataset_single():
+    """Single dataset returns the total time."""
+    result = compute_inference_time_per_dataset(3.5, n_datasets=1)
+    assert np.isclose(result, 3.5)
 
 
-def test_inference_time_ratio_fallback_when_sim_time_none():
-    """Falls back to raw inference seconds when sim_time_per_sim is None."""
-    ratio = compute_inference_time_ratio(5.5, sim_time_per_sim=None, n_sims=200)
-    assert ratio == 5.5
-
-
-def test_inference_time_ratio_fallback_when_sim_time_zero():
-    """Falls back to raw inference seconds when sim_time_per_sim is 0."""
-    ratio = compute_inference_time_ratio(3.0, sim_time_per_sim=0.0, n_sims=200)
-    assert ratio == 3.0
-
-
-def test_inference_time_ratio_n_sims_zero():
-    """n_sims=0 uses max(0, 1)=1 to avoid division by zero."""
-    ratio = compute_inference_time_ratio(1.0, sim_time_per_sim=0.5, n_sims=0)
-    assert np.isclose(ratio, 2.0)  # 1.0 / (0.5 * 1)
+def test_inference_time_per_dataset_zero_datasets():
+    """n_datasets=0 uses max(0, 1)=1 to avoid division by zero."""
+    result = compute_inference_time_per_dataset(5.0, n_datasets=0)
+    assert np.isclose(result, 5.0)

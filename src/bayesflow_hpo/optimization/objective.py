@@ -40,7 +40,7 @@ from bayesflow_hpo.objectives import (
     FAILED_TRIAL_CAL_ERROR,
     FAILED_TRIAL_COST,
     MAX_PARAM_COUNT,
-    compute_inference_time_ratio,
+    compute_inference_time_per_dataset,
     extract_multi_objective_values,
     get_param_count,
     normalize_param_count,
@@ -610,26 +610,46 @@ class GenericObjective:
 
         # --- Step 8: VALIDATE ---
         inference_time = 0.0
+        n_conditions = 0
         try:
             if config.validation_data is not None:
-                actual_validate = (
-                    config.validate_fn
-                    if config.validate_fn is not None
-                    else default_validate_fn
-                )
-                t_val_start = time.perf_counter()
-                raw = actual_validate(
-                    approximator,
-                    config.validation_data,
-                    config.n_posterior_samples,
-                )
-                inference_time = time.perf_counter() - t_val_start
-                metrics_summary = _validate_metric_keys(
-                    raw, config.objective_metrics,
-                )
+                n_conditions = len(config.validation_data.simulations)
 
+                if config.validate_fn is not None:
+                    # Custom validation hook — wall-clock time includes
+                    # metric computation; pure inference timing unavailable.
+                    t_val_start = time.perf_counter()
+                    raw = config.validate_fn(
+                        approximator,
+                        config.validation_data,
+                        config.n_posterior_samples,
+                    )
+                    inference_time = time.perf_counter() - t_val_start
+                    metrics_summary = _validate_metric_keys(
+                        raw, config.objective_metrics,
+                    )
+                else:
+                    # Default path — call pipeline directly to get pure
+                    # inference timing from result.timing["inference"].
+                    from bayesflow_hpo.validation.pipeline import (
+                        run_validation_pipeline,
+                    )
+
+                    result = run_validation_pipeline(
+                        approximator=approximator,
+                        validation_data=config.validation_data,
+                        n_posterior_samples=config.n_posterior_samples,
+                    )
+                    inference_time = result.timing.get("inference", 0.0)
+                    metrics_summary = _validate_metric_keys(
+                        dict(result.summary), config.objective_metrics,
+                    )
+
+                inference_time_s = compute_inference_time_per_dataset(
+                    inference_time, n_conditions,
+                )
                 trial.set_user_attr(
-                    "inference_time_s", round(inference_time, 2),
+                    "inference_time_s", round(inference_time_s, 4),
                 )
                 for key, val in metrics_summary.items():
                     trial.set_user_attr(key, round(float(val), 6))
@@ -685,18 +705,8 @@ class GenericObjective:
         trial.set_user_attr("param_count", param_count)
 
         if config.cost_metric == "inference_time":
-            vd = config.validation_data
-            n_sims = sum(
-                len(next(iter(batch.values()))) if batch else 0
-                for batch in vd.simulations
-            ) if vd is not None else 0
-            cost_score = compute_inference_time_ratio(
-                inference_time,
-                sim_time_per_sim=vd.sim_time_per_sim if vd is not None else None,
-                n_sims=n_sims,
-            )
-            trial.set_user_attr(
-                "inference_time_ratio", round(cost_score, 6),
+            cost_score = compute_inference_time_per_dataset(
+                inference_time, n_conditions,
             )
         else:
             cost_score = normalize_param_count(
