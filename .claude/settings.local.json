@@ -19,11 +19,13 @@
       "Edit(*)",
       "Glob(*)",
       "Grep(*)",
-      "Bash(git fetch:*)"
+      "Bash(git fetch:*)",
+      "WebFetch(domain:api.github.com)"
     ]
   },
   "sandbox": {
     "enabled": true,
-    "autoAllowBashIfSandboxed": true
+    "autoAllowBashIfSandboxed": true,
+    "excludedCommands": ["git", "gh"]
   }
 }

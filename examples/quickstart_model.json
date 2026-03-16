@@ -1,0 +1,20 @@
+{
+  "config": {
+    "ds_depth": 3,
+    "ds_dropout": 0.09,
+    "ds_summary_dim": 20,
+    "ds_width": 64,
+    "fm_dropout": 0.09,
+    "fm_subnet_depth": 4,
+    "fm_subnet_width": 96,
+    "initial_lr": "4.19e-04"
+  },
+  "versions": {
+    "bayesflow": "2.0.8",
+    "numpy": "2.4.2"
+  },
+  "created_at": "2026-03-16T00:34:24.074587",
+  "model_type": "ContinuousApproximator",
+  "retrained_epochs": 50,
+  "retrained_batches_per_epoch": 50
+}
