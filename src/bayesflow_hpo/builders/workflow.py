@@ -9,12 +9,16 @@ steps).
 
 from __future__ import annotations
 
+import logging
+from pathlib import Path
 from typing import Any
 
 import bayesflow as bf
 import keras
 
 from bayesflow_hpo.search_spaces.composite import CompositeSearchSpace
+
+logger = logging.getLogger(__name__)
 
 
 def _make_cosine_decay_optimizer(
@@ -81,6 +85,7 @@ def build_continuous_approximator(
     hparams: dict[str, Any],
     adapter: bf.adapters.Adapter,
     search_space: CompositeSearchSpace,
+    checkpoint_dir: str | Path | None = None,
 ) -> Any:
     """Build an uncompiled ``ContinuousApproximator`` from search-space hparams.
 
@@ -89,6 +94,7 @@ def build_continuous_approximator(
 
     1. Constructs inference and summary networks from the search space.
     2. Wraps them in a ``ContinuousApproximator``.
+    3. Optionally loads pre-trained weights from *checkpoint_dir*.
 
     The returned approximator is **uncompiled** — the objective handles
     compilation separately.
@@ -105,6 +111,13 @@ def build_continuous_approximator(
         BayesFlow adapter for data preprocessing.
     search_space
         Composite search space defining the tunable dimensions.
+    checkpoint_dir
+        Optional directory containing ``weights.weights.h5``.  When
+        provided, the approximator is warm-started from these weights.
+        Use ``CheckpointPool.best_checkpoint_dir`` to load the best
+        trial's weights.  If loading fails (file missing, incompatible
+        shapes), a warning is logged and the model continues with
+        fresh weights.
 
     Returns
     -------
@@ -122,4 +135,17 @@ def build_continuous_approximator(
         summary_network=summary_net,
         adapter=adapter,
     )
+
+    if checkpoint_dir is not None:
+        checkpoint_path = Path(checkpoint_dir) / "weights.weights.h5"
+        try:
+            approximator.load_weights(str(checkpoint_path))
+            logger.info("Loaded checkpoint weights from %s", checkpoint_path)
+        except Exception as exc:
+            logger.warning(
+                "Failed to load checkpoint from %s: %s. "
+                "Continuing with fresh weights.",
+                checkpoint_path, exc,
+            )
+
     return approximator

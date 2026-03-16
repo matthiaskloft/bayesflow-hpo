@@ -59,7 +59,7 @@ See the [examples/](examples/) directory for complete walkthroughs:
 
 | Notebook | Description |
 |---|---|
-| [`quickstart.ipynb`](examples/quickstart.ipynb) | End-to-end HPO: search, train, validate, select & retrain the best model |
+| [`getting_started.ipynb`](examples/getting_started.ipynb) | End-to-end HPO: search, train, validate, select & retrain the best model |
 | [`custom_summary_network.ipynb`](examples/custom_summary_network.ipynb) | Custom summary network registration + HPO |
 | [`optuna_dashboard.md`](examples/optuna_dashboard.md) | Optuna dashboard integration guide |
 

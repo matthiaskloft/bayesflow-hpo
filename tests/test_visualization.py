@@ -521,23 +521,26 @@ class TestPlotStudy:
         assert isinstance(fig, matplotlib.figure.Figure)
         assert len(fig.axes) >= 4
 
-    def test_3obj_returns_figure(self, three_objective_study):
+    def test_3obj_uses_2x2_layout(self, three_objective_study):
+        """3+ objective studies use the same 2x2 layout as 2-obj."""
         fig = plot_study(three_objective_study)
         assert isinstance(fig, matplotlib.figure.Figure)
-        # 3D Pareto + parallel coords + 3 projections = 5 main axes
-        # (plus potential colorbar axes)
-        assert len(fig.axes) >= 5
+        assert len(fig.axes) >= 4
 
     def test_single_obj_raises(self, single_objective_study):
-        with pytest.raises(ValueError, match="2 or 3 objectives"):
+        with pytest.raises(ValueError, match="at least 2 objectives"):
             plot_study(single_objective_study)
 
-    def test_4obj_raises(self):
+    def test_4obj_accepted(self):
+        """4+ objective studies are accepted (use first 2 objectives)."""
         study = optuna.create_study(
             directions=["minimize"] * 4,
         )
-        with pytest.raises(ValueError, match="2 or 3 objectives"):
-            plot_study(study)
+        study.add_trial(_make_trial(0, [0.1, 0.2, 0.3, 0.4], {
+            "param_count": 50000,
+        }))
+        fig = plot_study(study)
+        assert isinstance(fig, matplotlib.figure.Figure)
 
     def test_empty_2obj_study(self, empty_study):
         """Empty study still returns a Figure with placeholder text."""
@@ -580,6 +583,13 @@ class TestPlotParallelCoordinatesEdgeCases:
         ax = plot_parallel_coordinates(three_objective_study, top_k=1000)
         assert isinstance(ax, matplotlib.axes.Axes)
         assert ax.get_title() == "Parallel coordinates"
+
+    def test_cost_axis_inverted_and_log_transformed(self, three_objective_study):
+        """Last axis label should show -log(cost_metric)."""
+        ax = plot_parallel_coordinates(three_objective_study)
+        labels = [t.get_text() for t in ax.get_xticklabels()]
+        # Last label should be "-log(param_count_norm)"
+        assert labels[-1].startswith("-log(")
 
 
 class TestColorConstantsUsed:
