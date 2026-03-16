@@ -1012,21 +1012,19 @@ def plot_study(
 
     # --- Row 2: Parameter importance (one per objective, may fail) ---
     importance_axes = np.array([fig.add_subplot(gs[2, col]) for col in range(n_obj)])
+    row2_padding: list[Any] = []
     for col in range(n_obj, n_cols):
         ax = fig.add_subplot(gs[2, col])
         ax.set_visible(False)
+        row2_padding.append(ax)
     result = plot_param_importance(study, axes=importance_axes)
 
     if result is None:
         # All importance panels failed — remove row 2 and shrink figure
         for ax in importance_axes:
             ax.remove()
-        # Also remove any hidden padding axes in row 2
-        for ax in list(fig.axes):
-            pos = ax.get_position()
-            if pos.y0 < 0.05:  # bottom row
-                ax.remove()
-        # Rebuild with 2 rows
+        for ax in row2_padding:
+            ax.remove()
         fig.set_size_inches(figsize[0], figsize[1] * 2 / 3)
 
     fig.tight_layout()
