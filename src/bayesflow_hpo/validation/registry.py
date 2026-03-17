@@ -170,19 +170,20 @@ class MetricTable(list):
 
     def _repr_html_(self) -> str:
         """Render as an HTML table in Jupyter notebooks."""
+        left = ' style="text-align:left"'
         rows_html = []
         for r in self:
             alias = r["aliases"] or "&mdash;"
             rows_html.append(
-                f"<tr><td><code>{r['name']}</code></td>"
-                f"<td>{alias}</td>"
-                f"<td>{r['description']}</td></tr>"
+                f"<tr><td{left}><code>{r['name']}</code></td>"
+                f"<td{left}>{alias}</td>"
+                f"<td{left}>{r['description']}</td></tr>"
             )
         return (
-            '<table style="text-align:left">'
-            "<thead><tr>"
-            "<th>Name</th><th>Aliases</th><th>Description</th>"
-            "</tr></thead><tbody>"
+            "<table>"
+            f"<thead><tr><th{left}>Name</th>"
+            f"<th{left}>Aliases</th>"
+            f"<th{left}>Description</th></tr></thead><tbody>"
             + "\n".join(rows_html)
             + "</tbody></table>"
         )
