@@ -931,6 +931,7 @@ def plot_study(
     *,
     third_dim: str = "color",
     figsize: tuple[float, float] | None = None,
+    row_labels: bool = True,
 ) -> plt.Figure:
     """Adaptive multi-row study overview figure.
 
@@ -951,6 +952,9 @@ def plot_study(
     figsize : tuple, optional
         Explicit ``(width, height)``.  Auto-computed as
         ``(5 * n_cols, 4.5 * n_rows)`` when *None*.
+    row_labels : bool
+        When *True* (default), annotate each row with a descriptive
+        label on the left margin.
 
     Returns
     -------
@@ -1027,7 +1031,39 @@ def plot_study(
             ax.remove()
         fig.set_size_inches(figsize[0], figsize[1] * 2 / 3)
 
-    fig.tight_layout()
+    fig.tight_layout(rect=[0.03, 0, 1, 1] if row_labels else None)
+
+    # --- Row labels (placed after tight_layout so positions are final) ---
+    if row_labels:
+        # Collect axes per row: row 0 = pareto, row 1 = history, row 2 = importance
+        row_axes: dict[int, list[Any]] = {
+            0: list(pareto_axes),
+            1: list(history_axes),
+        }
+        if result is not None:
+            row_axes[2] = list(importance_axes)
+
+        row_label_text = {
+            0: "Pareto Front",
+            1: "Convergence",
+            2: "Parameter Importance",
+        }
+
+        for row_idx, axes_list in row_axes.items():
+            # Use the rendered bbox of axes in the row to find vertical center
+            bboxes = [ax.get_position() for ax in axes_list if ax.get_visible()]
+            if not bboxes:
+                continue
+            y_top = max(b.y1 for b in bboxes)
+            y_bot = min(b.y0 for b in bboxes)
+            fig.text(
+                0.005, (y_top + y_bot) / 2,
+                row_label_text[row_idx],
+                va="center", ha="left",
+                fontsize=13, fontweight="bold",
+                rotation=90,
+            )
+
     return fig
 
 
