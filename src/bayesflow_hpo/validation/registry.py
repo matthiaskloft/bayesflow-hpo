@@ -441,25 +441,6 @@ def _sbc_chi2_metric(
     return {"sbc_chi2": full["sbc_chi2_stat"]}
 
 
-def _sbc_c2st_metric(
-    draws: np.ndarray, true_values: np.ndarray,
-) -> dict[str, float]:
-    """SBC rank uniformity via the Classifier Two-Sample Test (C2ST).
-
-    Returns ``accuracy - 0.5`` (minimize -> 0 = classifier cannot
-    distinguish observed ranks from uniform).  Requires scikit-learn.
-    """
-    from bayesflow_hpo.validation.sbc_tests import compute_sbc_c2st
-
-    ranks, n_posterior_samples = _sbc_ranks(draws, true_values)
-    result = compute_sbc_c2st(ranks, n_posterior_samples)
-    acc = result["sbc_c2st_accuracy"]
-    if np.isnan(acc):
-        return {"sbc_c2st": np.nan}
-    return {"sbc_c2st": acc - 0.5}
-
-
-
 def _bias_metric(
     draws: np.ndarray, true_values: np.ndarray,
 ) -> dict[str, float]:
@@ -639,11 +620,6 @@ register_metric(
 register_metric(
     "sbc_chi2", _sbc_chi2_metric,
     description="SBC chi-squared statistic (minimize -> 0 = uniform ranks).",
-)
-register_metric(
-    "sbc_c2st", _sbc_c2st_metric,
-    description="SBC C2ST deviation (accuracy - 0.5; minimize -> 0).",
-    requires="sklearn",
 )
 register_metric(
     "coverage", _coverage_two_sided,

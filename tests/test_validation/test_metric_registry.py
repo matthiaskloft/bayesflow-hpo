@@ -20,7 +20,6 @@ def test_list_metrics_returns_builtin_names():
     assert "coverage" in names
     assert "sbc_ks" in names
     assert "sbc_chi2" in names
-    assert "sbc_c2st" in names
     assert "bias" in names
     assert "mae" in names
     assert "correlation" in names
@@ -217,5 +216,4 @@ def test_describe_metrics_kind_and_requires():
     assert rows["z_score"]["kind"] == "diagnostic"
     assert rows["coverage"]["kind"] == "diagnostic"
     # Dependency tracking
-    assert rows["sbc_c2st"]["requires"] == "sklearn"
     assert rows["nrmse"]["requires"] == ""

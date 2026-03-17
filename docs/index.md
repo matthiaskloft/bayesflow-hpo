@@ -68,7 +68,6 @@ hpo.plot_pareto_front(study)
 pip install bayesflow-hpo
 
 # With optional dependencies
-pip install bayesflow-hpo[c2st]       # SBC classifier two-sample test
 pip install bayesflow-hpo[dashboard]  # Optuna dashboard
 pip install bayesflow-hpo[dev]        # Development tools
 ```

@@ -200,7 +200,6 @@ def optimize(
         coverage_right    Right-sided coverage (futility)
         sbc_ks            SBC KS statistic (minimize → 0)
         sbc_chi2          SBC chi-squared stat (min → 0)
-        sbc_c2st          SBC C2ST deviation (needs sklearn)
         bias              Mean signed error
         mae               Mean Absolute Error
         ================= ======================================

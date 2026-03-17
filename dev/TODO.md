@@ -4,7 +4,79 @@ Tracked items for ongoing development. Updated by contributors and Claude Code s
 
 ## Open
 
-No open items.
+### Add named sampler presets to create_study()
+
+Add string-based sampler selection (`"tpe"`, `"gp"`, `"nsga2"`, `"nsga3"`,
+`"auto"`, `"random"`) to `create_study()` alongside existing object parameter.
+Each preset wires sensible defaults and auto-wires `constraints_func` when
+`budget_aware=True`. See `HPO-BENCHMARK-PAPER_PLAN.md` in bayesflow_projects
+for full design.
+
+### Add QMC warm-up option to optimize()
+
+Add `qmc_startup_trials: int = 0` parameter. When > 0, first N trials use
+`QMCSampler` (Sobol sequences), then swap to the main sampler. Composes with
+any sampler preset.
+
+### Add pruner string presets to create_study()
+
+Add `pruner="none"` (NopPruner) and `pruner="median"` (current default) as
+convenience presets.
+
+### Add lexicographic-Pareto trial selection
+
+Add `select_best_trial()` to `results/extraction.py` and integrate into
+`best_config()` via an optional `priorities` parameter. Two-phase algorithm:
+(1) satisficing — filter by priority thresholds in order, (2) Pareto selection
+over remaining metrics. Direction inferred from `study.directions` for
+objectives, explicit for user_attrs. See `HPO-BENCHMARK-PAPER_PLAN.md` in
+bayesflow_projects for full design.
+
+### Research: detailed sampler preset defaults
+
+For each of the 6 sampler presets, research and document optimal default
+parameters:
+- GP: internal normalization with conditional spaces, `n_startup_trials`
+- NSGA-II/III: population size heuristics (function of search space dim)
+- Auto: verify it selects sensibly for BayesFlow HPO workloads
+- Document each sampler's internal HP scaling behavior (confirms no external
+  transform layer needed)
+
+### Research: multi-objective pruning improvement
+
+Investigate whether Hyperband/SHA ideas can be adapted to multi-objective mode
+(e.g., using the geometric mean score from `PeriodicValidationCallback`).
+Current custom median pruner works but may be suboptimal.
+
+### Research: QMC warm-up effectiveness
+
+Empirically test whether QMC startup improves convergence compared to random
+startup, especially for GP and TPE. May become a secondary finding in the
+HPO benchmark paper.
+
+### Reimplement C2ST as a multivariate posterior two-sample test
+
+The `sbc_c2st` metric was removed because applying C2ST (Lopez-Paz &
+Oquab 2017) to 1D SBC rank integers is theoretically redundant with
+KS and chi-squared tests — a random forest on a single integer feature
+is just a noisy histogram comparison.
+
+A proper reimplementation should follow the standard SBI approach
+(Lueckmann et al. 2021, sbibm): train a classifier on **multivariate
+posterior draws** vs reference samples (not 1D ranks). This would
+require a different metric signature that receives full posterior
+arrays rather than per-parameter slices.
+
+Design considerations:
+- Metric signature: needs `(draws: [n_sims, n_samples, n_params],
+  true_values: [n_sims, n_params])` — different from the current
+  per-parameter `MetricFn` convention
+- Classifier choice: MLP (sbibm default) or RF; consider
+  probability-based statistic (L-C2ST, Linhart et al. 2023) instead
+  of binarized accuracy
+- Reference samples: requires either a reference posterior method or
+  prior predictive draws (different from SBC rank-based null)
+- Keep as optional metric with `requires="sklearn"` extra
 
 ## Done
 

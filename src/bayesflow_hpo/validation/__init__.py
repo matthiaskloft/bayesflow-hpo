@@ -26,10 +26,7 @@ from bayesflow_hpo.validation.registry import (
     resolve_metrics,
 )
 from bayesflow_hpo.validation.result import ValidationResult
-from bayesflow_hpo.validation.sbc_tests import (
-    compute_sbc_c2st,
-    compute_sbc_uniformity_tests,
-)
+from bayesflow_hpo.validation.sbc_tests import compute_sbc_uniformity_tests
 
 __all__ = [
     "DEFAULT_METRICS",
@@ -39,7 +36,6 @@ __all__ = [
     "describe_metrics",
     "aggregate_condition_rows",
     "compute_condition_metrics",
-    "compute_sbc_c2st",
     "compute_sbc_uniformity_tests",
     "generate_validation_dataset",
     "get_metric",
