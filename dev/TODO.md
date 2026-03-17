@@ -2,9 +2,17 @@
 
 Tracked items for ongoing development. Updated by contributors and Claude Code sessions.
 
+Items are grouped into packages of related work that should be shipped together.
+Suggested execution order: F → C → D → A → B → G → E.
+
 ## Open
 
-### Add named sampler presets to create_study()
+### Package A: Sampler & Pruner Presets
+
+Tightly coupled — presets need researched defaults, and pruning warmup
+depends on sampler config. QMC warm-up composes with sampler presets.
+
+#### Add named sampler presets to create_study()
 
 Add string-based sampler selection (`"tpe"`, `"gp"`, `"nsga2"`, `"nsga3"`,
 `"auto"`, `"random"`) to `create_study()` alongside existing object parameter.
@@ -12,27 +20,7 @@ Each preset wires sensible defaults and auto-wires `constraints_func` when
 `budget_aware=True`. See `HPO-BENCHMARK-PAPER_PLAN.md` in bayesflow_projects
 for full design.
 
-### Add QMC warm-up option to optimize()
-
-Add `qmc_startup_trials: int = 0` parameter. When > 0, first N trials use
-`QMCSampler` (Sobol sequences), then swap to the main sampler. Composes with
-any sampler preset.
-
-### Add pruner string presets to create_study()
-
-Add `pruner="none"` (NopPruner) and `pruner="median"` (current default) as
-convenience presets.
-
-### Add lexicographic-Pareto trial selection
-
-Add `select_best_trial()` to `results/extraction.py` and integrate into
-`best_config()` via an optional `priorities` parameter. Two-phase algorithm:
-(1) satisficing — filter by priority thresholds in order, (2) Pareto selection
-over remaining metrics. Direction inferred from `study.directions` for
-objectives, explicit for user_attrs. See `HPO-BENCHMARK-PAPER_PLAN.md` in
-bayesflow_projects for full design.
-
-### Research: detailed sampler preset defaults
+#### Research: detailed sampler preset defaults
 
 For each of the 6 sampler presets, research and document optimal default
 parameters:
@@ -42,26 +30,116 @@ parameters:
 - Document each sampler's internal HP scaling behavior (confirms no external
   transform layer needed)
 
-### Align pruning warmup with sampler startup
+#### Add pruner string presets to create_study()
+
+Add `pruner="none"` (NopPruner) and `pruner="median"` (current default) as
+convenience presets.
+
+#### Align pruning warmup with sampler startup
 
 Auto-align `PeriodicValidationCallback.n_startup_trials` with the sampler's
 startup count. Current default (5) is too few for `NetworkSelectionSpace`
 (25 architecture combos). Default to `sampler.n_startup_trials` (25 for TPE,
 10 for GP, population_size for NSGA-II). User-overridable.
 
-### Research: multi-objective pruning improvement
+#### Add QMC warm-up option to optimize()
 
-Investigate whether Hyperband/SHA ideas can be adapted to multi-objective mode
-(e.g., using the geometric mean score from `PeriodicValidationCallback`).
-Current custom median pruner works but may be suboptimal.
+Add `qmc_startup_trials: int = 0` parameter. When > 0, first N trials use
+`QMCSampler` (Sobol sequences), then swap to the main sampler. Composes with
+any sampler preset.
 
-### Research: QMC warm-up effectiveness
+#### Research: QMC warm-up effectiveness
 
 Empirically test whether QMC startup improves convergence compared to random
 startup, especially for GP and TPE. May become a secondary finding in the
 HPO benchmark paper.
 
-### Reimplement C2ST as a multivariate posterior two-sample test
+---
+
+### Package B: Trial Selection & Results
+
+Lexicographic selection builds on Pareto extraction; `select_by` bounds
+check is in the same code path.
+
+#### Add lexicographic-Pareto trial selection
+
+Add `select_best_trial()` to `results/extraction.py` and integrate into
+`best_config()` via an optional `priorities` parameter. Two-phase algorithm:
+(1) satisficing — filter by priority thresholds in order, (2) Pareto selection
+over remaining metrics. Direction inferred from `study.directions` for
+objectives, explicit for user_attrs. See `HPO-BENCHMARK-PAPER_PLAN.md` in
+bayesflow_projects for full design.
+
+#### Add `select_by` bounds check (#22)
+
+Validate `0 <= select_by < len(study.directions)` at entry of
+`get_pareto_trials()` and `summarize_study()`.
+**File:** `results/extraction.py:229, 251`
+
+---
+
+### Package C: API Consolidation & Usability
+
+Naming alignment, explicit key overrides, and silent-failure fixes are all
+about the public API surface.
+
+#### Consolidate API naming against BayesFlow
+
+Align parameter/method names with BayesFlow 2.x conventions.
+Example: `batches_per_epoch` → `num_batches`.
+
+#### Accept explicit `param_keys`/`data_keys` in optimize() (#5)
+
+Add optional `param_keys` / `data_keys` parameters that override
+adapter inference when provided.
+**File:** `api.py:96-362`
+
+#### Add debug logging to `infer_keys_from_adapter` (#4)
+
+When the adapter has no `transforms` attribute, log at `DEBUG` level
+so the inference path is visible.
+**File:** `api.py:63-65`
+
+#### Fix `normalize_param_count` edge case (#3)
+
+Document the intended invariant and add a guard for
+`max_count <= min_count` that returns `0.5` (neutral) instead of `0.0`.
+**File:** `objectives.py:92-99`
+
+---
+
+### Package D: `optimize()` Refactor
+
+Extract helpers first, then the tracking dict fix is testable against
+the cleaner code.
+
+#### Extract helpers from `optimize()` (~270 lines) (#8)
+
+Extract `_setup_validation_data()` and `_build_objective()` to improve
+readability and testability. No change to the public API.
+**File:** `api.py:96-362`
+
+#### Deduplicate builder registration loop (#9)
+
+Extract a `_register_with_aliases(registry_fn, name, builder, aliases)`
+helper to remove duplicated alias logic.
+**File:** `registration.py:55-58, 90-92`
+
+#### `_TrackingDict` — track `items()`/`values()` or document (#10)
+
+A builder using `for k, v in hparams.items()` won't mark keys as accessed,
+causing false-positive unused-key warnings. Either override iteration methods
+or document the limitation in `check_pipeline`'s docstring.
+**File:** `pipeline.py:51-84`
+
+---
+
+### Package E: Validation & Metrics
+
+C2ST reimplementation and inference key validation are both in the
+validation subsystem.
+
+#### Reimplement C2ST as a multivariate posterior two-sample test
 
 The `sbc_c2st` metric was removed because applying C2ST (Lopez-Paz &
 Oquab 2017) to 1D SBC rank integers is theoretically redundant with
@@ -84,6 +162,65 @@ Design considerations:
 - Reference samples: requires either a reference posterior method or
   prior predictive draws (different from SBC rank-based null)
 - Keep as optional metric with `requires="sklearn"` extra
+
+#### Validate `data_keys` exist before `sample()` (#18)
+
+`inference.py` silently skips missing data keys via dict comprehension.
+Validate all `data_keys` exist in `sim_data` before calling `sample()`.
+**File:** `validation/inference.py:32`
+
+#### Research: multi-objective pruning improvement
+
+Investigate whether Hyperband/SHA ideas can be adapted to multi-objective mode
+(e.g., using the geometric mean score from `PeriodicValidationCallback`).
+Current custom median pruner works but may be suboptimal.
+
+---
+
+### Package F: Testing Gaps
+
+Independent test additions. Ideally done first to establish a safety net
+before the other packages.
+
+#### Test `warm_start_study` (#23)
+
+**File:** `optimization/study.py:169-218`
+Warm-start logic (ranking, trial copying, edge cases) has no unit tests.
+
+#### Test `_training_loss_fallback` (#24)
+
+**File:** `optimization/objective.py:281-334`
+The validation-failure fallback path is critical but not directly tested.
+
+#### Test `load_validation_dataset` round-trip (#25)
+
+**File:** `validation/data.py:214-244`
+`save_validation_dataset` → `load_validation_dataset` round-trip is not tested.
+
+#### Test `make_condition_grid` edge cases (#26)
+
+**File:** `validation/data.py:149-182`
+`logspace` and mixed-mode grids are not tested.
+
+---
+
+### Package G: Search Space Gaps
+
+#### Add `mlp_width` and `bidirectional` to `FusionTransformerSpace` (#29)
+
+`SetTransformerSpace` and `TimeSeriesTransformerSpace` expose `mlp_width`;
+`TimeSeriesNetworkSpace` exposes `bidirectional`. `FusionTransformerSpace`
+has neither — inconsistent across transformer-based summary spaces.
+**File:** `search_spaces/summary/fusion_transformer.py`
+
+#### Validate `IntDimension` rejects `log=True` + `step` (#28)
+
+Optuna's `trial.suggest_int()` raises `ValueError` when both `log=True`
+and `step` (other than 1) are set. Add validation in
+`BaseSearchSpace.sample()` or `IntDimension.__post_init__`.
+**File:** `search_spaces/base.py:49`
+
+---
 
 ## Done
 
