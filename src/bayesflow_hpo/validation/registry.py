@@ -35,7 +35,36 @@ def register_metric(
     overwrite: bool = False,
     description: str | None = None,
 ) -> None:
-    """Register a metric function under *name* (and optional aliases)."""
+    """Register a metric function under *name* (and optional aliases).
+
+    Parameters
+    ----------
+    name
+        Canonical name used to look up the metric (e.g. ``"nrmse"``).
+    fn
+        Callable with signature
+        ``(draws: ndarray[n, s], true_values: ndarray[n]) -> dict``.
+    aliases
+        Alternative names that resolve to *name*
+        (e.g. ``["cal_error"]`` for ``"calibration_error"``).
+    overwrite
+        If ``True``, silently replace an existing metric with the same
+        *name*.  Default ``False`` (raises :class:`ValueError`).
+    description
+        One-line human-readable summary shown by
+        :func:`describe_metrics`.  ``None`` (default) leaves any
+        existing description unchanged on overwrite.
+
+    Raises
+    ------
+    ValueError
+        If *name* is already registered and *overwrite* is ``False``.
+
+    See Also
+    --------
+    describe_metrics : Discover all registered metrics.
+    get_metric : Look up a single metric by name or alias.
+    """
     if name in _REGISTRY and not overwrite:
         raise ValueError(
             f"Metric '{name}' is already registered. "
@@ -50,7 +79,23 @@ def register_metric(
 
 
 def get_metric(name: str) -> MetricFn:
-    """Look up a metric by name or alias."""
+    """Look up a metric by name or alias.
+
+    Parameters
+    ----------
+    name
+        Canonical name or alias (e.g. ``"nrmse"`` or ``"corr"``).
+
+    Returns
+    -------
+    MetricFn
+        The registered callable.
+
+    Raises
+    ------
+    KeyError
+        If *name* is not a registered metric or alias.
+    """
     canonical = _ALIASES.get(name, name)
     if canonical not in _REGISTRY:
         raise KeyError(f"Unknown metric '{name}'. Available: {list_metrics()}")
@@ -58,12 +103,37 @@ def get_metric(name: str) -> MetricFn:
 
 
 def resolve_metrics(names: list[str]) -> dict[str, MetricFn]:
-    """Resolve a list of metric names to a ``{name: fn}`` dict."""
+    """Resolve a list of metric names to a ``{name: fn}`` dict.
+
+    Parameters
+    ----------
+    names
+        Metric names or aliases to resolve.
+
+    Returns
+    -------
+    dict[str, MetricFn]
+        Mapping from the *input* names to their callables.
+
+    Raises
+    ------
+    KeyError
+        If any name in *names* is unknown.
+    """
     return {n: get_metric(n) for n in names}
 
 
 def list_metrics() -> list[str]:
-    """Return sorted list of registered metric names (not aliases)."""
+    """Return sorted canonical names of all registered metrics.
+
+    Aliases are excluded; use :func:`describe_metrics` for a full
+    listing that includes aliases and descriptions.
+
+    Returns
+    -------
+    list[str]
+        Sorted metric names.
+    """
     return sorted(_REGISTRY)
 
 
@@ -439,7 +509,7 @@ register_metric(
 )
 register_metric(
     "bias", _bias_metric,
-    description="Mean signed error (positive = overestimate, negative = underestimate).",
+    description="Mean signed error (positive=overestimate, negative=underestimate).",
 )
 register_metric(
     "mae", _mae_metric,
