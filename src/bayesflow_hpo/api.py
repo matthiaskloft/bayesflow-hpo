@@ -198,9 +198,9 @@ def optimize(
         coverage          Two-sided SBC rank coverage
         coverage_left     Left-sided coverage (efficiency)
         coverage_right    Right-sided coverage (futility)
-        sbc_ks            SBC KS test (stat + p-value)
-        sbc_chi2          SBC chi-squared test (stat + p)
-        sbc_c2st          SBC C2ST (requires sklearn)
+        sbc_ks            SBC KS statistic (minimize → 0)
+        sbc_chi2          SBC chi-squared stat (min → 0)
+        sbc_c2st          SBC C2ST deviation (needs sklearn)
         bias              Mean signed error
         mae               Mean Absolute Error
         ================= ======================================
