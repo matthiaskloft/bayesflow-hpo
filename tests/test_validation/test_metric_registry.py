@@ -18,7 +18,9 @@ def test_list_metrics_returns_builtin_names():
     names = list_metrics()
     assert "calibration_error" in names
     assert "coverage" in names
-    assert "sbc" in names
+    assert "sbc_ks" in names
+    assert "sbc_chi2" in names
+    assert "sbc_c2st" in names
     assert "bias" in names
     assert "mae" in names
     assert "correlation" in names

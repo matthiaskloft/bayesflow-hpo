@@ -298,25 +298,62 @@ def _bf_log_gamma(
 # ---------------------------------------------------------------------------
 
 
-def _sbc_metric(
+def _sbc_ranks(
     draws: np.ndarray, true_values: np.ndarray,
-) -> dict[str, float]:
-    """SBC rank uniformity tests (KS, chi-squared, C2ST).
-
-    Computes rank statistics and delegates to the dedicated SBC test
-    functions in :mod:`bayesflow_hpo.validation.sbc_tests`.
-    """
-    from bayesflow_hpo.validation.sbc_tests import (
-        compute_sbc_c2st,
-        compute_sbc_uniformity_tests,
-    )
-
+) -> tuple[np.ndarray, int]:
+    """Compute SBC ranks shared by all SBC metrics."""
     n_posterior_samples = draws.shape[1]
     ranks = np.sum(draws < true_values[:, None], axis=1)
-    result: dict[str, float] = {}
-    result.update(compute_sbc_uniformity_tests(ranks, n_posterior_samples))
-    result.update(compute_sbc_c2st(ranks, n_posterior_samples))
-    return result
+    return ranks, n_posterior_samples
+
+
+def _sbc_ks_metric(
+    draws: np.ndarray, true_values: np.ndarray,
+) -> dict[str, float]:
+    """SBC rank uniformity via the Kolmogorov-Smirnov test.
+
+    Returns the KS statistic (minimize → 0 = perfectly uniform ranks).
+    """
+    from bayesflow_hpo.validation.sbc_tests import compute_sbc_uniformity_tests
+
+    ranks, n_posterior_samples = _sbc_ranks(draws, true_values)
+    full = compute_sbc_uniformity_tests(ranks, n_posterior_samples)
+    return {"sbc_ks": full["sbc_ks_stat"]}
+
+
+def _sbc_chi2_metric(
+    draws: np.ndarray, true_values: np.ndarray,
+) -> dict[str, float]:
+    """SBC rank uniformity via the chi-squared goodness-of-fit test.
+
+    Returns the chi-squared statistic (minimize → 0 = perfectly uniform
+    ranks).  NaN when expected bin counts are below 5.
+    """
+    from bayesflow_hpo.validation.sbc_tests import compute_sbc_uniformity_tests
+
+    ranks, n_posterior_samples = _sbc_ranks(draws, true_values)
+    full = compute_sbc_uniformity_tests(ranks, n_posterior_samples)
+    return {"sbc_chi2": full["sbc_chi2_stat"]}
+
+
+def _sbc_c2st_metric(
+    draws: np.ndarray, true_values: np.ndarray,
+) -> dict[str, float]:
+    """SBC rank uniformity via the Classifier Two-Sample Test (C2ST).
+
+    Returns ``accuracy - 0.5`` (minimize → 0 = classifier cannot
+    distinguish observed ranks from uniform).  Requires scikit-learn.
+    """
+    from bayesflow_hpo.validation.sbc_tests import compute_sbc_c2st
+
+    ranks, n_posterior_samples = _sbc_ranks(draws, true_values)
+    result = compute_sbc_c2st(ranks, n_posterior_samples)
+    acc = result["sbc_c2st_accuracy"]
+    if np.isnan(acc):
+        return {"sbc_c2st": np.nan}
+    return {"sbc_c2st": acc - 0.5}
+
+
 
 
 def _bias_metric(
@@ -489,10 +526,18 @@ register_metric(
     description="Log-gamma calibration diagnostic from BayesFlow.",
 )
 
-# Native metrics
+# Native metrics — SBC rank uniformity
 register_metric(
-    "sbc", _sbc_metric,
-    description="SBC rank uniformity tests (KS, chi-squared, C2ST).",
+    "sbc_ks", _sbc_ks_metric,
+    description="SBC KS statistic (minimize → 0 = uniform ranks).",
+)
+register_metric(
+    "sbc_chi2", _sbc_chi2_metric,
+    description="SBC chi-squared statistic (minimize → 0 = uniform ranks).",
+)
+register_metric(
+    "sbc_c2st", _sbc_c2st_metric,
+    description="SBC C2ST deviation (accuracy − 0.5; minimize → 0). Requires sklearn.",
 )
 register_metric(
     "coverage", _coverage_two_sided,

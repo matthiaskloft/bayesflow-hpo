@@ -185,27 +185,32 @@ def optimize(
 
         Built-in metrics (pass any of these as strings):
 
-        ================= ==================== ==========================================
-        Name              Aliases              Description
-        ================= ==================== ==========================================
-        calibration_error cal_error            Expected Calibration Error (ECE)
-        nrmse                                  Range-normalized RMSE
-        rmse                                   Root Mean Squared Error of posterior means
-        correlation       corr                 Pearson correlation (means vs true)
-        contraction                            Posterior contraction (1=learned, 0=not)
-        z_score                                Posterior z-score (bias + calibration)
-        log_gamma                              Log-gamma calibration diagnostic
-        coverage          coverage_two_sided   Two-sided SBC rank coverage
-        coverage_left                          Left-sided coverage (efficiency)
-        coverage_right                         Right-sided coverage (futility)
-        sbc                                    SBC uniformity tests (KS, chi-sq, C2ST)
-        bias                                   Mean signed error
-        mae                                    Mean Absolute Error
-        ================= ==================== ==========================================
+        ================= ======================================
+        Name              Description
+        ================= ======================================
+        calibration_error Expected Calibration Error (ECE)
+        nrmse             Range-normalized RMSE
+        rmse              RMSE of posterior means
+        correlation       Pearson correlation (means vs true)
+        contraction       Posterior contraction (1=learned)
+        z_score           Posterior z-score (bias+calibration)
+        log_gamma         Log-gamma calibration diagnostic
+        coverage          Two-sided SBC rank coverage
+        coverage_left     Left-sided coverage (efficiency)
+        coverage_right    Right-sided coverage (futility)
+        sbc_ks            SBC KS test (stat + p-value)
+        sbc_chi2          SBC chi-squared test (stat + p)
+        sbc_c2st          SBC C2ST (requires sklearn)
+        bias              Mean signed error
+        mae               Mean Absolute Error
+        ================= ======================================
 
-        Call :func:`~bayesflow_hpo.describe_metrics` for a machine-readable
-        version, or :func:`~bayesflow_hpo.list_metrics` for just the names.
-        Register custom metrics with :func:`~bayesflow_hpo.register_metric`.
+        Some metrics have aliases (e.g. ``"corr"`` for
+        ``"correlation"``).  Call :func:`describe_metrics` for the
+        full listing including aliases.
+
+        Use :func:`~bayesflow_hpo.list_metrics` for just the names,
+        or :func:`~bayesflow_hpo.register_metric` to add custom ones.
     objective_mode
         ``"pareto"`` (default) — each metric is its own objective;
         study has ``len(objective_metrics) + 1`` directions.

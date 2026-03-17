@@ -42,8 +42,9 @@ def test_compute_condition_metrics_with_sbc():
     true_values = rng.normal(size=n_sims)
     draws = rng.normal(loc=true_values[:, None], scale=0.25, size=(n_sims, n_samples))
 
-    fns = resolve_metrics(["sbc"])
+    fns = resolve_metrics(["sbc_ks", "sbc_chi2", "sbc_c2st"])
     row = compute_condition_metrics(draws, true_values, cond_id=0, metric_fns=fns)
 
-    assert "sbc_ks_pvalue" in row
-    assert "sbc_chi2_pvalue" in row
+    assert "sbc_ks" in row
+    assert "sbc_chi2" in row
+    assert "sbc_c2st" in row
