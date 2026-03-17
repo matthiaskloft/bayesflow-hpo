@@ -22,7 +22,9 @@ MetricFn = Callable[[np.ndarray, np.ndarray], dict[str, float]]
 
 _REGISTRY: dict[str, MetricFn] = {}
 _ALIASES: dict[str, str] = {}
-_DESCRIPTIONS: dict[str, str] = {}  # canonical name → one-line description
+_DESCRIPTIONS: dict[str, str] = {}  # canonical name -> one-line description
+_KINDS: dict[str, str] = {}  # "objective" or "diagnostic"
+_REQUIRES: dict[str, str] = {}  # extra dependency, e.g. "sklearn"
 
 
 # ---------------------------------------------------------------------------
@@ -36,6 +38,8 @@ def register_metric(
     aliases: list[str] | None = None,
     overwrite: bool = False,
     description: str | None = None,
+    kind: str = "objective",
+    requires: str = "",
 ) -> None:
     """Register a metric function under *name* (and optional aliases).
 
@@ -56,6 +60,16 @@ def register_metric(
         One-line human-readable summary shown by
         :func:`describe_metrics`.  ``None`` (default) leaves any
         existing description unchanged on overwrite.
+    kind
+        ``"objective"`` (default) — returns a single scalar with key
+        matching *name*; can be passed directly to ``objective_metrics``
+        in :func:`~bayesflow_hpo.optimize`.
+        ``"diagnostic"`` — returns multiple sub-keys; useful for
+        analysis but not directly optimizable.
+    requires
+        Extra dependency needed to compute this metric (e.g.
+        ``"sklearn"``).  Empty string (default) means no extra
+        dependencies beyond bayesflow and numpy.
 
     Raises
     ------
@@ -75,6 +89,9 @@ def register_metric(
     _REGISTRY[name] = fn
     if description is not None:
         _DESCRIPTIONS[name] = description
+    _KINDS[name] = kind
+    if requires:
+        _REQUIRES[name] = requires
     if aliases:
         for alias in aliases:
             _ALIASES[alias] = name
@@ -154,17 +171,30 @@ class MetricTable(list):
         if not self:
             return "(no metrics registered)"
         w_name = max(len(r["name"]) for r in self)
-        w_alias = max(len(r["aliases"]) for r in self)
-        w_name = max(w_name, 4)  # "Name"
-        w_alias = max(w_alias, 7)  # "Aliases"
-        sep = f"{'-' * w_name}  {'-' * w_alias}  {'-' * 40}"
-        hdr = f"{'Name':<{w_name}}  {'Aliases':<{w_alias}}  Description"
+        w_alias = max((len(r["aliases"]) for r in self), default=0)
+        w_kind = max(len(r.get("kind", "")) for r in self)
+        w_name = max(w_name, 4)
+        w_alias = max(w_alias, 7)
+        w_kind = max(w_kind, 4)
+        sep = (
+            f"{'-' * w_name}  {'-' * w_kind}  "
+            f"{'-' * w_alias}  {'-' * 40}"
+        )
+        hdr = (
+            f"{'Name':<{w_name}}  {'Kind':<{w_kind}}  "
+            f"{'Aliases':<{w_alias}}  Description"
+        )
         lines = [hdr, sep]
         for r in self:
+            req = r.get("requires", "")
+            desc = r["description"]
+            if req:
+                desc = f"{desc} [requires {req}]"
             lines.append(
                 f"{r['name']:<{w_name}}  "
+                f"{r.get('kind', ''):<{w_kind}}  "
                 f"{r['aliases']:<{w_alias}}  "
-                f"{r['description']}"
+                f"{desc}"
             )
         return "\n".join(lines)
 
@@ -174,14 +204,24 @@ class MetricTable(list):
         rows_html = []
         for r in self:
             alias = r["aliases"] or "&mdash;"
+            req = r.get("requires", "")
+            desc = r["description"]
+            if req:
+                desc += (
+                    f' <span style="color:#888">'
+                    f"[requires {req}]</span>"
+                )
+            kind = r.get("kind", "")
             rows_html.append(
                 f"<tr><td{left}><code>{r['name']}</code></td>"
+                f"<td{left}>{kind}</td>"
                 f"<td{left}>{alias}</td>"
-                f"<td{left}>{r['description']}</td></tr>"
+                f"<td{left}>{desc}</td></tr>"
             )
         return (
             "<table>"
             f"<thead><tr><th{left}>Name</th>"
+            f"<th{left}>Kind</th>"
             f"<th{left}>Aliases</th>"
             f"<th{left}>Description</th></tr></thead><tbody>"
             + "\n".join(rows_html)
@@ -192,9 +232,16 @@ class MetricTable(list):
 def describe_metrics() -> MetricTable:
     """Return a description of every registered metric.
 
-    Each entry contains ``name``, ``aliases`` (comma-separated), and
-    ``description``.  Useful for discovering which strings are valid
-    for ``objective_metrics`` in :func:`~bayesflow_hpo.optimize`.
+    Each entry is a dict with keys:
+
+    - ``"name"`` — canonical metric name
+    - ``"kind"`` — ``"objective"`` (single scalar, usable in
+      ``objective_metrics``) or ``"diagnostic"`` (multi-key output,
+      informational only)
+    - ``"aliases"`` — comma-separated alternative names
+    - ``"description"`` — one-line summary
+    - ``"requires"`` — extra dependency (e.g. ``"sklearn"``), or
+      empty string if none
 
     The returned :class:`MetricTable` is a ``list[dict]`` that renders
     as a formatted table in Jupyter notebooks (HTML) and terminals
@@ -203,15 +250,14 @@ def describe_metrics() -> MetricTable:
     Returns
     -------
     MetricTable
-        One dict per metric with keys ``"name"``, ``"aliases"``,
-        ``"description"``.
+        One dict per metric.
 
     Examples
     --------
     >>> from bayesflow_hpo import describe_metrics
     >>> describe_metrics()  # pretty table in notebooks
-    >>> for m in describe_metrics():
-    ...     print(m['name'], m['description'])  # iterate as usual
+    >>> # Filter to objective-ready metrics only:
+    >>> [m["name"] for m in describe_metrics() if m["kind"] == "objective"]
     """
     inverse_aliases: dict[str, list[str]] = {}
     for alias, canonical in _ALIASES.items():
@@ -221,8 +267,10 @@ def describe_metrics() -> MetricTable:
     for name in sorted(_REGISTRY):
         rows.append({
             "name": name,
+            "kind": _KINDS.get(name, "objective"),
             "aliases": ", ".join(sorted(inverse_aliases.get(name, []))),
             "description": _DESCRIPTIONS.get(name, ""),
+            "requires": _REQUIRES.get(name, ""),
         })
     return rows
 
@@ -576,6 +624,7 @@ register_metric(
 register_metric(
     "z_score", _bf_z_score,
     description="Posterior z-score (mean and mean-absolute; bias + calibration).",
+    kind="diagnostic",
 )
 register_metric(
     "log_gamma", _bf_log_gamma,
@@ -593,20 +642,24 @@ register_metric(
 )
 register_metric(
     "sbc_c2st", _sbc_c2st_metric,
-    description="SBC C2ST deviation (accuracy - 0.5; minimize -> 0). Requires sklearn.",
+    description="SBC C2ST deviation (accuracy - 0.5; minimize -> 0).",
+    requires="sklearn",
 )
 register_metric(
     "coverage", _coverage_two_sided,
     aliases=["coverage_two_sided"],
     description="Two-sided SBC rank coverage at standard credible-interval levels.",
+    kind="diagnostic",
 )
 register_metric(
     "coverage_left", _coverage_left,
     description="Left-sided coverage (statistical efficiency).",
+    kind="diagnostic",
 )
 register_metric(
     "coverage_right", _coverage_right,
     description="Right-sided coverage (futility / conservatism).",
+    kind="diagnostic",
 )
 register_metric(
     "bias", _bias_metric,

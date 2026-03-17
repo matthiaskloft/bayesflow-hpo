@@ -188,8 +188,9 @@ def test_describe_metrics_returns_all():
 
 def test_describe_metrics_row_keys():
     rows = describe_metrics()
+    expected = {"name", "aliases", "description", "kind", "requires"}
     for row in rows:
-        assert set(row) == {"name", "aliases", "description"}
+        assert set(row) == expected
 
 
 def test_describe_metrics_builtins_have_descriptions():
@@ -204,3 +205,17 @@ def test_describe_metrics_aliases_correct():
     assert "cal_error" in rows["calibration_error"]["aliases"]
     assert "corr" in rows["correlation"]["aliases"]
     assert rows["bias"]["aliases"] == ""
+
+
+def test_describe_metrics_kind_and_requires():
+    rows = {r["name"]: r for r in describe_metrics()}
+    # Objective metrics return a single scalar
+    assert rows["nrmse"]["kind"] == "objective"
+    assert rows["bias"]["kind"] == "objective"
+    assert rows["sbc_ks"]["kind"] == "objective"
+    # Diagnostic metrics return multiple sub-keys
+    assert rows["z_score"]["kind"] == "diagnostic"
+    assert rows["coverage"]["kind"] == "diagnostic"
+    # Dependency tracking
+    assert rows["sbc_c2st"]["requires"] == "sklearn"
+    assert rows["nrmse"]["requires"] == ""
