@@ -42,6 +42,13 @@ parameters:
 - Document each sampler's internal HP scaling behavior (confirms no external
   transform layer needed)
 
+### Align pruning warmup with sampler startup
+
+Auto-align `PeriodicValidationCallback.n_startup_trials` with the sampler's
+startup count. Current default (5) is too few for `NetworkSelectionSpace`
+(25 architecture combos). Default to `sampler.n_startup_trials` (25 for TPE,
+10 for GP, population_size for NSGA-II). User-overridable.
+
 ### Research: multi-objective pruning improvement
 
 Investigate whether Hyperband/SHA ideas can be adapted to multi-objective mode
