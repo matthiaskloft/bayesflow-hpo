@@ -5,6 +5,7 @@ import pytest
 
 from bayesflow_hpo.validation.registry import (
     DEFAULT_METRICS,
+    describe_metrics,
     get_metric,
     list_metrics,
     make_coverage_metric,
@@ -170,3 +171,34 @@ def test_correlation_metric_constant_true_values():
     fn = get_metric("correlation")
     result = fn(draws, true_values)
     assert result["correlation"] == 0.0
+
+
+# ---------------------------------------------------------------------------
+# describe_metrics
+# ---------------------------------------------------------------------------
+
+
+def test_describe_metrics_returns_all():
+    rows = describe_metrics()
+    names = {r["name"] for r in rows}
+    assert names == set(list_metrics())
+
+
+def test_describe_metrics_row_keys():
+    rows = describe_metrics()
+    for row in rows:
+        assert set(row) == {"name", "aliases", "description"}
+
+
+def test_describe_metrics_builtins_have_descriptions():
+    rows = describe_metrics()
+    for row in rows:
+        if not row["name"].startswith("_test"):
+            assert row["description"], f"missing description for {row['name']}"
+
+
+def test_describe_metrics_aliases_correct():
+    rows = {r["name"]: r for r in describe_metrics()}
+    assert "cal_error" in rows["calibration_error"]["aliases"]
+    assert "corr" in rows["correlation"]["aliases"]
+    assert rows["bias"]["aliases"] == ""

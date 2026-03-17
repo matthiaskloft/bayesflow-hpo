@@ -20,6 +20,7 @@ MetricFn = Callable[[np.ndarray, np.ndarray], dict[str, float]]
 
 _REGISTRY: dict[str, MetricFn] = {}
 _ALIASES: dict[str, str] = {}
+_DESCRIPTIONS: dict[str, str] = {}  # canonical name → one-line description
 
 
 # ---------------------------------------------------------------------------
@@ -32,6 +33,7 @@ def register_metric(
     fn: MetricFn,
     aliases: list[str] | None = None,
     overwrite: bool = False,
+    description: str | None = None,
 ) -> None:
     """Register a metric function under *name* (and optional aliases)."""
     if name in _REGISTRY and not overwrite:
@@ -40,6 +42,8 @@ def register_metric(
             "Use overwrite=True to replace."
         )
     _REGISTRY[name] = fn
+    if description is not None:
+        _DESCRIPTIONS[name] = description
     if aliases:
         for alias in aliases:
             _ALIASES[alias] = name
@@ -61,6 +65,39 @@ def resolve_metrics(names: list[str]) -> dict[str, MetricFn]:
 def list_metrics() -> list[str]:
     """Return sorted list of registered metric names (not aliases)."""
     return sorted(_REGISTRY)
+
+
+def describe_metrics() -> list[dict[str, str]]:
+    """Return a description of every registered metric.
+
+    Each entry contains ``name``, ``aliases`` (comma-separated), and
+    ``description``.  Useful for discovering which strings are valid
+    for ``objective_metrics`` in :func:`~bayesflow_hpo.optimize`.
+
+    Returns
+    -------
+    list of dict
+        One dict per metric with keys ``"name"``, ``"aliases"``,
+        ``"description"``.
+
+    Examples
+    --------
+    >>> from bayesflow_hpo import describe_metrics
+    >>> for m in describe_metrics():
+    ...     print(f"{m['name']:20s} {m['description']}")
+    """
+    inverse_aliases: dict[str, list[str]] = {}
+    for alias, canonical in _ALIASES.items():
+        inverse_aliases.setdefault(canonical, []).append(alias)
+
+    rows: list[dict[str, str]] = []
+    for name in sorted(_REGISTRY):
+        rows.append({
+            "name": name,
+            "aliases": ", ".join(sorted(inverse_aliases.get(name, []))),
+            "description": _DESCRIPTIONS.get(name, ""),
+        })
+    return rows
 
 
 # ---------------------------------------------------------------------------
@@ -356,18 +393,60 @@ DEFAULT_METRICS = [
 ]
 
 # BF wrappers
-register_metric("calibration_error", _bf_calibration_error, aliases=["cal_error"])
-register_metric("rmse", _bf_rmse)
-register_metric("nrmse", _bf_nrmse)
-register_metric("contraction", _bf_contraction)
-register_metric("z_score", _bf_z_score)
-register_metric("log_gamma", _bf_log_gamma)
+register_metric(
+    "calibration_error", _bf_calibration_error,
+    aliases=["cal_error"],
+    description="Expected Calibration Error (ECE) via BayesFlow diagnostics.",
+)
+register_metric(
+    "rmse", _bf_rmse,
+    description="Root Mean Squared Error of posterior means vs true values.",
+)
+register_metric(
+    "nrmse", _bf_nrmse,
+    description="Range-normalized RMSE (comparable across parameter scales).",
+)
+register_metric(
+    "contraction", _bf_contraction,
+    description="Posterior contraction (1 = strong learning, 0 = no narrowing).",
+)
+register_metric(
+    "z_score", _bf_z_score,
+    description="Posterior z-score (mean and mean-absolute; bias + calibration).",
+)
+register_metric(
+    "log_gamma", _bf_log_gamma,
+    description="Log-gamma calibration diagnostic from BayesFlow.",
+)
 
 # Native metrics
-register_metric("sbc", _sbc_metric)
-register_metric("coverage", _coverage_two_sided, aliases=["coverage_two_sided"])
-register_metric("coverage_left", _coverage_left)
-register_metric("coverage_right", _coverage_right)
-register_metric("bias", _bias_metric)
-register_metric("mae", _mae_metric)
-register_metric("correlation", _correlation_metric, aliases=["corr"])
+register_metric(
+    "sbc", _sbc_metric,
+    description="SBC rank uniformity tests (KS, chi-squared, C2ST).",
+)
+register_metric(
+    "coverage", _coverage_two_sided,
+    aliases=["coverage_two_sided"],
+    description="Two-sided SBC rank coverage at standard credible-interval levels.",
+)
+register_metric(
+    "coverage_left", _coverage_left,
+    description="Left-sided coverage (statistical efficiency).",
+)
+register_metric(
+    "coverage_right", _coverage_right,
+    description="Right-sided coverage (futility / conservatism).",
+)
+register_metric(
+    "bias", _bias_metric,
+    description="Mean signed error (positive = overestimate, negative = underestimate).",
+)
+register_metric(
+    "mae", _mae_metric,
+    description="Mean Absolute Error of posterior means vs true values.",
+)
+register_metric(
+    "correlation", _correlation_metric,
+    aliases=["corr"],
+    description="Pearson correlation between posterior means and true values.",
+)

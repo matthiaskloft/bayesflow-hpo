@@ -18,6 +18,7 @@ from bayesflow_hpo.validation.pipeline import run_validation_pipeline
 from bayesflow_hpo.validation.registry import (
     DEFAULT_METRICS,
     MetricFn,
+    describe_metrics,
     get_metric,
     list_metrics,
     make_coverage_metric,
@@ -35,6 +36,7 @@ __all__ = [
     "MetricFn",
     "ValidationDataset",
     "ValidationResult",
+    "describe_metrics",
     "aggregate_condition_rows",
     "compute_condition_metrics",
     "compute_sbc_c2st",
