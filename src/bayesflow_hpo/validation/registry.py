@@ -1,9 +1,11 @@
 """Metric registry for validation pipeline.
 
-Maps string names to callable metric functions. Built-in metrics wrap
-BayesFlow diagnostics; additional metrics (SBC, coverage, bias, MAE) are
-provided natively. Users can register custom metrics via
-:func:`register_metric`.
+Maps string names to callable metric functions.  Built-in metrics wrap
+BayesFlow diagnostics (ECE, RMSE, contraction, z-score, log-gamma);
+native metrics cover SBC rank tests (KS, chi-squared, C2ST), coverage,
+bias, MAE, and correlation.  Users can register custom metrics via
+:func:`register_metric` and discover available metrics with
+:func:`describe_metrics`.
 
 Metric function signature
 -------------------------
@@ -137,30 +139,84 @@ def list_metrics() -> list[str]:
     return sorted(_REGISTRY)
 
 
-def describe_metrics() -> list[dict[str, str]]:
+class MetricTable(list):
+    """List of metric dicts with pretty display in notebooks and terminals.
+
+    Behaves exactly like ``list[dict[str, str]]`` but provides
+    ``_repr_html_`` for Jupyter and ``__str__`` / ``__repr__`` for
+    terminal use.
+    """
+
+    def __repr__(self) -> str:
+        return str(self)
+
+    def __str__(self) -> str:
+        if not self:
+            return "(no metrics registered)"
+        w_name = max(len(r["name"]) for r in self)
+        w_alias = max(len(r["aliases"]) for r in self)
+        w_name = max(w_name, 4)  # "Name"
+        w_alias = max(w_alias, 7)  # "Aliases"
+        sep = f"{'-' * w_name}  {'-' * w_alias}  {'-' * 40}"
+        hdr = f"{'Name':<{w_name}}  {'Aliases':<{w_alias}}  Description"
+        lines = [hdr, sep]
+        for r in self:
+            lines.append(
+                f"{r['name']:<{w_name}}  "
+                f"{r['aliases']:<{w_alias}}  "
+                f"{r['description']}"
+            )
+        return "\n".join(lines)
+
+    def _repr_html_(self) -> str:
+        """Render as an HTML table in Jupyter notebooks."""
+        rows_html = []
+        for r in self:
+            alias = r["aliases"] or "&mdash;"
+            rows_html.append(
+                f"<tr><td><code>{r['name']}</code></td>"
+                f"<td>{alias}</td>"
+                f"<td>{r['description']}</td></tr>"
+            )
+        return (
+            '<table style="text-align:left">'
+            "<thead><tr>"
+            "<th>Name</th><th>Aliases</th><th>Description</th>"
+            "</tr></thead><tbody>"
+            + "\n".join(rows_html)
+            + "</tbody></table>"
+        )
+
+
+def describe_metrics() -> MetricTable:
     """Return a description of every registered metric.
 
     Each entry contains ``name``, ``aliases`` (comma-separated), and
     ``description``.  Useful for discovering which strings are valid
     for ``objective_metrics`` in :func:`~bayesflow_hpo.optimize`.
 
+    The returned :class:`MetricTable` is a ``list[dict]`` that renders
+    as a formatted table in Jupyter notebooks (HTML) and terminals
+    (plain text).
+
     Returns
     -------
-    list of dict
+    MetricTable
         One dict per metric with keys ``"name"``, ``"aliases"``,
         ``"description"``.
 
     Examples
     --------
     >>> from bayesflow_hpo import describe_metrics
+    >>> describe_metrics()  # pretty table in notebooks
     >>> for m in describe_metrics():
-    ...     print(f"{m['name']:20s} {m['description']}")
+    ...     print(m['name'], m['description'])  # iterate as usual
     """
     inverse_aliases: dict[str, list[str]] = {}
     for alias, canonical in _ALIASES.items():
         inverse_aliases.setdefault(canonical, []).append(alias)
 
-    rows: list[dict[str, str]] = []
+    rows = MetricTable()
     for name in sorted(_REGISTRY):
         rows.append({
             "name": name,
@@ -312,7 +368,7 @@ def _sbc_ks_metric(
 ) -> dict[str, float]:
     """SBC rank uniformity via the Kolmogorov-Smirnov test.
 
-    Returns the KS statistic (minimize → 0 = perfectly uniform ranks).
+    Returns the KS statistic (minimize -> 0 = perfectly uniform ranks).
     """
     from bayesflow_hpo.validation.sbc_tests import compute_sbc_uniformity_tests
 
@@ -326,7 +382,7 @@ def _sbc_chi2_metric(
 ) -> dict[str, float]:
     """SBC rank uniformity via the chi-squared goodness-of-fit test.
 
-    Returns the chi-squared statistic (minimize → 0 = perfectly uniform
+    Returns the chi-squared statistic (minimize -> 0 = perfectly uniform
     ranks).  NaN when expected bin counts are below 5.
     """
     from bayesflow_hpo.validation.sbc_tests import compute_sbc_uniformity_tests
@@ -341,7 +397,7 @@ def _sbc_c2st_metric(
 ) -> dict[str, float]:
     """SBC rank uniformity via the Classifier Two-Sample Test (C2ST).
 
-    Returns ``accuracy - 0.5`` (minimize → 0 = classifier cannot
+    Returns ``accuracy - 0.5`` (minimize -> 0 = classifier cannot
     distinguish observed ranks from uniform).  Requires scikit-learn.
     """
     from bayesflow_hpo.validation.sbc_tests import compute_sbc_c2st
@@ -355,11 +411,10 @@ def _sbc_c2st_metric(
 
 
 
-
 def _bias_metric(
     draws: np.ndarray, true_values: np.ndarray,
 ) -> dict[str, float]:
-    """Mean signed error (posterior mean − true value).
+    """Mean signed error (posterior mean - true value).
 
     Positive bias means the model systematically overestimates;
     negative means it underestimates.
@@ -407,7 +462,7 @@ def make_coverage_metric(
     Parameters
     ----------
     levels
-        Nominal coverage levels (default: ``[0.5, 0.8, 0.9, 0.95, 0.99]``).
+        Nominal coverage levels (default: ``[0.9, 0.95, 0.975, 0.99]``).
     side
         ``"two-sided"`` (standard calibration), ``"left"`` (efficiency),
         or ``"right"`` (futility).
@@ -529,15 +584,15 @@ register_metric(
 # Native metrics — SBC rank uniformity
 register_metric(
     "sbc_ks", _sbc_ks_metric,
-    description="SBC KS statistic (minimize → 0 = uniform ranks).",
+    description="SBC KS statistic (minimize -> 0 = uniform ranks).",
 )
 register_metric(
     "sbc_chi2", _sbc_chi2_metric,
-    description="SBC chi-squared statistic (minimize → 0 = uniform ranks).",
+    description="SBC chi-squared statistic (minimize -> 0 = uniform ranks).",
 )
 register_metric(
     "sbc_c2st", _sbc_c2st_metric,
-    description="SBC C2ST deviation (accuracy − 0.5; minimize → 0). Requires sklearn.",
+    description="SBC C2ST deviation (accuracy - 0.5; minimize -> 0). Requires sklearn.",
 )
 register_metric(
     "coverage", _coverage_two_sided,
