@@ -185,6 +185,27 @@ class TestTrialsToDataframe:
         df = trials_to_dataframe(study, extra_attrs=["custom_val"])
         assert "custom_val" in df.columns
 
+    def test_includes_rank_columns_multi_objective(self):
+        study = _make_study(n_trials=3, metric_names=["m1", "m2"])
+        df = trials_to_dataframe(study)
+        assert "rank" in df.columns
+        assert "rank_m1" in df.columns
+        assert "rank_m2" in df.columns
+        assert list(df["rank_m1"]) == [1, 2, 3]
+
+    def test_includes_rank_column_single_objective(self):
+        study = _make_study(n_trials=3, n_objectives=1)
+        df = trials_to_dataframe(study)
+        assert "rank" in df.columns
+        assert list(df["rank"]) == [1, 2, 3]
+
+    def test_can_disable_rank_columns(self):
+        study = _make_study(n_trials=3, metric_names=["m1", "m2"])
+        df = trials_to_dataframe(study, include_ranks=False)
+        assert "rank" not in df.columns
+        assert "rank_m1" not in df.columns
+        assert "rank_m2" not in df.columns
+
 
 # ---------------------------------------------------------------------------
 # get_pareto_trials
