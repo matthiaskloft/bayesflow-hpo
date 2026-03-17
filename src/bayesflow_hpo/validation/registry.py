@@ -14,6 +14,8 @@ Metric function signature
 
 from __future__ import annotations
 
+import html as _html
+import warnings
 from collections.abc import Callable
 
 import numpy as np
@@ -86,6 +88,14 @@ def register_metric(
             f"Metric '{name}' is already registered. "
             "Use overwrite=True to replace."
         )
+    if overwrite and name in _REGISTRY:
+        # Clear stale aliases pointing to this canonical name
+        stale = [k for k, v in _ALIASES.items() if v == name]
+        for k in stale:
+            del _ALIASES[k]
+        # Clear stale description if no new one provided
+        if description is None and name in _DESCRIPTIONS:
+            del _DESCRIPTIONS[name]
     _REGISTRY[name] = fn
     if description is not None:
         _DESCRIPTIONS[name] = description
@@ -203,17 +213,18 @@ class MetricTable(list):
         left = ' style="text-align:left"'
         rows_html = []
         for r in self:
-            alias = r["aliases"] or "&mdash;"
+            name = _html.escape(r["name"])
+            alias = _html.escape(r["aliases"]) if r["aliases"] else "&mdash;"
+            desc = _html.escape(r["description"])
             req = r.get("requires", "")
-            desc = r["description"]
             if req:
                 desc += (
                     f' <span style="color:#888">'
-                    f"[requires {req}]</span>"
+                    f"[requires {_html.escape(req)}]</span>"
                 )
-            kind = r.get("kind", "")
+            kind = _html.escape(r.get("kind", ""))
             rows_html.append(
-                f"<tr><td{left}><code>{r['name']}</code></td>"
+                f"<tr><td{left}><code>{name}</code></td>"
                 f"<td{left}>{kind}</td>"
                 f"<td{left}>{alias}</td>"
                 f"<td{left}>{desc}</td></tr>"
@@ -649,4 +660,27 @@ register_metric(
     "correlation", _correlation_metric,
     aliases=["corr"],
     description="Pearson correlation between posterior means and true values.",
+)
+
+
+# Deprecated shim for the old combined "sbc" metric
+def _sbc_deprecated_wrapper(
+    draws: np.ndarray, true_values: np.ndarray,
+) -> dict[str, float]:
+    """Deprecated: use sbc_ks or sbc_chi2 instead."""
+    warnings.warn(
+        '"sbc" metric is deprecated; use "sbc_ks" or "sbc_chi2".',
+        DeprecationWarning,
+        stacklevel=3,
+    )
+    result = {}
+    result.update(_sbc_ks_metric(draws, true_values))
+    result.update(_sbc_chi2_metric(draws, true_values))
+    return result
+
+
+register_metric(
+    "sbc", _sbc_deprecated_wrapper,
+    description="Deprecated: delegates to sbc_ks + sbc_chi2.",
+    kind="diagnostic",
 )

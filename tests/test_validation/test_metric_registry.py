@@ -206,6 +206,58 @@ def test_describe_metrics_aliases_correct():
     assert rows["bias"]["aliases"] == ""
 
 
+def test_describe_metrics_renders():
+    rows = describe_metrics()
+    text = str(rows)
+    assert "Name" in text and "Description" in text
+    html = rows._repr_html_()
+    assert "<table>" in html and "</table>" in html
+
+
+def test_overwrite_clears_stale_aliases():
+    def dummy(d, t):
+        return {"v": 0.0}
+
+    register_metric(
+        "_test_alias_cleanup", dummy,
+        aliases=["_test_old_alias"],
+        overwrite=True,
+        description="original",
+    )
+    assert get_metric("_test_old_alias") is dummy
+
+    def dummy2(d, t):
+        return {"v": 1.0}
+
+    register_metric(
+        "_test_alias_cleanup", dummy2,
+        aliases=["_test_new_alias"],
+        overwrite=True,
+        description="replaced",
+    )
+    # Old alias should be gone
+    with pytest.raises(KeyError):
+        get_metric("_test_old_alias")
+    # New alias should work
+    assert get_metric("_test_new_alias") is dummy2
+
+
+def test_sbc_deprecated_shim():
+    import warnings
+
+    rng = np.random.default_rng(42)
+    draws = rng.normal(size=(100, 200))
+    true_values = rng.normal(size=100)
+
+    fn = get_metric("sbc")
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        result = fn(draws, true_values)
+        assert any("deprecated" in str(x.message).lower() for x in w)
+    assert "sbc_ks" in result
+    assert "sbc_chi2" in result
+
+
 def test_describe_metrics_kind_and_requires():
     rows = {r["name"]: r for r in describe_metrics()}
     # Objective metrics return a single scalar
