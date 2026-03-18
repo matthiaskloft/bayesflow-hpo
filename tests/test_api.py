@@ -188,6 +188,65 @@ def test_optimize_rejects_invalid_report_frequency():
         )
 
 
+def test_optimize_uses_validation_simulator_for_dataset():
+    """validation_simulator is passed to generate_validation_dataset."""
+    val_sim = MagicMock(name="val_simulator")
+    train_sim = MagicMock(name="train_simulator")
+    adapter = canonical_adapter()
+
+    with (
+        patch("bayesflow_hpo.api.GenericObjective") as mock_obj_cls,
+        patch("bayesflow_hpo.api.create_study"),
+        patch("bayesflow_hpo.api.optimize_until"),
+        patch("bayesflow_hpo.api.check_pipeline"),
+        patch("bayesflow_hpo.api.generate_validation_dataset") as mock_gen,
+    ):
+        mock_instance = MagicMock()
+        mock_instance.n_objectives = 3
+        mock_obj_cls.return_value = mock_instance
+        mock_gen.return_value = MagicMock()
+
+        optimize(
+            simulator=train_sim,
+            adapter=adapter,
+            search_space=_make_fake_search_space(),
+            storage=None,
+            validation_simulator=val_sim,
+        )
+
+        # generate_validation_dataset should receive val_sim, not train_sim
+        call_kwargs = mock_gen.call_args
+        assert call_kwargs[1]["simulator"] is val_sim
+
+
+def test_optimize_defaults_to_training_simulator_for_dataset():
+    """Without validation_simulator, training simulator is used."""
+    train_sim = MagicMock(name="train_simulator")
+    adapter = canonical_adapter()
+
+    with (
+        patch("bayesflow_hpo.api.GenericObjective") as mock_obj_cls,
+        patch("bayesflow_hpo.api.create_study"),
+        patch("bayesflow_hpo.api.optimize_until"),
+        patch("bayesflow_hpo.api.check_pipeline"),
+        patch("bayesflow_hpo.api.generate_validation_dataset") as mock_gen,
+    ):
+        mock_instance = MagicMock()
+        mock_instance.n_objectives = 3
+        mock_obj_cls.return_value = mock_instance
+        mock_gen.return_value = MagicMock()
+
+        optimize(
+            simulator=train_sim,
+            adapter=adapter,
+            search_space=_make_fake_search_space(),
+            storage=None,
+        )
+
+        call_kwargs = mock_gen.call_args
+        assert call_kwargs[1]["simulator"] is train_sim
+
+
 def test_optimize_calls_check_pipeline():
     """check_pipeline() is called at start of optimize()."""
     adapter = canonical_adapter()

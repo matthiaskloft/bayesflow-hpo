@@ -102,6 +102,7 @@ def optimize(
     train_fn: TrainFn | None = None,
     validate_fn: ValidateFn | None = None,
     # Validation data
+    validation_simulator: bf.simulators.Simulator | None = None,
     validation_conditions: dict[str, list[Any]] | None = None,
     sims_per_condition: int = 200,
     n_posterior_samples: int = 500,
@@ -150,8 +151,8 @@ def optimize(
     Parameters
     ----------
     simulator
-        BayesFlow simulator used for online training and for
-        generating validation data.
+        BayesFlow simulator used for online training and (unless
+        *validation_simulator* is given) for generating validation data.
     adapter
         BayesFlow adapter for data preprocessing.
     search_space
@@ -169,6 +170,12 @@ def optimize(
         ``(approximator, validation_data, n_posterior_samples) ->
         dict[str, float]``.  When ``None`` (default), uses
         ``default_validate_fn()``.
+    validation_simulator
+        Optional simulator used *only* for generating the validation
+        dataset.  When ``None`` (default), ``simulator`` is used.
+        Use this to pin validation to a specific condition — e.g. a
+        simulator cloned with fixed sizes for edge-case testing —
+        while keeping the training simulator's full range.
     validation_conditions
         Condition grid specification
         (e.g. ``{"N": [50, 100, 200]}``).  Used to build a
@@ -326,8 +333,9 @@ def optimize(
         )
 
     # --- Always build validation data internally ---
+    val_sim = validation_simulator if validation_simulator is not None else simulator
     validation_data = generate_validation_dataset(
-        simulator=simulator,
+        simulator=val_sim,
         param_keys=param_keys,
         data_keys=data_keys,
         condition_grid=validation_conditions,
