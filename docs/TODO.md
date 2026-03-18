@@ -1,177 +1,510 @@
-# TODOs
+# bayesflow-hpo — Project TODOs
 
-Active issues and improvement opportunities for bayesflow-hpo.
+Tracked items for ongoing development. Updated by contributors and Claude Code sessions.
 
-Items from the multi-objective pruning quality audit (2026-03-06) are
-archived in the [Resolved](#resolved-archive) section at the bottom.
+Items are grouped into packages of related work that should be shipped together.
+Suggested execution order: F → C → D → A → B → G → E.
 
----
+## Open
 
-## Robustness
+### Package H: Metric Constraints & Memory Auto-Detection
 
-### 3. `normalize_param_count` edge-case inconsistency
+#### Add metric constraints on objective values
 
-**File:** `objectives.py:92-99`
+Add layered metric constraints to the optimization loop:
 
-**Issue:** `param_count=0` returns `1.0` (worst), but
-`param_count=1, min_count=1, max_count=1` returns `0.0` (best).  The boundary
-semantics are not uniformly defined.
+- **Soft constraints (feasibility-guided search):** Extend `_budget_constraints_func()`
+  so trials violating user-specified metric thresholds (e.g., `calibration_error > 0.10`)
+  are marked infeasible via Optuna's `constraints_func`. The sampler learns to avoid
+  those regions while still considering them in its model.
+- **Hard constraints (post-validation rejection):** After validation, check metrics
+  against user-specified bounds. Violating trials are marked rejected (like budget
+  rejection) — keeps the Pareto front clean.
+- Both layers compose: hard thresholds reject clearly bad trials; soft constraints
+  guide the sampler away from borderline regions.
 
-**Fix:** Document the intended invariant and add a guard for
-`max_count <= min_count` that returns `0.5` (neutral) instead of `0.0`.
+Design considerations:
+- New `MetricConstraints` config (or extend `ObjectiveConfig`) with per-metric
+  upper/lower bounds
+- Applies to objective metrics and optionally non-objective diagnostic metrics
+  (e.g., SBC uniformity)
+- Rejected-by-metric trials should not count toward `n_trained` (like budget rejection)
 
-### 4. `infer_keys_from_adapter` returns `None` silently on missing transforms
+#### Auto-detect GPU memory budget
 
-**File:** `api.py:63-65`
+Add `auto_detect_memory_budget()` that queries available VRAM via
+`torch.cuda.get_device_properties()` / `torch.cuda.mem_get_info()`, subtracts
+a configurable safety margin (default 20%), and returns usable MB. Wire into
+`optimize()` as `max_memory_mb="auto"` option alongside explicit numeric values.
 
-**Issue:** When the adapter has no `transforms` attribute, the function returns
-all-`None` with no log message.  Users get a `TypeError` later from `optimize()`
-without knowing why.
-
-**Fix:** Add a `logger.debug(...)` when `transforms` is `None` so the inference
-path is at least visible in debug logs.
-
----
-
-## Usability
-
-### 5. `optimize()` does not accept explicit `param_keys`/`data_keys`
-
-**File:** `api.py:96-362`
-
-**Issue:** Keys are always inferred from the adapter.  Users with non-standard
-adapters (e.g. custom transforms) have no fallback.
-
-**Fix:** Add optional `param_keys` / `data_keys` parameters that override
-inference when provided.
+Falls back gracefully when no GPU is available (use system RAM estimate or skip).
 
 ---
 
-## Code Quality
+### Package A: Sampler & Pruner Presets
 
-### 8. `optimize()` function is ~270 lines with mixed responsibilities
+Tightly coupled — presets need researched defaults, and pruning warmup
+depends on sampler config. QMC warm-up composes with sampler presets.
 
-**File:** `api.py:96-362`
+#### Add named sampler presets to create_study()
 
-**Issue:** Key inference, validation data generation, pipeline checking,
-objective creation, study creation, and optimization are all in one function.
+Add string-based sampler selection (`"tpe"`, `"botorch"`, `"gp"`, `"nsga2"`,
+`"nsga3"`, `"auto"`, `"random"`) to `create_study()` alongside existing object
+parameter. Each preset wires sensible defaults and auto-wires `constraints_func`
+when `budget_aware=True`. `"botorch"` requires `optuna-integration[botorch]`
+(lazy import with clear error). See `HPO-BENCHMARK-PAPER_PLAN.md` in
+bayesflow_projects for full design and `docs/references.md` for citations.
 
-**Fix:** Extract helpers like `_setup_validation_data()` and
-`_build_objective()` to improve readability and testability.  No change
-to the public API.
+#### Research: detailed sampler preset defaults
 
-### 9. Redundant builder registration loop in `registration.py`
+For each of the 7 sampler presets, research and document optimal default
+parameters:
+- BoTorch: `n_startup_trials`, `device` (auto-detect GPU), categorical
+  handling verification with NetworkSelectionSpace
+- GP: internal normalization with conditional spaces, `n_startup_trials`
+- NSGA-II/III: population size heuristics (function of search space dim)
+- Auto: verify it selects sensibly for BayesFlow HPO workloads
+- Document each sampler's internal HP scaling behavior (confirms no external
+  transform layer needed)
 
-**File:** `registration.py:55-58, 90-92`
+#### Add pruner string presets to create_study()
 
-**Issue:** The alias loop manually calls `register_inference_builder` for each
-alias, duplicating logic that could be a shared helper.
+Add `pruner="none"` (NopPruner) and `pruner="median"` (current default) as
+convenience presets.
 
-**Fix:** Extract a `_register_with_aliases(registry_fn, name, builder, aliases)`
-helper.
+#### Align pruning warmup with sampler startup
 
-### 10. `_TrackingDict` does not track `items()` / `values()` / `__iter__`
+Auto-align `PeriodicValidationCallback.n_startup_trials` with the sampler's
+startup count. Current default (5) is too few for `NetworkSelectionSpace`
+(25 architecture combos). Default to `sampler.n_startup_trials` (25 for TPE,
+10 for BoTorch/GP, population_size for NSGA-II). User-overridable.
 
-**File:** `pipeline.py:51-84`
+#### Add QMC warm-up option to optimize()
 
-**Issue:** A builder that uses `for k, v in hparams.items()` will not mark keys
-as accessed, so the unused-key warning fires even when keys were consumed.
-This is a known trade-off documented in the class (calling `dict()` on the
-tracking dict would mark everything), but it can produce false-positive
-warnings.
+Add `qmc_startup_trials: int = 0` parameter. When > 0, first N trials use
+`QMCSampler` (Sobol sequences), then swap to the main sampler. Composes with
+any sampler preset.
 
-**Fix:** Document the limitation in `check_pipeline`'s docstring so users know
-to ignore warnings when their builder iterates the dict.
+#### Research: QMC warm-up effectiveness
+
+Empirically test whether QMC startup improves convergence compared to random
+startup, especially for GP and TPE. May become a secondary finding in the
+HPO benchmark paper.
 
 ---
 
----
+### Package B: Trial Selection & Results
 
-## Validation & Results
+Lexicographic selection builds on Pareto extraction; `select_by` bounds
+check is in the same code path.
 
-### 18. `inference.py` silently skips missing data keys
+#### Add lexicographic-Pareto trial selection
 
-**File:** `validation/inference.py:32`
+Add `select_best_trial()` to `results/extraction.py` and integrate into
+`best_config()` via an optional `priorities` parameter. Two-phase algorithm:
+(1) satisficing — filter by priority thresholds in order, (2) Pareto selection
+over remaining metrics. Direction inferred from `study.directions` for
+objectives, explicit for user_attrs. See `HPO-BENCHMARK-PAPER_PLAN.md` in
+bayesflow_projects for full design.
 
-**Issue:** `{k: sim_data[k] for k in data_keys if k in sim_data}` silently
-drops keys not present in the simulation batch.  When a user passes wrong
-`data_keys`, `approximator.sample()` fails with a cryptic BayesFlow error
-instead of a clear "missing key" message.
+#### Add `select_by` bounds check (#22)
 
-**Fix:** Validate all `data_keys` exist in `sim_data` before calling `sample()`.
-
-### 20–21. Removed (sbc_c2st metric deleted)
-
-Items 20 and 21 are no longer relevant — the `sbc_c2st` metric and
-`compute_sbc_c2st()` were removed because C2ST on 1D rank integers is
-redundant with KS and chi-squared tests (see dev/TODO.md for
-reimplementation plan).
-
-### 22. `get_pareto_trials` / `summarize_study` no bounds check on `select_by`
-
+Validate `0 <= select_by < len(study.directions)` at entry of
+`get_pareto_trials()` and `summarize_study()`.
 **File:** `results/extraction.py:229, 251`
 
-**Issue:** `select_by` is a user-facing int index into `trial.values` with no
-bounds checking.  Out-of-range values cause an `IndexError` with no context.
+---
 
-**Fix:** Validate `0 <= select_by < len(study.directions)` at function entry.
+### Package C: API Consolidation & Usability
+
+Naming alignment, explicit key overrides, and silent-failure fixes are all
+about the public API surface.
+
+#### Consolidate API naming against BayesFlow
+
+Align parameter/method names with BayesFlow 2.x conventions.
+Example: `batches_per_epoch` → `num_batches`.
+
+#### Accept explicit `param_keys`/`data_keys` in optimize() (#5)
+
+Add optional `param_keys` / `data_keys` parameters that override
+adapter inference when provided.
+**File:** `api.py:96-362`
+
+#### Add debug logging to `infer_keys_from_adapter` (#4)
+
+When the adapter has no `transforms` attribute, log at `DEBUG` level
+so the inference path is visible.
+**File:** `api.py:63-65`
+
+#### Fix `normalize_param_count` edge case (#3)
+
+Document the intended invariant and add a guard for
+`max_count <= min_count` that returns `0.5` (neutral) instead of `0.0`.
+**File:** `objectives.py:92-99`
+
+#### Review: search space fixed-value and optional-inclusion pathways
+
+Review the multiple ways users can fix hyperparameters or make them
+optional in search spaces, and determine if simplification is needed:
+
+- **Fixed values via single-point ranges** — e.g., `FloatDimension(low=0.1, high=0.1)`
+  collapses to a constant. Works but non-obvious.
+- **Fixed values via `__post_init__` overrides** — subclass sets a field
+  to a concrete value, removing it from the search.
+- **Optional parameter inclusion** — `include_X: bool = True` fields on
+  search spaces that toggle whether a dimension is sampled or uses a
+  default. Multiple patterns exist across spaces.
+- **CompositeSearchSpace assembly** — users compose sub-spaces, choosing
+  which to include.
+
+Concerns:
+- Too many pathways to achieve the same goal (fixing a hyperparameter)
+- `include_X` pattern may be confusing alongside single-point ranges
+- Not clear which approach is idiomatic or recommended
+
+**Decision needed:** simplify to fewer, well-documented pathways, or
+keep all and add a "How to fix hyperparameters" guide. Audit all
+search spaces for consistency.
+**Files:** `search_spaces/base.py`, `search_spaces/training.py`,
+all files under `search_spaces/inference/` and `search_spaces/summary/`
 
 ---
 
-## Search Spaces
+### Package D: `optimize()` Refactor
 
-### 28. `IntDimension` allows `log=True` + `step` simultaneously
+Extract helpers first, then the tracking dict fix is testable against
+the cleaner code.
 
-**File:** `search_spaces/base.py:49`
+#### Extract helpers from `optimize()` (~270 lines) (#8)
 
-**Issue:** Optuna's `trial.suggest_int()` raises `ValueError` when both
-`log=True` and `step` (other than 1) are set.  No current space triggers this,
-but the data model permits it, so a user customizing dimensions could hit a
-runtime error.
+Extract `_setup_validation_data()` and `_build_objective()` to improve
+readability and testability. No change to the public API.
+**File:** `api.py:96-362`
 
-**Fix:** Add validation in `BaseSearchSpace.sample()` or `IntDimension.__post_init__`.
+#### Deduplicate builder registration loop (#9)
 
-### 29. `FusionTransformerSpace` missing `mlp_width` and `bidirectional` dimensions
+Extract a `_register_with_aliases(registry_fn, name, builder, aliases)`
+helper to remove duplicated alias logic.
+**File:** `registration.py:55-58, 90-92`
 
-**File:** `search_spaces/summary/fusion_transformer.py`
+#### `_TrackingDict` — track `items()`/`values()` or document (#10)
 
-**Issue:** `SetTransformerSpace` and `TimeSeriesTransformerSpace` expose
-`mlp_width` (optional) and `TimeSeriesNetworkSpace` exposes `bidirectional`,
-but `FusionTransformerSpace` has neither.  Inconsistent across transformer-based
-summary spaces.
-
-**Fix:** Add `ft_mlp_width` and `ft_bidirectional` as optional dimensions.
+A builder using `for k, v in hparams.items()` won't mark keys as accessed,
+causing false-positive unused-key warnings. Either override iteration methods
+or document the limitation in `check_pipeline`'s docstring.
+**File:** `pipeline.py:51-84`
 
 ---
 
-## Testing Gaps
+### Package E: Validation & Metrics
 
-### 23. No test for `warm_start_study`
+C2ST variants and inference key validation are both in the validation
+subsystem.
+
+#### Background: C2ST variants for SBI
+
+The `sbc_c2st` metric was removed because applying C2ST to 1D SBC rank
+integers is theoretically redundant with KS and chi-squared tests — a
+random forest on a single integer feature is just a noisy histogram
+comparison.
+
+Two C2ST variants are relevant for proper multivariate posterior
+validation:
+
+**Global C2ST** (López-Paz & Oquab, 2017) — the original classifier
+two-sample test. A binary classifier is trained to discriminate samples
+from two distributions P and Q; if classification accuracy significantly
+exceeds chance, the distributions differ. In the SBI context, this
+means comparing samples from the approximate posterior q_φ(θ|x_o) vs
+the true posterior p(θ|x_o) for a fixed observation x_o. This requires
+access to true posterior samples (e.g., from MCMC), which limits it to
+settings where a reference posterior is available.
+
+**L-C2ST** (Linhart et al., 2023) — a local variant that eliminates
+the need for true posterior samples. Instead of comparing q(θ|x_o) vs
+p(θ|x_o) at a fixed observation, L-C2ST works with joint samples: it
+classifies (θ, x) pairs drawn from q(θ|x)p(x) [class 0] vs (θ, x)
+pairs drawn from p(θ, x) [class 1]. The key insight (Linhart et al.,
+2023, eq. 11) is that the optimal joint classifier d*(θ, x) equals the
+optimal local classifier d*_x(θ), so the joint-sample approach recovers
+local posterior diagnostics without needing true posterior samples.
+Only requires samples from p(θ, x) — exactly what BayesFlow simulators
+provide.
+
+#### Implement L-C2ST (primary)
+
+Implement L-C2ST for reference-free posterior validation.
+
+Design considerations:
+- Metric signature: needs `(draws: [n_sims, n_samples, n_params],
+  true_values: [n_sims, n_params])` — different from the current
+  per-parameter `MetricFn` convention
+- Classifier: MLP (Linhart et al. recommend MLP for L-C2ST); returns
+  probability-based statistic (not binarized accuracy)
+- Training data: joint samples (θ, x) from the simulator — no
+  reference posterior needed
+- Keep as optional metric with `requires="sklearn"` extra
+- Reference implementation available at
+  https://github.com/JuliaLinhart/lc2st and integrated in the
+  `sbi` Python package
+
+#### Implement global C2ST (optional, requires reference posterior)
+
+Implement standard C2ST (López-Paz & Oquab, 2017) for settings where
+MCMC or other reference posterior samples are available. Useful for
+post-hoc validation in the benchmark study where reference posteriors
+can be computed for specific models (SDT, 2HTM, GVAR via Stan/brms).
+
+Design considerations:
+- Separate metric or mode flag on a shared C2ST implementation
+- Inputs: approximate posterior samples + reference posterior samples
+- Classifier: MLP or RF; binarized accuracy as test statistic
+- Not usable as an HPO objective (requires MCMC per trial) — purely
+  a post-hoc diagnostic
+
+#### Audit all metrics and features against literature references
+
+Systematic check that every built-in metric and major feature has a
+verified literature reference in `docs/references.md`. For each:
+
+- Confirm the implementation matches the method described in the paper
+- Verify edge-case handling (e.g., degenerate inputs, numerical guards)
+  is consistent with the original authors' recommendations
+- Document any intentional deviations from the reference method and why
+- Add missing references for metrics currently without citations
+  (e.g., ECE, posterior contraction, z-score, coverage)
+
+Scope: all 13 built-in metrics in `validation/registry.py`, the
+budget-aware sampling design, the pruning strategy, and the
+lexicographic-Pareto selection (once implemented).
+
+#### Validate `data_keys` exist before `sample()` (#18)
+
+`inference.py` silently skips missing data keys via dict comprehension.
+Validate all `data_keys` exist in `sim_data` before calling `sample()`.
+**File:** `validation/inference.py:32`
+
+#### Deep review: pruning feature
+
+Comprehensive review of the pruning implementation, including literature
+search for best practices and audit of the current code.
+
+**Literature search:**
+- Optuna's built-in pruners (MedianPruner, HyperbandPruner, SHA) and
+  their applicability to multi-objective settings
+- Multi-objective early stopping / pruning in the HPO literature
+  (e.g., BOHB, DEHB, multi-fidelity multi-objective methods)
+- Whether geometric mean of objectives is a sound composite score
+  for pruning decisions, or if dominated-hypervolume-based pruning
+  exists
+- Warm-up heuristics: how many startup trials before pruning is
+  reliable (current default: 5)
+
+**Implementation audit:**
+- `PeriodicValidationCallback` (validation_callback.py): review the
+  custom median-based multi-objective pruning strategy (lines 31–82)
+- Hard-coded intermediate metrics `["calibration_error", "nrmse"]`
+  (line 28) — should these align with `objective_metrics`?
+- `_should_prune_multi_objective()`: median threshold, reference
+  trial selection (COMPLETE + non-rejected only), NaN/Inf handling
+- Single-objective path: delegates to Optuna's `trial.report()` +
+  study pruner — is this sufficient?
+- Interaction with `pruning_n_startup_trials` and sampler startup
+  (see Package A: align pruning warmup with sampler startup)
+- Pruning score = `sqrt(nrmse * calibration_error)` — is geometric
+  mean the right aggregation? What about user-defined objectives?
+
+**Decision needed:** keep custom pruning, adopt a published
+multi-objective pruning strategy, or make pluggable.
+**Files:** `optimization/validation_callback.py`,
+`optimization/objective.py:573-588`
+
+#### Review: validation pipeline contracts & standardization
+
+Review of the validation pipeline integration with `optimize()` identified
+six contract issues. Address as documentation, minor cleanup, or redesign:
+
+1. **`validate_fn` return contract undocumented** — must return
+   `dict[str, float]` with at least the keys in `objective_metrics`;
+   missing keys get penalty substitution, extra keys are silently
+   ignored. Document in `optimize()` docstring and `ValidateFn` alias.
+   **Files:** `api.py:167-171`, `types.py:26`, `optimization/objective.py:129-152`
+
+2. **Timing semantics differ between default and custom paths** — default
+   path extracts pure inference time from `result.timing["inference"]`;
+   custom `validate_fn` path measures total wall-clock (inference + metric
+   computation). Makes `cost_metric="inference_time"` non-comparable.
+   **Decision needed:** ask custom hooks to return timing dict (breaks
+   `ValidateFn`), or document the limitation, or drop inference time
+   normalization if samplers handle this internally.
+   **Files:** `optimization/objective.py:621-643`
+
+3. **Intermediate validation is implicit and non-configurable** —
+   `PeriodicValidationCallback` is always injected when `validation_data`
+   exists, hard-coded to `["calibration_error", "nrmse"]` regardless of
+   `objective_metrics`. No way to disable or customize.
+   **Decision needed:** accept `intermediate_metrics` in ObjectiveConfig,
+   provide disable flag, or document as intentional design.
+   **Files:** `optimization/validation_callback.py:28`,
+   `optimization/objective.py:573-588`
+
+4. **`validation_data` typed Optional but never None in practice** —
+   `ObjectiveConfig.validation_data` accepts `None` with a penalty
+   fallback path, but `optimize()` always generates the dataset.
+   **Decision needed:** make required (non-Optional) in ObjectiveConfig,
+   or expose `validate=False` in `optimize()`, or document as
+   internal-only.
+   **Files:** `optimization/objective.py:226,659-666`, `api.py:329-335`
+
+5. **`default_validate_fn` not exported** — users writing custom
+   `validate_fn` can't easily see the reference implementation. Export
+   it or add a usage example in the docstring.
+   **File:** `optimization/objective.py:95-126`
+
+6. **Multi-objective pruning strategy not pluggable** — custom
+   median-based pruning is buried in the callback with no configuration
+   hooks. Overlaps with "Research: multi-objective pruning improvement"
+   above.
+   **File:** `optimization/validation_callback.py:31-82`
+
+**Prime test case:** The bayesflow-irt IRT model (equivariant summary
+networks, custom approximator) should work flawlessly through the
+custom `build_approximator_fn` / `validate_fn` pathway. Use it as
+the integration test when standardizing these contracts.
+
+---
+
+### Package F: Testing Gaps
+
+Independent test additions. Ideally done first to establish a safety net
+before the other packages.
+
+#### Test `warm_start_study` (#23)
 
 **File:** `optimization/study.py:169-218`
+Warm-start logic (ranking, trial copying, edge cases) has no unit tests.
 
-**Issue:** Warm-start logic (ranking, trial copying, edge cases) has no unit
-tests.
-
-### 24. No test for `_training_loss_fallback`
+#### Test `_training_loss_fallback` (#24)
 
 **File:** `optimization/objective.py:281-334`
+The validation-failure fallback path is critical but not directly tested.
 
-**Issue:** The validation-failure fallback path is critical but not directly
-tested.
-
-### 25. No test for `load_validation_dataset` round-trip
+#### Test `load_validation_dataset` round-trip (#25)
 
 **File:** `validation/data.py:214-244`
+`save_validation_dataset` → `load_validation_dataset` round-trip is not tested.
 
-**Issue:** `save_validation_dataset` → `load_validation_dataset` round-trip
-is not tested.  Serialization bugs would go unnoticed.
-
-### 26. No test for `make_condition_grid` edge cases
+#### Test `make_condition_grid` edge cases (#26)
 
 **File:** `validation/data.py:149-182`
+`logspace` and mixed-mode grids are not tested.
 
-**Issue:** `logspace` and mixed-mode grids are not tested.
+---
+
+### Package G: Search Space Gaps
+
+#### Add `mlp_width` and `bidirectional` to `FusionTransformerSpace` (#29)
+
+`SetTransformerSpace` and `TimeSeriesTransformerSpace` expose `mlp_width`;
+`TimeSeriesNetworkSpace` exposes `bidirectional`. `FusionTransformerSpace`
+has neither — inconsistent across transformer-based summary spaces.
+**File:** `search_spaces/summary/fusion_transformer.py`
+
+#### Validate `IntDimension` rejects `log=True` + `step` (#28)
+
+Optuna's `trial.suggest_int()` raises `ValueError` when both `log=True`
+and `step` (other than 1) are set. Add validation in
+`BaseSearchSpace.sample()` or `IntDimension.__post_init__`.
+**File:** `search_spaces/base.py:49`
+
+---
+
+## Done
+
+### Redesign plot_study() for multi-objective support (2026-03-16, PRs #43, #45)
+Two-phase redesign of the visualization module:
+- **Phase 1** (PR #43): Rewrote `plot_pareto_front()` (pairwise 2D projections with
+  `third_dim` encoding), `plot_optimization_history()` (per-objective direction-aware
+  step lines), `plot_param_importance()` (per-objective bar charts with graceful
+  degradation). Added `max_cols` wrapping to `plot_pareto_projections()` and
+  `plot_metric_panels()`. Added `_setup_grid()` shared helper for dual-mode axes.
+- **Phase 2** (PR #45): Rewrote `plot_study()` as a 3-row GridSpec orchestrator
+  (Pareto / History / Importance) supporting 2-3 objectives. Removed `_plot_study_2obj()`,
+  `select_by`, and `metrics` params. >3 objectives raises `ValueError` with
+  helpful message.
+
+### Add Two Moons network selection example (2026-03-16, PR #44)
+Added `examples/two_moons_optimization.ipynb` — demonstrates `NetworkSelectionSpace`
+letting Optuna choose between CouplingFlow and FlowMatching on the Two Moons
+benchmark. Fixed `optimize()` and `SelectionSpace.build()` for condition-only models.
+
+### Rework inference time metric (2026-03-16, PRs #37-42)
+Multi-phase rework of the inference time cost metric:
+- Changed from ratio-based to seconds-per-dataset measurement
+- Improved display: human-readable time units, per-metric logging
+- Refactored checkpoint loading, plot naming, notebook rename
+  (`quickstart.ipynb` → `getting_started.ipynb`)
+
+### Fix fragile iso-line color assertion (2026-03-15, PR #36)
+Replaced `line.get_color() in ("grey", "gray")` with
+`to_hex(line.get_color()) == to_hex("gray")` for version-safe color
+comparison. File: `tests/test_visualization.py`.
+
+### Unify metric auto-detection in plot_metric_panels (2026-03-15)
+Already resolved — `plot_metric_panels` calls `_get_metric_user_attrs()`
+at line 369. No code change needed; moved from Open to Done.
+
+### Rework plotting for 2D and 3D objectives (2026-03-15, PRs #32, #34, #35)
+Added 3-objective support (`plot_pareto_3d`, `plot_pareto_projections`,
+`plot_parallel_coordinates`) and `plot_study()` convenience entry point that
+auto-detects 2 vs 3 objectives. Polished legends, axis formatting, and added
+BayesFlow-aligned color palette (`_colors.py`). Updated quickstart to use
+`plot_study()`.
+
+### Quickstart: model selection & retraining workflow (2026-03-15, PR #33)
+Added section 4 to `examples/quickstart.ipynb` with the full HPO-to-production workflow:
+`trial_table()` → `best_config()` → `build_continuous_approximator()` → compile with
+Adam/CosineDecay → retrain with full budget → `save_workflow_with_metadata()`.
+
+### Review search space defaults against BayesFlow (2026-03-15, PR #29)
+Full audit of all 11 search spaces against BayesFlow 2.x source defaults. Fixes applied:
+- **`subnet_depth` high 4→6** in FlowMatchingSpace, DiffusionModelSpace, ConsistencyModelSpace, StableConsistencyModelSpace — BayesFlow `TIME_MLP_DEFAULT_CONFIG` uses 5 layers, so the old cap of 4 excluded the framework default
+- **`tst_time_embed` choices**: replaced invalid `"sinusoidal"` (would raise `ValueError`) with valid BayesFlow options `["time2vec", "lstm", "gru"]`
+- **`ds_summary_dim`**: added `step=4` for consistency with other summary network spaces (SetTransformer etc. use `step=8`)
+- Updated docstrings in all changed search spaces and both docs files (`search_spaces.md`, `defaults.md`)
+
+Remaining non-blocking items (intentionally left as-is):
+- Dropout dimensions use continuous float (standard Optuna practice)
+- `cf_permutation` omits `"swap"` and `None` (rarely useful)
+- Subnet widths cap at 256 (intentional to keep search tractable)
+
+### Remove multi_objective.ipynb (2026-03-15)
+Removed the `examples/multi_objective.ipynb` notebook and updated README examples table.
+
+### Dev docs: BayesFlow fit() compatibility note (2026-03-15)
+Updated developer-facing docs to record BayesFlow 2.0.8 fit() keyword behavior:
+- Added quickstart guidance using a compatibility `train_fn` that maps `batches_per_epoch` -> `num_batches`.
+- Updated optimization/index docs to match the current approximator-based `train_fn` signature and default training path.
+
+### Trial counting docs & reporting (2026-03-15)
+Clarified trial counting for users:
+- Split progress output into 4 categories: trained, rejected, failed, pruned (dropped redundant "total")
+- Added startup log message explaining what each category means
+- Added Notes section to `optimize()` docstring documenting the full trial lifecycle and safety caps
+- Added `_count_budget_rejected()` and `_count_failed()` helpers in `study.py`
+
+### Quickstart runnable example (2026-03-15)
+Fixed `examples/quickstart.ipynb` to run end-to-end from a fresh clone:
+- Removed stale kwargs (`param_keys`, `data_keys`, `validation_data`) that no longer exist in `optimize()` API
+- Changed `n_trials=0, resume=True` → `n_trials=5, storage=None`
+- Updated markdown to reflect that key inference and validation data generation happen inside `optimize()`
+
+### Review CI checks (2026-03-15)
+PR #9 (stale revert) was already closed. CI passes on main (lint + test 3.11/3.12/3.13). No action needed.
+
+### Enhance code docs (2026-03-12)
+Added/enhanced module-level docstrings on all 42 .py files, all `build()` methods, private helpers, and design-decision comments. All 233 tests pass, ruff clean.
 
 ---
 

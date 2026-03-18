@@ -2,7 +2,7 @@
 
 Maps string names to callable metric functions.  Built-in metrics wrap
 BayesFlow diagnostics (ECE, RMSE, contraction, z-score, log-gamma);
-native metrics cover SBC rank tests (KS, chi-squared, C2ST), coverage,
+native metrics cover SBC rank tests (KS, chi-squared), coverage,
 bias, MAE, and correlation.  Users can register custom metrics via
 :func:`register_metric` and discover available metrics with
 :func:`describe_metrics`.

@@ -1,5 +1,13 @@
 # bayesflow-hpo
 
+## Source-Backed Implementation (MANDATORY)
+
+- EVERYTHING that is implemented must be theoretically backed by either a research article (accessed via full text) or package documentation.
+- If an article is not accessible, ask the user to find and download it. Do NOT proceed with unverified assumptions.
+- Do NOT blindly use in-memory knowledge from LLM training — verify against actual sources first.
+- Document the references backing a given implementation in docstrings and docs (e.g., API/architecture documentation).
+- Verify references via the OpenAlex API and save them formatted in APA 7 in [`docs/references.md`](docs/references.md).
+
 Generic hyperparameter optimization for BayesFlow 2.x models,
 wrapping Optuna multi-objective search with BayesFlow-aware
 search spaces, builders, and validation.
@@ -72,7 +80,7 @@ src/bayesflow_hpo/
 │   ├── inference.py    # make_bayesflow_infer_fn()
 │   ├── result.py       # ValidationResult dataclass
 │   ├── dry_run.py      # validate_once()
-│   └── sbc_tests.py    # SBC uniformity tests (KS, chi-squared, C2ST)
+│   └── sbc_tests.py    # SBC uniformity tests (KS, chi-squared)
 └── results/            # Post-optimization analysis + export
     ├── extraction.py   # trials_to_dataframe(), get_pareto_trials(), summarize_study()
     ├── export.py       # save/load_workflow_with_metadata(), get_workflow_metadata()
@@ -89,7 +97,11 @@ src/bayesflow_hpo/
 
 ## Project TODOs
 
-See [`dev/TODO.md`](dev/TODO.md) for open and completed project tasks.
+See [`docs/TODO.md`](docs/TODO.md) for open and completed project tasks.
+
+## References
+
+See [`docs/references.md`](docs/references.md) for verified APA 7 citations backing the implementation.
 
 ## Gotchas
 
