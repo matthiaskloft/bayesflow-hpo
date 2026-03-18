@@ -35,7 +35,6 @@ dev = [
     "ruff>=0.1.0",
     "mypy>=1.0",
 ]
-c2st = ["scikit-learn>=1.2"]
 dashboard = ["optuna-dashboard>=0.14"]
 
 [tool.setuptools.packages.find]

@@ -13,7 +13,6 @@ Tunes inference networks, summary networks, and training hyperparameters — so 
 
 ```bash
 pip install bayesflow-hpo            # core
-pip install bayesflow-hpo[c2st]      # + C2ST metric (requires scikit-learn)
 pip install bayesflow-hpo[dashboard] # + Optuna dashboard
 ```
 

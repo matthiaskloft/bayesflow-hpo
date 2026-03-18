@@ -100,23 +100,12 @@ instead of a clear "missing key" message.
 
 **Fix:** Validate all `data_keys` exist in `sim_data` before calling `sample()`.
 
-### 20. `sbc_tests.py` returns NaN silently when scikit-learn is missing
+### 20–21. Removed (sbc_c2st metric deleted)
 
-**File:** `validation/sbc_tests.py:66-70`
-
-**Issue:** C2ST returns `{"sbc_c2st_accuracy": NaN}` with no warning when
-`sklearn` is not installed.  Users may not realize the metric was skipped.
-
-**Fix:** Add a `logger.warning(...)` when sklearn is unavailable.
-
-### 21. `sbc_tests.py` uses deprecated `np.random.RandomState`
-
-**File:** `validation/sbc_tests.py:76`
-
-**Issue:** Uses `np.random.RandomState(random_state)` while the rest of the
-codebase uses `np.random.default_rng()`.
-
-**Fix:** Replace with `np.random.default_rng(random_state)` for consistency.
+Items 20 and 21 are no longer relevant — the `sbc_c2st` metric and
+`compute_sbc_c2st()` were removed because C2ST on 1D rank integers is
+redundant with KS and chi-squared tests (see dev/TODO.md for
+reimplementation plan).
 
 ### 22. `get_pareto_trials` / `summarize_study` no bounds check on `select_by`
 

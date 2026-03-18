@@ -182,6 +182,34 @@ def optimize(
     objective_metrics
         List of metric keys to optimize simultaneously.  Default
         ``["calibration_error", "nrmse"]``.
+
+        Built-in metrics (pass any of these as strings):
+
+        ================= ======================================
+        Name              Description
+        ================= ======================================
+        calibration_error Expected Calibration Error (ECE)
+        nrmse             Range-normalized RMSE
+        rmse              RMSE of posterior means
+        correlation       Pearson correlation (means vs true)
+        contraction       Posterior contraction (1=learned)
+        z_score           Posterior z-score (bias+calibration)
+        log_gamma         Log-gamma calibration diagnostic
+        coverage          Two-sided SBC rank coverage
+        coverage_left     Left-sided coverage (efficiency)
+        coverage_right    Right-sided coverage (futility)
+        sbc_ks            SBC KS statistic (minimize → 0)
+        sbc_chi2          SBC chi-squared stat (min → 0)
+        bias              Mean signed error
+        mae               Mean Absolute Error
+        ================= ======================================
+
+        Some metrics have aliases (e.g. ``"corr"`` for
+        ``"correlation"``).  Call :func:`describe_metrics` for the
+        full listing including aliases.
+
+        Use :func:`~bayesflow_hpo.list_metrics` for just the names,
+        or :func:`~bayesflow_hpo.register_metric` to add custom ones.
     objective_mode
         ``"pareto"`` (default) — each metric is its own objective;
         study has ``len(objective_metrics) + 1`` directions.

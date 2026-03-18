@@ -5,6 +5,7 @@ import pytest
 
 from bayesflow_hpo.validation.registry import (
     DEFAULT_METRICS,
+    describe_metrics,
     get_metric,
     list_metrics,
     make_coverage_metric,
@@ -17,7 +18,8 @@ def test_list_metrics_returns_builtin_names():
     names = list_metrics()
     assert "calibration_error" in names
     assert "coverage" in names
-    assert "sbc" in names
+    assert "sbc_ks" in names
+    assert "sbc_chi2" in names
     assert "bias" in names
     assert "mae" in names
     assert "correlation" in names
@@ -170,3 +172,100 @@ def test_correlation_metric_constant_true_values():
     fn = get_metric("correlation")
     result = fn(draws, true_values)
     assert result["correlation"] == 0.0
+
+
+# ---------------------------------------------------------------------------
+# describe_metrics
+# ---------------------------------------------------------------------------
+
+
+def test_describe_metrics_returns_all():
+    rows = describe_metrics()
+    names = {r["name"] for r in rows}
+    assert names == set(list_metrics())
+
+
+def test_describe_metrics_row_keys():
+    rows = describe_metrics()
+    expected = {"name", "aliases", "description", "kind", "requires"}
+    for row in rows:
+        assert set(row) == expected
+
+
+def test_describe_metrics_builtins_have_descriptions():
+    rows = describe_metrics()
+    for row in rows:
+        if not row["name"].startswith("_test"):
+            assert row["description"], f"missing description for {row['name']}"
+
+
+def test_describe_metrics_aliases_correct():
+    rows = {r["name"]: r for r in describe_metrics()}
+    assert "cal_error" in rows["calibration_error"]["aliases"]
+    assert "corr" in rows["correlation"]["aliases"]
+    assert rows["bias"]["aliases"] == ""
+
+
+def test_describe_metrics_renders():
+    rows = describe_metrics()
+    text = str(rows)
+    assert "Name" in text and "Description" in text
+    html = rows._repr_html_()
+    assert "<table>" in html and "</table>" in html
+
+
+def test_overwrite_clears_stale_aliases():
+    def dummy(d, t):
+        return {"v": 0.0}
+
+    register_metric(
+        "_test_alias_cleanup", dummy,
+        aliases=["_test_old_alias"],
+        overwrite=True,
+        description="original",
+    )
+    assert get_metric("_test_old_alias") is dummy
+
+    def dummy2(d, t):
+        return {"v": 1.0}
+
+    register_metric(
+        "_test_alias_cleanup", dummy2,
+        aliases=["_test_new_alias"],
+        overwrite=True,
+        description="replaced",
+    )
+    # Old alias should be gone
+    with pytest.raises(KeyError):
+        get_metric("_test_old_alias")
+    # New alias should work
+    assert get_metric("_test_new_alias") is dummy2
+
+
+def test_sbc_deprecated_shim():
+    import warnings
+
+    rng = np.random.default_rng(42)
+    draws = rng.normal(size=(100, 200))
+    true_values = rng.normal(size=100)
+
+    fn = get_metric("sbc")
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        result = fn(draws, true_values)
+        assert any("deprecated" in str(x.message).lower() for x in w)
+    assert "sbc_ks" in result
+    assert "sbc_chi2" in result
+
+
+def test_describe_metrics_kind_and_requires():
+    rows = {r["name"]: r for r in describe_metrics()}
+    # Objective metrics return a single scalar
+    assert rows["nrmse"]["kind"] == "objective"
+    assert rows["bias"]["kind"] == "objective"
+    assert rows["sbc_ks"]["kind"] == "objective"
+    # Diagnostic metrics return multiple sub-keys
+    assert rows["z_score"]["kind"] == "diagnostic"
+    assert rows["coverage"]["kind"] == "diagnostic"
+    # Dependency tracking
+    assert rows["nrmse"]["requires"] == ""

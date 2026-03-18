@@ -156,3 +156,10 @@ cython_debug/
 
 # Local data artifacts
 *.db
+
+# HPO checkpoints and model artifacts
+checkpoints/
+examples/checkpoints/
+*.weights.h5
+*.keras
+examples/quickstart_model.json

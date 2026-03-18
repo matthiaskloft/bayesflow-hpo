@@ -109,6 +109,7 @@ def trials_to_dataframe(
     trained_only: bool = True,
     include_pruned: bool = False,
     extra_attrs: list[str] | None = None,
+    include_ranks: bool = True,
 ) -> pd.DataFrame:
     """Convert study trials to a DataFrame.
 
@@ -129,6 +130,12 @@ def trials_to_dataframe(
     extra_attrs
         Additional trial user-attribute keys to include as columns
         (beyond :data:`DEFAULT_RESULT_ATTRS`).
+    include_ranks
+        If ``True`` (default), append rank columns derived from objective
+        values. For single-objective studies this adds ``"rank"``. For
+        multi-objective studies this adds one column per objective,
+        e.g. ``"rank_sbc_c2st"``, and ``"rank"`` as the rank for the
+        first objective.
     """
     obj_cols = _objective_column_names(study)
     attr_keys = list(DEFAULT_RESULT_ATTRS)
@@ -153,7 +160,31 @@ def trials_to_dataframe(
             records.append(
                 {"trial_number": trial.number, "pruned": True, **trial.params}
             )
-    return pd.DataFrame(records)
+    df = pd.DataFrame(records)
+
+    if include_ranks and not df.empty:
+        if len(obj_cols) == 1:
+            col = obj_cols[0]
+            if col in df.columns:
+                df["rank"] = df[col].rank(method="min", ascending=True)
+        else:
+            for col in obj_cols:
+                if col in df.columns:
+                    rank_col = f"rank_{col}"
+                    df[rank_col] = df[col].rank(method="min", ascending=True)
+
+            first_rank_col = f"rank_{obj_cols[0]}"
+            if first_rank_col in df.columns:
+                df["rank"] = df[first_rank_col]
+
+        if "rank" in df.columns:
+            df["rank"] = df["rank"].astype("Int64")
+        for col in obj_cols:
+            rank_col = f"rank_{col}"
+            if rank_col in df.columns:
+                df[rank_col] = df[rank_col].astype("Int64")
+
+    return df
 
 
 def _get_trained_trials(

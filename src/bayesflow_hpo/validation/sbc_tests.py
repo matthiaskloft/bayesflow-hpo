@@ -7,9 +7,6 @@ are uniformly distributed.  Three tests are provided:
 - **KS test**: Kolmogorov-Smirnov test against Uniform(0, 1).
 - **Chi-squared test**: Binned goodness-of-fit against uniform expected
   counts.  Skipped when bins have fewer than 5 expected observations.
-- **C2ST**: Classifier two-sample test using a random forest to
-  distinguish observed ranks from uniformly-generated ones.  An accuracy
-  near 0.5 indicates calibrated posteriors.
 """
 
 from __future__ import annotations
@@ -56,35 +53,3 @@ def compute_sbc_uniformity_tests(
     }
 
 
-def compute_sbc_c2st(
-    ranks: np.ndarray,
-    n_posterior_samples: int,
-    n_folds: int = 5,
-    random_state: int = 42,
-) -> dict[str, float]:
-    """Classifier two-sample test for SBC rank uniformity."""
-    try:
-        from sklearn.ensemble import RandomForestClassifier
-        from sklearn.model_selection import cross_val_score
-    except ImportError:
-        return {"sbc_c2st_accuracy": np.nan, "sbc_c2st_sd": np.nan}
-
-    n_sims = len(ranks)
-    if n_sims < 2 * n_folds:
-        return {"sbc_c2st_accuracy": np.nan, "sbc_c2st_sd": np.nan}
-
-    rng = np.random.RandomState(random_state)
-    uniform_ranks = rng.randint(0, n_posterior_samples + 1, size=n_sims)
-
-    x_data = np.concatenate([ranks, uniform_ranks]).reshape(-1, 1)
-    y = np.concatenate([np.ones(n_sims), np.zeros(n_sims)])
-
-    clf = RandomForestClassifier(
-        n_estimators=50, max_depth=5, random_state=random_state,
-    )
-    scores = cross_val_score(clf, x_data, y, cv=n_folds, scoring="accuracy")
-
-    return {
-        "sbc_c2st_accuracy": float(np.mean(scores)),
-        "sbc_c2st_sd": float(np.std(scores)),
-    }

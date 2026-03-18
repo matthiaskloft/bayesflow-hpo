@@ -111,7 +111,8 @@ These wrap `bf.diagnostics.*` functions, reshaping `(n_sims, n_samples)` to the 
 
 | Name | Description | Output Keys |
 |------|-------------|-------------|
-| `sbc` | SBC rank uniformity tests (KS, chi-squared, C2ST) | `sbc_ks_pvalue`, `sbc_chi2_pvalue`, `sbc_c2st_accuracy` |
+| `sbc_ks` | SBC KS statistic (minimize → 0 = uniform ranks) | `sbc_ks` |
+| `sbc_chi2` | SBC chi-squared statistic (minimize → 0 = uniform ranks) | `sbc_chi2` |
 | `coverage` | Two-sided SBC rank-based calibration | `coverage_50`, ..., `coverage_99`, `mean_cal_error` |
 | `coverage_left` | Left-sided coverage (efficiency for RCTs) | `left_coverage_50`, ..., `left_mean_cal_error` |
 | `coverage_right` | Right-sided coverage (futility for RCTs) | `right_coverage_50`, ..., `right_mean_cal_error` |
@@ -270,13 +271,3 @@ If the posterior is well-calibrated, SBC ranks should be uniform over `[0, n_pos
 
 Both return p-values; low p-values indicate miscalibration.
 
-### Classifier Two-Sample Test (C2ST)
-
-Requires `scikit-learn`. Trains a random forest to distinguish SBC ranks from uniform samples. Returns accuracy — values near 0.5 indicate good calibration.
-
-```python
-from bayesflow_hpo.validation.sbc_tests import compute_sbc_c2st
-
-result = compute_sbc_c2st(ranks, n_posterior_samples, n_folds=5)
-# {"sbc_c2st_accuracy": 0.52, "sbc_c2st_std": 0.03}
-```
