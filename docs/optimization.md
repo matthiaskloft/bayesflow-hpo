@@ -57,6 +57,25 @@ def my_train_fn(approximator, simulator, hparams, callbacks):
 config = ObjectiveConfig(..., train_fn=my_train_fn)
 ```
 
+#### Custom Validation Function
+
+`validate_fn` allows users to override the default validation pipeline. The signature is `(approximator, validation_data, n_posterior_samples) -> dict[str, float]`. The returned dict must include all keys listed in `objective_metrics`. When provided, `validate_fn` is also used for **intermediate validation** during training (via `PeriodicValidationCallback`), enabling mid-training pruning for custom approximator architectures.
+
+```python
+def my_validate_fn(approximator, validation_data, n_posterior_samples):
+    """Custom validation for per-item (IRT-style) posteriors."""
+    # ... sample from approximator, compute metrics ...
+    return {"calibration_error": cal_err, "correlation": corr}
+
+study = hpo.optimize(
+    ...,
+    validate_fn=my_validate_fn,
+    objective_metrics=["calibration_error", "correlation"],
+)
+```
+
+Without `validate_fn`, the default `run_validation_pipeline` is used for both final and intermediate validation. If the default pipeline cannot handle your approximator's output shapes (e.g., 3D per-item posteriors), intermediate validation will fail silently and pruning will be ineffective — providing a custom `validate_fn` is the fix.
+
 #### Training Failure Handling
 
 When training raises an exception, the objective:

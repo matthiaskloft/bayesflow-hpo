@@ -260,6 +260,39 @@ result = validate_once(
 
 Slices the first condition to `n_sims` rows and wraps any error with a descriptive message including `param_keys` and `data_keys`.
 
+## Custom Validation for Structured Posteriors
+
+The default `run_validation_pipeline` expects flat 2D posteriors `(batch, param_dim)`. For models with structured (e.g., per-item) posteriors of shape `(batch, n_samples, items)`, the default pipeline will fail because `bf.diagnostics.calibration_error` cannot broadcast the shapes.
+
+**Solution**: provide a custom `validate_fn` to `optimize()` that flattens the structured posteriors before computing metrics:
+
+```python
+def validate_irt(approximator, validation_data, n_posterior_samples):
+    metric_fns = resolve_metrics(["calibration_error", "correlation"])
+    all_rows = []
+
+    for raw_batch in validation_batches:
+        posterior = approximator.sample(conditions=raw_batch, num_samples=n_posterior_samples)
+
+        for param_key in ["a", "b"]:
+            true = np.asarray(raw_batch[param_key])            # (B, I)
+            draws = np.asarray(posterior[param_key])            # (B, n_samples, I)
+
+            # Flatten per-item: (B*I,) and (B*I, n_samples)
+            true_flat = true.reshape(-1)
+            draws_flat = np.moveaxis(draws, 1, -1).reshape(-1, draws.shape[1])
+
+            row = {}
+            for _name, fn in metric_fns.items():
+                row.update(fn(draws_flat, true_flat))
+            all_rows.append(row)
+
+    # Average across items and parameters
+    return {key: float(np.mean([r[key] for r in all_rows])) for key in ["calibration_error", "correlation"]}
+```
+
+This `validate_fn` is also used for intermediate validation during training (via `PeriodicValidationCallback`), enabling mid-training pruning for structured approximators.
+
 ## SBC Tests
 
 ### Rank Uniformity

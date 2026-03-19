@@ -584,6 +584,7 @@ class GenericObjective:
                     warmup=config.intermediate_validation_warmup,
                     n_posterior_samples=config.n_intermediate_posterior_samples,
                     n_startup_trials=config.pruning_n_startup_trials,
+                    validate_fn=config.validate_fn,
                 )
             )
 

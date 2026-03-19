@@ -22,6 +22,8 @@ import numpy as np
 import optuna
 from keras.callbacks import Callback
 
+from bayesflow_hpo.types import ValidateFn
+
 logger = logging.getLogger(__name__)
 
 # Metrics computed during intermediate validation (fast subset).
@@ -115,6 +117,14 @@ class PeriodicValidationCallback(Callback):
     n_startup_trials
         Minimum completed trials before multi-objective pruning
         activates.  Default 5.
+    validate_fn
+        Optional custom validation function with signature
+        ``(approximator, validation_data, n_posterior_samples) ->
+        dict[str, float]``.  When provided, replaces the default
+        ``run_validation_pipeline`` for intermediate pruning.  The
+        returned dict must contain ``"calibration_error"``; if it
+        also contains ``"nrmse"``, the pruning score uses their
+        geometric mean.
     """
 
     def __init__(
@@ -126,6 +136,7 @@ class PeriodicValidationCallback(Callback):
         warmup: int = 10,
         n_posterior_samples: int = 250,
         n_startup_trials: int = 5,
+        validate_fn: ValidateFn | None = None,
     ):
         super().__init__()
         self.trial = trial
@@ -135,6 +146,7 @@ class PeriodicValidationCallback(Callback):
         self.warmup = warmup
         self.n_posterior_samples = n_posterior_samples
         self.n_startup_trials = n_startup_trials
+        self.validate_fn = validate_fn
         self._step = 0  # monotonic step counter for Optuna
         self._consecutive_failures = 0
         self._is_multi_objective = len(trial.study.directions) > 1
@@ -186,17 +198,25 @@ class PeriodicValidationCallback(Callback):
     def _run_lightweight_validation(self) -> float | None:
         """Compute geometric mean of nrmse and calibration_error."""
         try:
-            from bayesflow_hpo.validation.pipeline import run_validation_pipeline
+            if self.validate_fn is not None:
+                result_dict = self.validate_fn(
+                    self.approximator,
+                    self.validation_data,
+                    self.n_posterior_samples,
+                )
+                cal_err = result_dict.get("calibration_error")
+                nrmse = result_dict.get("nrmse")
+            else:
+                from bayesflow_hpo.validation.pipeline import run_validation_pipeline
 
-            result = run_validation_pipeline(
-                approximator=self.approximator,
-                validation_data=self.validation_data,
-                n_posterior_samples=self.n_posterior_samples,
-                metrics=_INTERMEDIATE_METRICS,
-            )
-
-            cal_err = result.summary.get("calibration_error")
-            nrmse = result.summary.get("nrmse")
+                result = run_validation_pipeline(
+                    approximator=self.approximator,
+                    validation_data=self.validation_data,
+                    n_posterior_samples=self.n_posterior_samples,
+                    metrics=_INTERMEDIATE_METRICS,
+                )
+                cal_err = result.summary.get("calibration_error")
+                nrmse = result.summary.get("nrmse")
 
             if cal_err is not None and nrmse is not None:
                 # Geometric mean — both should be positive.
