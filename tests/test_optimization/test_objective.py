@@ -985,3 +985,42 @@ def test_objective_validation_failure_without_training_loss_sets_penalty_attr(
     # No training loss available → full penalty
     assert values == (FAILED_TRIAL_CAL_ERROR, FAILED_TRIAL_CAL_ERROR, FAILED_TRIAL_COST)
     assert trial.user_attrs["validation_fallback"] == "penalty"
+
+
+# --- _training_loss_fallback edge-case tests ---
+
+
+def _single_metric_pareto_fallback(loss):
+    """Call _training_loss_fallback with 1 pareto metric and param_count cost."""
+    return _training_loss_fallback(
+        best_training_loss=loss,
+        objective_metrics=["calibration_error"],
+        objective_mode="pareto",
+        param_count=50_000,
+        max_param_count=1_000_000,
+        cost_metric="param_count",
+        penalty=(1.0, 1e6),
+    )
+
+
+def test_training_loss_fallback_clamps_negative():
+    """Negative training loss is clamped to 0.0."""
+    assert _single_metric_pareto_fallback(-0.5)[0] == pytest.approx(0.0)
+
+
+def test_training_loss_fallback_exact_zero():
+    """Training loss of exactly 0.0 passes through unchanged."""
+    assert _single_metric_pareto_fallback(0.0)[0] == pytest.approx(0.0)
+
+
+def test_training_loss_fallback_exact_one():
+    """Training loss of exactly 1.0 passes through unchanged."""
+    assert _single_metric_pareto_fallback(1.0)[0] == pytest.approx(1.0)
+
+
+def test_training_loss_fallback_single_metric_pareto():
+    """Pareto mode with 1 metric returns (clamped_loss, cost_score)."""
+    values = _single_metric_pareto_fallback(0.25)
+    assert len(values) == 2
+    assert values[0] == pytest.approx(0.25)
+    assert 0.0 < values[1] < 1e6  # normalized param count

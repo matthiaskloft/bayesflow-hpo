@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import numpy as np
+import pytest
 from conftest import DummySimulator
 
 from bayesflow_hpo.validation.data import (
@@ -44,6 +45,32 @@ def test_make_condition_grid_combined():
     assert "group" in grid
     assert len(grid["N"]) == 3
     assert len(grid["group"]) == 2
+
+
+def test_make_condition_grid_all_modes():
+    """All three modes (linspace + logspace + values) combined."""
+    grid = make_condition_grid(
+        linspace={"N": (10, 50, 3)},
+        logspace={"lr": (1e-4, 1e-1, 4)},
+        values={"method": ["A", "B"]},
+    )
+    assert len(grid) == 3
+    assert len(grid["N"]) == 3
+    assert len(grid["lr"]) == 4
+    assert grid["method"] == ["A", "B"]
+
+
+def test_make_condition_grid_all_none():
+    """All parameters omitted returns empty dict."""
+    grid = make_condition_grid()
+    assert grid == {}
+
+
+def test_make_condition_grid_single_point():
+    """n=1 produces a single-element list."""
+    grid = make_condition_grid(linspace={"x": (5.0, 5.0, 1)})
+    assert len(grid["x"]) == 1
+    assert abs(grid["x"][0] - 5.0) < 1e-9
 
 
 def test_make_validation_dataset():
@@ -104,3 +131,67 @@ def test_validation_dataset_round_trip(tmp_path: Path):
             loaded.simulations[idx]["x"],
             dataset.simulations[idx]["x"],
         )
+
+
+def test_load_validation_dataset_missing_dir(tmp_path: Path):
+    """Raises FileNotFoundError for a nonexistent path."""
+    with pytest.raises(FileNotFoundError, match="not found"):
+        load_validation_dataset(tmp_path / "nonexistent")
+
+
+def test_validation_dataset_round_trip_preserves_sim_time(tmp_path: Path):
+    """save/load round-trip preserves sim_time_per_sim."""
+    simulator = DummySimulator()
+    dataset = generate_validation_dataset(
+        simulator=simulator,
+        param_keys=["theta"],
+        data_keys=["x"],
+        condition_grid=None,
+        sims_per_condition=5,
+        seed=42,
+    )
+    # Ensure sim_time_per_sim was set during generation
+    assert dataset.sim_time_per_sim is not None
+
+    save_validation_dataset(dataset, tmp_path)
+    loaded = load_validation_dataset(tmp_path)
+
+    assert loaded.sim_time_per_sim is not None
+    assert abs(loaded.sim_time_per_sim - dataset.sim_time_per_sim) < 1e-9
+
+
+def test_validation_dataset_round_trip_multi_key(tmp_path: Path):
+    """Dataset with multiple param/data keys round-trips correctly."""
+
+    class MultiKeySimulator:
+        def sample(self, n_sims, conditions=None, seed=None):
+            rng = np.random.default_rng(seed)
+            return {
+                "alpha": rng.normal(size=(n_sims, 2)),
+                "beta": rng.normal(size=(n_sims, 3)),
+                "x": rng.normal(size=(n_sims, 4)),
+                "y": rng.normal(size=(n_sims, 5)),
+            }
+
+    dataset = generate_validation_dataset(
+        simulator=MultiKeySimulator(),
+        param_keys=["alpha", "beta"],
+        data_keys=["x", "y"],
+        condition_grid={"N": [10, 20]},
+        sims_per_condition=5,
+        seed=7,
+    )
+
+    save_validation_dataset(dataset, tmp_path)
+    loaded = load_validation_dataset(tmp_path)
+
+    assert loaded.param_keys == ["alpha", "beta"]
+    assert loaded.data_keys == ["x", "y"]
+    assert len(loaded.simulations) == 2
+
+    for idx in range(len(dataset.simulations)):
+        for key in ["alpha", "beta", "x", "y"]:
+            assert np.array_equal(
+                loaded.simulations[idx][key],
+                dataset.simulations[idx][key],
+            )
