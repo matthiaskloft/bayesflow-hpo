@@ -38,6 +38,14 @@ Deb, K., Pratap, A., Agarwal, S., & Meyarivan, T. (2002). A fast and elitist
   Evolutionary Computation*, *6*(2), 182–197.
   https://doi.org/10.1109/4235.996017
 
+Emmerich, M. T. M., & Deutz, A. H. (2018). A tutorial on multiobjective
+  optimization: Fundamentals and evolutionary methods. *Natural Computing*,
+  *17*(3), 585–609. https://doi.org/10.1007/s11047-018-9685-y
+
+Li, L., Jamieson, K., DeSalvo, G., Rostamizadeh, A., & Talwalkar, A. (2018).
+  Hyperband: A novel bandit-based approach to hyperparameter optimization.
+  *Journal of Machine Learning Research*, *18*(185), 1–52.
+
 Linhart, J., Gramfort, A., & Rodrigues, P. L. C. (2023). L-C2ST: Local
   diagnostics for posterior approximations in simulation-based inference. In
   *Advances in Neural Information Processing Systems 36*.
@@ -52,6 +60,10 @@ Lueckmann, J.-M., Boelts, J., Greenberg, D. S., Gonçalves, P. J., & Macke,
   the 24th International Conference on Artificial Intelligence and Statistics*,
   PMLR 130, pp. 343–351.
   https://proceedings.mlr.press/v130/lueckmann21a.html
+
+Schmucker, R., Donini, M., Zafar, M. B., Salinas, D., & Archambeau, C.
+  (2021). Multi-objective asynchronous successive halving. *arXiv preprint*.
+  https://doi.org/10.48550/arxiv.2106.12639
 
 ## Summaries
 
@@ -115,6 +127,17 @@ crowding-distance-based selection operator that combines parent and offspring
 populations. Finds better spread and convergence on the Pareto front than
 PAES and SPEA. Extends dominance for constrained multi-objective problems.
 
+### Emmerich & Deutz (2018) — MOO tutorial
+*Source: full text (25 pages)*
+
+Tutorial on multiobjective optimization fundamentals. Definition 5: formal
+Pareto dominance. Equations 3–4: non-dominated sorting as recursive extraction
+of non-dominated layers. Proposition 7: Θ(n²) complexity for finding
+non-dominated elements. Proposition 9: linear scalarization can only find
+solutions on convex Pareto fronts — non-convex regions are unreachable. Covers
+NSGA-II (Section 6.1), indicator-based (SMS-EMOA), and decomposition-based
+(MOEA/D) approaches.
+
 ### Deb & Jain (2014) — NSGA-III
 *Source: abstract (IEEE TEVC, vol. 18, no. 4)*
 
@@ -135,6 +158,17 @@ per-observation diagnostics using only joint samples p(θ, x). For
 normalizing-flow-based posteriors, achieves better statistical power and
 computational efficiency than standard C2ST. Matches global C2ST
 performance and outperforms HPD coverage tests on SBI benchmarks.
+
+### Li et al. (2018) — Hyperband
+*Source: full text (all 52 pages)*
+
+Proposes Hyperband, combining random search with adaptive resource allocation
+via Successive Halving. Algorithm 1: outer loop over brackets s=smax..0, inner
+SHA with ni=⌊n·η^(-i)⌋ survivors per round. Default η=3 (Section 3.6: "in
+practice we suggest taking η to be equal to 3 or 4"; theoretical optimum
+η=e≈2.718). smax=⌊log_η(R)⌋ brackets, B=(smax+1)·R budget. Over 20× faster
+than random search on deep learning benchmarks. Section 6 suggests
+quasi-random (Sobol) sampling as a promising extension.
 
 ### López-Paz & Oquab (2017) — C2ST
 *Source: abstract (arXiv 1610.06545)*
@@ -157,6 +191,18 @@ efficiency; no uniformly best algorithm exists; even state-of-the-art methods
 have substantial room for improvement. Provides practical guidance and an
 interactive companion website for exploring results.
 
+### Schmucker et al. (2021) — MO-ASHA
+*Source: full text (19 pages)*
+
+Extends ASHA to multi-objective settings. Proposes two families of candidate
+selection: scalarization-based (RW, ParEGO, Golovin) and dominance-based
+(NSGA-II, EpsNet). Algorithm 1 defines `non_dom_sorting` + selectors;
+Algorithm 2 defines async MO-ASHA with default η=3 and promotion rule
+`mo_selector(rung k, |rung k|/η)`. Key finding: dominance-based approaches
+"consistently outperform multi-fidelity HPO based on MO scalarization" —
+scalarization tends to focus on one objective and can be worse than random
+search. Evaluated on NAS-201, Adult fairness, Wikitext2.
+
 ## Index by Topic
 
 ### Optuna Framework
@@ -169,6 +215,15 @@ interactive companion website for exploring results.
 - **qNEHVI**: Daulton et al. (2021)
 - **NSGA-II**: Deb et al. (2002)
 - **NSGA-III**: Deb & Jain (2014)
+
+### Pruning Strategies
+- **MO-ASHA**: Schmucker et al. (2021)
+- **Hyperband / Successive Halving**: Li et al. (2018)
+- **MedianPruner**: Akiba et al. (2019)
+
+### Multi-Objective Optimization
+- **Tutorial/Fundamentals**: Emmerich & Deutz (2018)
+- **NSGA-II**: Deb et al. (2002)
 
 ### Validation Metrics
 - **Global C2ST** (requires reference posterior): López-Paz & Oquab (2017)
