@@ -190,9 +190,16 @@ class ObjectiveConfig:
     intermediate_validation_warmup
         Skip the first *n* epochs before intermediate validation
         (default 10).
+    pruning_strategy
+        Multi-objective pruning strategy.  One of ``"dominance"``
+        (default), ``"mo-sha"``, ``"primary"``, or ``"none"``.
+        For ``"primary"``, pass a tuple ``("primary", metric_name)``.
+        See :mod:`~bayesflow_hpo.optimization.pruning_strategies`.
     pruning_n_startup_trials
         Minimum completed trials before multi-objective pruning
-        activates (default 5).
+        activates.  ``None`` (default) → auto-detected from the
+        sampler's ``n_startup_trials`` attribute (25 for TPE, fallback
+        10).  Explicit ``int`` overrides auto-detection.
     objective_metrics
         List of metric keys to optimize simultaneously.
         Default ``["calibration_error", "nrmse"]``.
@@ -250,7 +257,8 @@ class ObjectiveConfig:
     n_intermediate_posterior_samples: int = 250
     intermediate_validation_interval: int = 10
     intermediate_validation_warmup: int = 10
-    pruning_n_startup_trials: int = 5
+    pruning_strategy: str | tuple[str, str] = "dominance"
+    pruning_n_startup_trials: int | None = None
     objective_metrics: list[str] = field(
         default_factory=lambda: ["calibration_error", "nrmse"]
     )
@@ -282,6 +290,32 @@ class ObjectiveConfig:
         if self.report_frequency < 1:
             raise ValueError(
                 f"report_frequency must be >= 1, got {self.report_frequency}."
+            )
+        # Validate pruning_strategy.
+        _valid = {"none", "dominance", "mo-sha", "primary"}
+        if isinstance(self.pruning_strategy, tuple):
+            if (
+                len(self.pruning_strategy) != 2
+                or self.pruning_strategy[0] != "primary"
+            ):
+                raise ValueError(
+                    f"Tuple pruning_strategy must be "
+                    f"('primary', metric_name), "
+                    f"got {self.pruning_strategy!r}"
+                )
+        elif self.pruning_strategy not in _valid:
+            raise ValueError(
+                f"Unknown pruning_strategy: {self.pruning_strategy!r}. "
+                f"Expected one of {sorted(_valid)}."
+            )
+        # Validate pruning_n_startup_trials.
+        if (
+            self.pruning_n_startup_trials is not None
+            and self.pruning_n_startup_trials < 0
+        ):
+            raise ValueError(
+                f"pruning_n_startup_trials must be >= 0, "
+                f"got {self.pruning_n_startup_trials}."
             )
 
 
@@ -592,22 +626,31 @@ class GenericObjective:
             ),
         ]
 
-        from bayesflow_hpo.optimization.validation_callback import (
-            PeriodicValidationCallback,
+        # Resolve pruning strategy name for the "none" check.
+        _strategy = (
+            config.pruning_strategy[0]
+            if isinstance(config.pruning_strategy, tuple)
+            else config.pruning_strategy
         )
-
-        callbacks.append(
-            PeriodicValidationCallback(
-                trial=trial,
-                approximator=approximator,
-                validation_data=config.validation_data,
-                interval=config.intermediate_validation_interval,
-                warmup=config.intermediate_validation_warmup,
-                n_posterior_samples=config.n_intermediate_posterior_samples,
-                n_startup_trials=config.pruning_n_startup_trials,
-                validate_fn=config.validate_fn,
+        if _strategy != "none":
+            from bayesflow_hpo.optimization.validation_callback import (
+                PeriodicValidationCallback,
             )
-        )
+
+            callbacks.append(
+                PeriodicValidationCallback(
+                    trial=trial,
+                    approximator=approximator,
+                    validation_data=config.validation_data,
+                    interval=config.intermediate_validation_interval,
+                    warmup=config.intermediate_validation_warmup,
+                    n_posterior_samples=config.n_intermediate_posterior_samples,
+                    n_startup_trials=config.pruning_n_startup_trials,
+                    validate_fn=config.validate_fn,
+                    pruning_strategy=config.pruning_strategy,
+                    objective_metrics=config.objective_metrics,
+                )
+            )
 
         # --- Step 7: TRAIN ---
         t_train_start = time.perf_counter()
