@@ -3,19 +3,29 @@
 Tracked items for ongoing development. Updated by contributors and Claude Code sessions.
 
 Items are grouped into packages of related work that should be shipped together.
-Suggested execution order: C → D → A → B → G → E → H → I.
+Suggested execution order: C → D → A → B → G → E → H → I → J.
+Package I (small API fixes) can be done at any time independently.
 
 ## Open
 
-### Package C: API Consolidation & Usability
+### Package C: API Consolidation & Search Space Simplification
 
-Naming alignment, explicit key overrides, and silent-failure fixes are all
-about the public API surface.
+**Spec:** [`docs/spec-api-consolidation.md`](spec-api-consolidation.md)
 
-#### Consolidate API naming against BayesFlow
+Two main changes:
 
-Align parameter/method names with BayesFlow 2.x conventions.
-Example: `batches_per_epoch` → `num_batches`.
+1. **API naming consolidation** — `batches_per_epoch` → `num_batches`
+   (clean break, fixes BF 2.0.8 `default_train_fn` bug), plus 6
+   dimension name expansions to match BayesFlow kwarg names.
+2. **Search space simplification** — Replace `enabled` / `include_optional`
+   with a `constant` field on dimensions. Add `.constants` property.
+   Remove conditional `if key in params` logic in `build()` methods.
+
+---
+
+### Package I: Small API Fixes
+
+Standalone fixes that don't depend on Package C.
 
 #### Accept explicit `param_keys`/`data_keys` in optimize() (#5)
 
@@ -40,32 +50,6 @@ Document the intended invariant and add a guard for
 `inference.py` silently skips missing data keys via dict comprehension.
 Validate all `data_keys` exist in `sim_data` before calling `sample()`.
 **File:** `validation/inference.py:32`
-
-#### Review: search space fixed-value and optional-inclusion pathways
-
-Review the multiple ways users can fix hyperparameters or make them
-optional in search spaces, and determine if simplification is needed:
-
-- **Fixed values via single-point ranges** — e.g., `FloatDimension(low=0.1, high=0.1)`
-  collapses to a constant. Works but non-obvious.
-- **Fixed values via `__post_init__` overrides** — subclass sets a field
-  to a concrete value, removing it from the search.
-- **Optional parameter inclusion** — `include_X: bool = True` fields on
-  search spaces that toggle whether a dimension is sampled or uses a
-  default. Multiple patterns exist across spaces.
-- **CompositeSearchSpace assembly** — users compose sub-spaces, choosing
-  which to include.
-
-Concerns:
-- Too many pathways to achieve the same goal (fixing a hyperparameter)
-- `include_X` pattern may be confusing alongside single-point ranges
-- Not clear which approach is idiomatic or recommended
-
-**Decision needed:** simplify to fewer, well-documented pathways, or
-keep all and add a "How to fix hyperparameters" guide. Audit all
-search spaces for consistency.
-**Files:** `search_spaces/base.py`, `search_spaces/training.py`,
-all files under `search_spaces/inference/` and `search_spaces/summary/`
 
 ---
 
