@@ -19,8 +19,8 @@ from bayesflow_hpo.search_spaces.base import (
 class SetTransformerSpace(BaseSearchSpace):
     """Search space for `bf.networks.SetTransformer`.
 
-    Default dimensions
-    ------------------
+    Default dimensions (tuned)
+    --------------------------
     st_summary_dim : int
         Output summary dimensionality (8--64, step 8).
     st_embed_dim : int
@@ -32,14 +32,15 @@ class SetTransformerSpace(BaseSearchSpace):
     st_dropout : float
         Dropout rate (0.0--0.3).
 
-    Optional dimensions (enabled via ``include_optional=True``)
-    -----------------------------------------------------------
+    Fixed dimensions (widen to tune)
+    --------------------------------
     st_mlp_width : int
-        Feed-forward MLP width (64--512, step 64).
+        Feed-forward MLP width. Fixed at ``128``.
     st_mlp_depth : int
-        Feed-forward MLP depth (1--4).
-    st_num_inducing : int
-        Number of inducing points for ISAB (8--64, step 8).
+        Feed-forward MLP depth. Fixed at ``2``.
+    st_num_inducing_points : int
+        Number of inducing points for ISAB. Fixed at ``None``
+        (disabled by default in BayesFlow).
     """
 
     summary_dim: IntDimension = field(
@@ -59,29 +60,20 @@ class SetTransformerSpace(BaseSearchSpace):
     dropout: FloatDimension = field(
         default_factory=lambda: FloatDimension("st_dropout", low=0.0, high=0.3)
     )
-
     mlp_width: IntDimension = field(
-        default_factory=lambda: IntDimension(
-            "st_mlp_width", low=64, high=512, step=64, enabled=False
-        )
+        default_factory=lambda: IntDimension("st_mlp_width", constant=128)
     )
     mlp_depth: IntDimension = field(
-        default_factory=lambda: IntDimension(
-            "st_mlp_depth", low=1, high=4, enabled=False
-        )
+        default_factory=lambda: IntDimension("st_mlp_depth", constant=2)
     )
     num_inducing: IntDimension = field(
         default_factory=lambda: IntDimension(
-            "st_num_inducing", low=8, high=64, step=8, enabled=False
+            "st_num_inducing_points", constant=None
         )
     )
 
     def build(self, params: dict[str, Any]) -> bf.networks.SetTransformer:
         """Construct a ``bf.networks.SetTransformer`` from sampled parameters.
-
-        Uses uniform embed_dim and num_heads across all layers.
-        BayesFlow expects per-layer tuples, so the scalar values are
-        replicated to ``num_layers`` length.
 
         Parameters
         ----------
@@ -98,27 +90,19 @@ class SetTransformerSpace(BaseSearchSpace):
         num_layers = int(params["st_num_layers"])
         embed_dim = int(params["st_embed_dim"])
         num_heads = int(params["st_num_heads"])
+        mlp_width = int(params["st_mlp_width"])
+        mlp_depth = int(params["st_mlp_depth"])
 
-        # BayesFlow expects per-layer tuples; we replicate uniform values.
         kwargs: dict[str, Any] = {
             "summary_dim": int(params["st_summary_dim"]),
             "embed_dims": tuple([embed_dim] * num_layers),
             "num_heads": tuple([num_heads] * num_layers),
             "dropout": float(params["st_dropout"]),
+            "mlp_widths": tuple([mlp_width] * num_layers),
+            "mlp_depths": tuple([mlp_depth] * num_layers),
         }
-        if "st_mlp_width" in params:
-            mlp_width = int(params["st_mlp_width"])
-            kwargs["mlp_widths"] = tuple(
-                [mlp_width] * num_layers
-            )
-        if "st_mlp_depth" in params:
-            mlp_depth = int(params["st_mlp_depth"])
-            kwargs["mlp_depths"] = tuple(
-                [mlp_depth] * num_layers
-            )
-        if "st_num_inducing" in params:
-            kwargs["num_inducing_points"] = int(
-                params["st_num_inducing"]
-            )
+        num_inducing = params["st_num_inducing_points"]
+        if num_inducing is not None:
+            kwargs["num_inducing_points"] = int(num_inducing)
 
         return bf.networks.SetTransformer(**kwargs)

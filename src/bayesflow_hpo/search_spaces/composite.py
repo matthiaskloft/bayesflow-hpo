@@ -44,13 +44,22 @@ class CompositeSearchSpace:
     summary_space: SearchSpace | None = None
     training_space: TrainingSpace = field(default_factory=TrainingSpace)
 
+    @property
+    def constants(self) -> dict[str, Any]:
+        """Return merged constants from all sub-spaces."""
+        result: dict[str, Any] = {}
+        if hasattr(self.inference_space, "constants"):
+            result.update(self.inference_space.constants)
+        if self.summary_space is not None and hasattr(
+            self.summary_space, "constants"
+        ):
+            result.update(self.summary_space.constants)
+        if hasattr(self.training_space, "constants"):
+            result.update(self.training_space.constants)
+        return result
+
     def sample(self, trial: Any) -> dict[str, Any]:
         """Sample hyperparameters from all sub-spaces into one dict.
-
-        Training defaults (e.g. ``batch_size=256``) are applied first,
-        then overwritten by any actively-tuned training dimensions.
-        This ensures every downstream consumer always sees a complete
-        parameter dict.
 
         Parameters
         ----------
@@ -65,11 +74,7 @@ class CompositeSearchSpace:
         params = self.inference_space.sample(trial)
         if self.summary_space is not None:
             params.update(self.summary_space.sample(trial))
-
-        # Apply training defaults first, then overwrite with tuned values.
-        training_params = self.training_space.sample(trial)
-        params.update(self.training_space.defaults())
-        params.update(training_params)
+        params.update(self.training_space.sample(trial))
         return params
 
 

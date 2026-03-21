@@ -14,7 +14,7 @@ class ObjectiveConfig:
     search_space: CompositeSearchSpace
     validation_data: ValidationDataset | None = None
     epochs: int = 200
-    batches_per_epoch: int = 50
+    num_batches: int = 50
     early_stopping_patience: int = 5
     early_stopping_window: int = 7
     max_param_count: int = 1_000_000
@@ -42,14 +42,14 @@ class ObjectiveConfig:
 
 #### Custom Training Function
 
-`train_fn` allows users to override the default training loop. The signature is `(approximator, simulator, hparams, callbacks) -> None`. When `None`, the objective uses `approximator.fit(simulator=..., epochs=..., batches_per_epoch=..., ...)`. Example:
+`train_fn` allows users to override the default training loop. The signature is `(approximator, simulator, hparams, callbacks) -> None`. When `None`, the objective uses `approximator.fit(simulator=..., epochs=..., num_batches=..., ...)`. Example:
 
 ```python
 def my_train_fn(approximator, simulator, hparams, callbacks):
     approximator.fit(
         simulator=simulator,
         epochs=int(hparams["epochs"]),
-        num_batches=int(hparams["batches_per_epoch"]),  # for BF versions expecting num_batches
+        num_batches=int(hparams["num_batches"]),  # for BF versions expecting num_batches
         batch_size=int(hparams.get("batch_size", 256)),
         callbacks=callbacks,
     )
@@ -209,14 +209,14 @@ workflow = build_workflow(
     summary_network=summary_net,
     params=params,
     config=WorkflowBuildConfig(
-        batches_per_epoch=50,
+        num_batches=50,
         optimizer=None,  # or a custom keras optimizer
     ),
 )
 ```
 
 When `config.optimizer` is `None`, an `ExponentialDecay + Adam` schedule is created:
-- `decay_steps = max(1, config.batches_per_epoch)` — decays once per epoch
+- `decay_steps = max(1, config.num_batches)` — decays once per epoch
 - `decay_rate` from `params.get("decay_rate", 0.95)`
 - `staircase=True`
 

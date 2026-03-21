@@ -19,8 +19,8 @@ from bayesflow_hpo.search_spaces.base import (
 class DeepSetSpace(BaseSearchSpace):
     """Search space for `bf.networks.DeepSet`.
 
-    Default dimensions
-    ------------------
+    Default dimensions (tuned)
+    --------------------------
     ds_summary_dim : int
         Output summary dimensionality (4--64, step 4).
     ds_depth : int
@@ -30,16 +30,16 @@ class DeepSetSpace(BaseSearchSpace):
     ds_dropout : float
         Dropout rate (0.0--0.3).
 
-    Optional dimensions (enabled via ``include_optional=True``)
-    -----------------------------------------------------------
+    Fixed dimensions (widen to tune)
+    --------------------------------
     ds_activation : str
-        Activation function. Falls back to BayesFlow default ``"silu"``.
-    ds_spectral_norm : bool
-        Whether to apply spectral normalization. Falls back to ``False``.
+        Activation function. Fixed at ``"silu"``.
+    ds_spectral_normalization : bool
+        Spectral normalization. Fixed at ``False``.
     ds_inner_pooling : str
-        Inner pooling strategy (``"mean"`` or ``"max"``).
+        Inner pooling strategy. Fixed at ``"mean"``.
     ds_output_pooling : str
-        Output pooling strategy (``"mean"`` or ``"max"``).
+        Output pooling strategy. Fixed at ``"mean"``.
 
     Architecture notes
     ------------------
@@ -60,34 +60,29 @@ class DeepSetSpace(BaseSearchSpace):
     dropout: FloatDimension = field(
         default_factory=lambda: FloatDimension("ds_dropout", low=0.0, high=0.3)
     )
-
     activation: CategoricalDimension = field(
         default_factory=lambda: CategoricalDimension(
-            "ds_activation", choices=["silu", "mish"], enabled=False
+            "ds_activation", constant="silu"
         )
     )
     spectral_norm: CategoricalDimension = field(
         default_factory=lambda: CategoricalDimension(
-            "ds_spectral_norm", choices=[True, False], enabled=False
+            "ds_spectral_normalization", constant=False
         )
     )
     inner_pooling: CategoricalDimension = field(
         default_factory=lambda: CategoricalDimension(
-            "ds_inner_pooling", choices=["mean", "max"], enabled=False
+            "ds_inner_pooling", constant="mean"
         )
     )
     output_pooling: CategoricalDimension = field(
         default_factory=lambda: CategoricalDimension(
-            "ds_output_pooling", choices=["mean", "max"], enabled=False
+            "ds_output_pooling", constant="mean"
         )
     )
 
     def build(self, params: dict[str, Any]) -> bf.networks.DeepSet:
         """Construct a ``bf.networks.DeepSet`` from sampled parameters.
-
-        The MLP architecture uses a uniform ``width`` for all sub-MLPs
-        except ``invariant_outer``, which uses ``(width, summary_dim)``
-        as a bottleneck to match BayesFlow's default architecture.
 
         Parameters
         ----------
@@ -103,25 +98,17 @@ class DeepSetSpace(BaseSearchSpace):
 
         width = int(params["ds_width"])
         summary_dim = int(params["ds_summary_dim"])
-        kwargs: dict[str, Any] = {
-            "summary_dim": summary_dim,
-            "depth": int(params["ds_depth"]),
-            "mlp_widths_equivariant": (width, width),
-            "mlp_widths_invariant_inner": (width, width),
-            # Outer MLP narrows to summary_dim — acts as a bottleneck.
-            "mlp_widths_invariant_outer": (width, summary_dim),
-            "mlp_widths_invariant_last": (width, width),
-            "dropout": float(params["ds_dropout"]),
-        }
-        if "ds_activation" in params:
-            kwargs["activation"] = params["ds_activation"]
-        if "ds_spectral_norm" in params:
-            kwargs["spectral_normalization"] = bool(
-                params["ds_spectral_norm"]
-            )
-        if "ds_inner_pooling" in params:
-            kwargs["inner_pooling"] = params["ds_inner_pooling"]
-        if "ds_output_pooling" in params:
-            kwargs["output_pooling"] = params["ds_output_pooling"]
 
-        return bf.networks.DeepSet(**kwargs)
+        return bf.networks.DeepSet(
+            summary_dim=summary_dim,
+            depth=int(params["ds_depth"]),
+            mlp_widths_equivariant=(width, width),
+            mlp_widths_invariant_inner=(width, width),
+            mlp_widths_invariant_outer=(width, summary_dim),
+            mlp_widths_invariant_last=(width, width),
+            dropout=float(params["ds_dropout"]),
+            activation=params["ds_activation"],
+            spectral_normalization=bool(params["ds_spectral_normalization"]),
+            inner_pooling=params["ds_inner_pooling"],
+            output_pooling=params["ds_output_pooling"],
+        )

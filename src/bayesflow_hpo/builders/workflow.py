@@ -3,7 +3,7 @@
 Builds a ``ContinuousApproximator`` for a single HPO trial from the
 sampled hyperparameters.  The optimizer helper uses **Adam with
 CosineDecay**, which decays the learning rate from ``initial_lr`` to
-near-zero over the full training budget (``epochs * batches_per_epoch``
+near-zero over the full training budget (``epochs * num_batches``
 steps).
 """
 
@@ -32,7 +32,7 @@ def _make_cosine_decay_optimizer(
     initial_lr
         Peak learning rate.
     decay_steps
-        Total steps over which to decay (``epochs * batches_per_epoch``).
+        Total steps over which to decay (``epochs * num_batches``).
     """
     lr_schedule = keras.optimizers.schedules.CosineDecay(
         initial_learning_rate=initial_lr,

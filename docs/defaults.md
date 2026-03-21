@@ -14,7 +14,7 @@ objects (e.g. `ObjectiveConfig`, `create_study`) directly.
 | `n_trials` | **50** | Number of *trained* trials to collect (budget-rejected trials don't count). |
 | `max_total_trials` | **3 &times; n_trials** | Hard cap on total trials including budget-rejected. |
 | `epochs` | **200** | Maximum training epochs per trial. |
-| `batches_per_epoch` | **50** | Online simulation batches per epoch. |
+| `num_batches` | **50** | Online simulation batches per epoch. |
 | `max_param_count` | **1 000 000** | Trials exceeding this estimated param count are rejected. |
 | `max_memory_mb` | **None** (disabled) | Peak-memory budget in MB (disabled by default). |
 | `objective_metric` | **`"calibration_error"`** | Key in the validation summary used as the first HPO objective. Ignored when `objective_metrics` is set. |

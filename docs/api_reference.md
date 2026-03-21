@@ -18,7 +18,7 @@ def optimize(
     # Objectives
     objective_metrics=None, objective_mode="pareto", cost_metric="inference_time",
     # Training
-    epochs=200, batches_per_epoch=50,
+    epochs=200, num_batches=50,
     early_stopping_patience=5, early_stopping_window=7,
     # Budget
     max_param_count=1_000_000, max_memory_mb=None,
@@ -46,7 +46,7 @@ def optimize(
 | `objective_mode` | `"pareto"` (default) — each metric is its own objective. `"mean"` — arithmetic mean of metrics. |
 | `cost_metric` | Cost objective: `"inference_time"` (default) or `"param_count"`. |
 | `epochs` | Max training epochs per trial (default 200). |
-| `batches_per_epoch` | Online simulation batches per epoch (default 50). |
+| `num_batches` | Online simulation batches per epoch (default 50). |
 | `early_stopping_patience` | Moving-average patience for early stopping (default 5). |
 | `early_stopping_window` | Moving-average window size (default 7). |
 | `max_param_count` | Reject trials exceeding this param count pre-training (default 1 000 000). |
@@ -66,7 +66,7 @@ def check_pipeline(
     build_approximator_fn=None, train_fn=None, validate_fn=None,
     objective_metrics=("calibration_error", "nrmse"),
     sims_per_condition=5, n_posterior_samples=2,
-    validation_conditions=None, epochs=1, batches_per_epoch=1,
+    validation_conditions=None, epochs=1, num_batches=1,
 ) -> None
 ```
 
@@ -105,7 +105,7 @@ ValidateFn = Callable[[Any, ValidationDataset, int], dict[str, float]]
 | `CouplingFlowSpace(include_optional=False)` | `bf.networks.CouplingFlow` |
 | `FlowMatchingSpace(include_optional=False)` | `bf.networks.FlowMatching` |
 | `DiffusionModelSpace(include_optional=False)` | `bf.networks.DiffusionModel` |
-| `ConsistencyModelSpace(epochs, batches_per_epoch, include_optional=False)` | `bf.networks.ConsistencyModel` |
+| `ConsistencyModelSpace(epochs, num_batches, include_optional=False)` | `bf.networks.ConsistencyModel` |
 | `StableConsistencyModelSpace(include_optional=False)` | `bf.networks.StableConsistencyModel` |
 
 ### Summary Spaces
@@ -173,7 +173,7 @@ Public default implementations used by `optimize()` when no custom hooks are pro
 | `search_space` | *(required)* | Composite search space |
 | `validation_data` | `None` | Pre-generated `ValidationDataset` |
 | `epochs` | `200` | Max training epochs per trial |
-| `batches_per_epoch` | `50` | Online batches per epoch |
+| `num_batches` | `50` | Online batches per epoch |
 | `early_stopping_patience` | `5` | Moving-average patience |
 | `early_stopping_window` | `7` | Moving-average window |
 | `max_param_count` | `1_000_000` | Pre-training param budget |

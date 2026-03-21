@@ -44,7 +44,7 @@ optimize(
 
     # Training
     epochs: int = 200,
-    batches_per_epoch: int = 50,
+    num_batches: int = 50,
     early_stopping_patience: int = 5,
     early_stopping_window: int = 7,
 
@@ -157,7 +157,7 @@ def default_train_fn(
     """Train via ``approximator.fit(simulator=..., ...)``.
 
     This is the default used by ``optimize()`` when ``train_fn`` is ``None``.
-    Reads ``epochs``, ``batches_per_epoch``, and ``batch_size`` from
+    Reads ``epochs``, ``num_batches``, and ``batch_size`` from
     ``hparams`` (injected by the objective before calling).
     """
 ```
@@ -184,7 +184,7 @@ passing it to `train_fn`:
 
 ```python
 hparams["epochs"] = config.epochs
-hparams["batches_per_epoch"] = config.batches_per_epoch
+hparams["num_batches"] = config.num_batches
 ```
 
 This keeps `TrainFn` a clean 4-arg signature. Custom `train_fn` implementations
@@ -284,7 +284,7 @@ def check_pipeline(
     n_posterior_samples: int = 2,
     validation_conditions: dict[str, list[Any]] | None = None,
     epochs: int = 1,
-    batches_per_epoch: int = 1,
+    num_batches: int = 1,
 ) -> None:
     """Dry-run the full pipeline to catch interface errors early.
 
@@ -308,7 +308,7 @@ def check_pipeline(
 
 Called automatically at the start of `optimize()`. Users can also call it
 manually to debug before launching a long run. Uses `epochs=1,
-batches_per_epoch=1` by default for minimal cost.
+num_batches=1` by default for minimal cost.
 
 ## Trial Lifecycle (inside `GenericObjective.__call__`)
 
@@ -316,7 +316,7 @@ batches_per_epoch=1` by default for minimal cost.
 1.  sample hparams from search_space                     (unchanged)
 2.  inject training config into hparams                  (NEW)
       hparams["epochs"] = config.epochs
-      hparams["batches_per_epoch"] = config.batches_per_epoch
+      hparams["num_batches"] = config.num_batches
 3.  budget pre-check (memory estimate from hparams)      (unchanged)
       Uses heuristic based on hparams (hidden_dim, depth, etc.)
       — no model needed. Skipped when max_memory_mb is None.
@@ -374,7 +374,7 @@ study = hpo.optimize(
     sims_per_condition=100,
     n_trials=10,
     epochs=30,
-    batches_per_epoch=30,
+    num_batches=30,
     max_param_count=500_000,
 )
 ```
