@@ -8,8 +8,8 @@
 | Phase | Status | Date | Notes |
 |-------|--------|------|-------|
 | Plan | DONE | 2026-03-21 | |
-| Phase 1: Docstrings + type tightening | IMPLEMENTED | 2026-03-21 | |
-| Ship | IN_PROGRESS | 2026-03-21 | |
+| Phase 1: Docstrings + type tightening | MERGED | 2026-03-21 | PR #50 |
+| Ship | MERGED | 2026-03-21 | |
 
 ## Summary
 
