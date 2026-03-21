@@ -395,6 +395,7 @@ class TestBuildObjective:
                 objective_mode="pareto",
                 cost_metric="inference_time",
                 report_frequency=10,
+                pruning_strategy="dominance",
                 build_approximator_fn=None,
                 train_fn=None,
                 validate_fn=None,
@@ -509,3 +510,217 @@ class TestCreateAndRunStudy:
             self._call(storage=None, resume=False)
             # storage=None → load_if_exists=True (resume or storage is None)
             assert mock_create.call_args[1]["load_if_exists"] is True
+
+
+class TestPruningStrategyWiring:
+    """Tests for pruning_strategy parameter wiring (Phase 3)."""
+
+    def test_optimize_forwards_pruning_strategy(self):
+        """pruning_strategy should reach _build_objective."""
+        with (
+            patch("bayesflow_hpo.api._infer_and_validate_keys") as mock_keys,
+            patch("bayesflow_hpo.api._setup_validation_data"),
+            patch("bayesflow_hpo.api.check_pipeline"),
+            patch("bayesflow_hpo.api._build_objective") as mock_build,
+            patch("bayesflow_hpo.api._derive_directions") as mock_dirs,
+            patch("bayesflow_hpo.api._create_and_run_study"),
+        ):
+            mock_keys.return_value = (["p"], ["x"])
+            mock_build.return_value = MagicMock(n_objectives=3)
+            mock_dirs.return_value = (["minimize"] * 3, ["a", "b", "c"])
+
+            from bayesflow_hpo.api import optimize
+
+            optimize(
+                simulator=MagicMock(),
+                adapter=MagicMock(),
+                search_space=MagicMock(),
+                pruning_strategy="mo-sha",
+                storage=None,
+            )
+            assert mock_build.call_args[1]["pruning_strategy"] == "mo-sha"
+
+    def test_optimize_forwards_tuple_pruning_strategy(self):
+        """Tuple pruning_strategy should reach _build_objective."""
+        with (
+            patch("bayesflow_hpo.api._infer_and_validate_keys") as mock_keys,
+            patch("bayesflow_hpo.api._setup_validation_data"),
+            patch("bayesflow_hpo.api.check_pipeline"),
+            patch("bayesflow_hpo.api._build_objective") as mock_build,
+            patch("bayesflow_hpo.api._derive_directions") as mock_dirs,
+            patch("bayesflow_hpo.api._create_and_run_study"),
+        ):
+            mock_keys.return_value = (["p"], ["x"])
+            mock_build.return_value = MagicMock(n_objectives=3)
+            mock_dirs.return_value = (["minimize"] * 3, ["a", "b", "c"])
+
+            from bayesflow_hpo.api import optimize
+
+            optimize(
+                simulator=MagicMock(),
+                adapter=MagicMock(),
+                search_space=MagicMock(),
+                pruning_strategy=("primary", "calibration_error"),
+                storage=None,
+            )
+            assert mock_build.call_args[1]["pruning_strategy"] == (
+                "primary",
+                "calibration_error",
+            )
+
+
+class TestObjectiveConfigPruningValidation:
+    """Tests for ObjectiveConfig.pruning_strategy validation."""
+
+    def _make_config(self, **overrides):
+        from bayesflow_hpo.optimization.objective import ObjectiveConfig
+        from bayesflow_hpo.validation.data import ValidationDataset
+
+        defaults = dict(
+            simulator=MagicMock(),
+            adapter=MagicMock(),
+            search_space=MagicMock(),
+            validation_data=ValidationDataset(
+                simulations=[],
+                condition_labels=[],
+                param_keys=["p"],
+                data_keys=["x"],
+                seed=0,
+            ),
+        )
+        defaults.update(overrides)
+        return ObjectiveConfig(**defaults)
+
+    def test_valid_strategies(self):
+        """All valid strategy names should be accepted."""
+        for s in ["none", "dominance", "mo-sha", "primary"]:
+            cfg = self._make_config(pruning_strategy=s)
+            assert cfg.pruning_strategy == s
+
+    def test_valid_tuple(self):
+        cfg = self._make_config(
+            pruning_strategy=("primary", "calibration_error")
+        )
+        assert cfg.pruning_strategy == ("primary", "calibration_error")
+
+    def test_invalid_strategy_raises(self):
+        with pytest.raises(ValueError, match="Unknown pruning_strategy"):
+            self._make_config(pruning_strategy="invalid")
+
+    def test_invalid_tuple_raises(self):
+        with pytest.raises(ValueError, match="Tuple pruning_strategy"):
+            self._make_config(pruning_strategy=("dominance", "metric"))
+
+    def test_negative_startup_raises(self):
+        with pytest.raises(ValueError, match="pruning_n_startup_trials"):
+            self._make_config(pruning_n_startup_trials=-1)
+
+    def test_none_startup_accepted(self):
+        """None startup (auto-detect sentinel) should be accepted."""
+        cfg = self._make_config(pruning_n_startup_trials=None)
+        assert cfg.pruning_n_startup_trials is None
+
+    def test_explicit_startup_overrides(self):
+        """Explicit int should be preserved."""
+        cfg = self._make_config(pruning_n_startup_trials=42)
+        assert cfg.pruning_n_startup_trials == 42
+
+
+class TestStartupAutoDetect:
+    """Tests for n_startup_trials auto-detection from sampler."""
+
+    def test_tpe_sampler_auto_detects_25(self):
+        """TPE sampler has n_startup_trials=25 by default."""
+        import optuna
+
+        from bayesflow_hpo.api import _create_and_run_study
+
+        mock_obj = MagicMock()
+        mock_obj.config.pruning_n_startup_trials = None
+
+        with (
+            patch("bayesflow_hpo.api.create_study") as mock_create,
+            patch("bayesflow_hpo.api.optimize_until"),
+        ):
+            study = optuna.create_study(directions=["minimize", "minimize"])
+            mock_create.return_value = study
+
+            _create_and_run_study(
+                objective=mock_obj,
+                study_name="test",
+                directions=["minimize", "minimize"],
+                metric_names=["a", "b"],
+                storage=None,
+                resume=False,
+                warm_start_from=None,
+                warm_start_top_k=25,
+                n_trials=1,
+                max_total_trials=3,
+                show_progress_bar=False,
+            )
+
+        # TPE default n_startup_trials is 10 (Optuna default).
+        detected = mock_obj.config.pruning_n_startup_trials
+        assert isinstance(detected, int)
+        assert detected >= 1
+
+    def test_explicit_startup_not_overridden(self):
+        """Explicit pruning_n_startup_trials should not be overridden."""
+        from bayesflow_hpo.api import _create_and_run_study
+
+        mock_obj = MagicMock()
+        mock_obj.config.pruning_n_startup_trials = 42
+
+        with (
+            patch("bayesflow_hpo.api.create_study") as mock_create,
+            patch("bayesflow_hpo.api.optimize_until"),
+        ):
+            mock_create.return_value = MagicMock()
+
+            _create_and_run_study(
+                objective=mock_obj,
+                study_name="test",
+                directions=["minimize"],
+                metric_names=["a"],
+                storage=None,
+                resume=False,
+                warm_start_from=None,
+                warm_start_top_k=25,
+                n_trials=1,
+                max_total_trials=3,
+                show_progress_bar=False,
+            )
+
+        assert mock_obj.config.pruning_n_startup_trials == 42
+
+    def test_sampler_without_attr_fallback_10(self):
+        """Sampler without n_startup_trials attribute → fallback 10."""
+        from bayesflow_hpo.api import _create_and_run_study
+
+        mock_obj = MagicMock()
+        mock_obj.config.pruning_n_startup_trials = None
+
+        with (
+            patch("bayesflow_hpo.api.create_study") as mock_create,
+            patch("bayesflow_hpo.api.optimize_until"),
+        ):
+            mock_study = MagicMock()
+            # Remove n_startup_trials attr from sampler.
+            del mock_study.sampler.n_startup_trials
+            mock_create.return_value = mock_study
+
+            _create_and_run_study(
+                objective=mock_obj,
+                study_name="test",
+                directions=["minimize"],
+                metric_names=["a"],
+                storage=None,
+                resume=False,
+                warm_start_from=None,
+                warm_start_top_k=25,
+                n_trials=1,
+                max_total_trials=3,
+                show_progress_bar=False,
+            )
+
+        assert mock_obj.config.pruning_n_startup_trials == 10

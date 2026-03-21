@@ -111,6 +111,8 @@ def optimize(
     objective_metrics: list[str] | None = None,
     objective_mode: str = "pareto",
     cost_metric: str = "inference_time",
+    # Pruning
+    pruning_strategy: str | tuple[str, str] = "dominance",
     # Training
     epochs: int = 200,
     num_batches: int = 50,
@@ -241,6 +243,21 @@ def optimize(
     cost_metric
         Which cost objective to use as the last Optuna direction.
         ``"inference_time"`` (default) or ``"param_count"``.
+    pruning_strategy
+        Multi-objective pruning strategy.  One of ``"dominance"``
+        (default), ``"mo-sha"``, ``"primary"``, or ``"none"``.
+        For ``"primary"``, pass a tuple ``("primary", metric_name)``
+        to specify which metric to prune on (defaults to
+        ``objective_metrics[0]``).  ``"none"`` disables intermediate
+        validation entirely.
+
+        Strategies are backed by literature — see
+        :mod:`~bayesflow_hpo.optimization.pruning_strategies` for
+        details and references.  Schmucker et al. (2021) provide the
+        MO-ASHA foundation for ``"dominance"`` and ``"mo-sha"``.
+
+        Only applies to multi-objective studies; single-objective
+        studies always use Optuna's built-in pruner.
     epochs
         Maximum training epochs per trial (default 200).
     num_batches
@@ -368,6 +385,7 @@ def optimize(
         objective_mode=objective_mode,
         cost_metric=cost_metric,
         report_frequency=report_frequency,
+        pruning_strategy=pruning_strategy,
         build_approximator_fn=build_approximator_fn,
         train_fn=train_fn,
         validate_fn=validate_fn,
@@ -484,6 +502,7 @@ def _build_objective(
     objective_mode: str,
     cost_metric: str,
     report_frequency: int,
+    pruning_strategy: str | tuple[str, str],
     build_approximator_fn: BuildApproximatorFn | None,
     train_fn: TrainFn | None,
     validate_fn: ValidateFn | None,
@@ -507,6 +526,7 @@ def _build_objective(
             objective_mode=objective_mode,
             cost_metric=cost_metric,
             report_frequency=report_frequency,
+            pruning_strategy=pruning_strategy,
             build_approximator_fn=build_approximator_fn,
             train_fn=train_fn,
             validate_fn=validate_fn,
@@ -586,6 +606,18 @@ def _create_and_run_study(
         warm_start_from=warm_start_from,
         warm_start_top_k=warm_start_top_k,
     )
+
+    # Auto-detect n_startup_trials from sampler if not set explicitly.
+    cfg = objective.config
+    if cfg.pruning_n_startup_trials is None:
+        resolved = getattr(study.sampler, "n_startup_trials", 10)
+        cfg.pruning_n_startup_trials = resolved
+        logger.debug(
+            "Auto-detected pruning_n_startup_trials=%d from %s",
+            resolved,
+            type(study.sampler).__name__,
+        )
+
     optimize_until(
         study,
         objective,
