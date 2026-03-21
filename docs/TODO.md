@@ -3,25 +3,10 @@
 Tracked items for ongoing development. Updated by contributors and Claude Code sessions.
 
 Items are grouped into packages of related work that should be shipped together.
-Suggested execution order: C → D → A → B → G → E → H → I → J.
+Suggested execution order: D → A → B → G → E → H → I → J.
 Package I (small API fixes) can be done at any time independently.
 
 ## Open
-
-### Package C: API Consolidation & Search Space Simplification
-
-**Spec:** [`docs/spec-api-consolidation.md`](spec-api-consolidation.md)
-
-Two main changes:
-
-1. **API naming consolidation** — `batches_per_epoch` → `num_batches`
-   (clean break, fixes BF 2.0.8 `default_train_fn` bug), plus 6
-   dimension name expansions to match BayesFlow kwarg names.
-2. **Search space simplification** — Replace `enabled` / `include_optional`
-   with a `constant` field on dimensions. Add `.constants` property.
-   Remove conditional `if key in params` logic in `build()` methods.
-
----
 
 ### Package I: Small API Fixes
 
@@ -387,6 +372,20 @@ lexicographic-Pareto selection (once implemented).
 ---
 
 ## Done
+
+### Package C: API Consolidation & Search Space Simplification (2026-03-21, PR #48)
+Three-phase API consolidation and search space simplification:
+- **Phase 1**: Replaced `enabled`/`include_optional` with `constant` field on
+  `IntDimension`, `FloatDimension`, `CategoricalDimension`. Added `_UNSET`
+  sentinel, `.constants` property on `BaseSearchSpace` and `CompositeSearchSpace`.
+- **Phase 2**: Migrated all 10 concrete search spaces (5 inference + 5 summary)
+  from `enabled=False` to `constant=<BF default>`. Expanded 6 abbreviated
+  dimension names (`cf_use_actnorm`, `fm_use_optimal_transport`,
+  `fm_time_power_law_alpha`, `ds_spectral_normalization`,
+  `st_num_inducing_points`, `tst_time_embedding`). Simplified all `build()`
+  methods to unconditionally read params.
+- **Phase 3**: Renamed `batches_per_epoch` → `num_batches` across API, objective,
+  pipeline, builders, docs, and examples. Fixed `default_train_fn` for BF 2.0.8+.
 
 ### Add edge-case tests — Package F (2026-03-21, PR #47)
 16 new edge-case tests across `warm_start_study`, `_training_loss_fallback`,

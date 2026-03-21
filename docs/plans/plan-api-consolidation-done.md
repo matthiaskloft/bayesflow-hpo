@@ -9,10 +9,10 @@
 | Phase | Status | Date | Notes |
 |-------|--------|------|-------|
 | Plan | DONE | 2026-03-21 | |
-| Phase 1: Dimension `constant` field | TODO | | |
-| Phase 2: Search space migration | TODO | | |
-| Phase 3: `num_batches` rename + dimension name expansion | TODO | | |
-| Ship | TODO | | |
+| Phase 1: Dimension `constant` field | MERGED | 2026-03-21 | PR #48 |
+| Phase 2: Search space migration | MERGED | 2026-03-21 | PR #48 |
+| Phase 3: `num_batches` rename + dimension name expansion | MERGED | 2026-03-21 | PR #48 |
+| Ship | MERGED | 2026-03-21 | PR #48 |
 
 ## Summary
 
