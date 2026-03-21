@@ -171,6 +171,21 @@ def optimize(
         ``(approximator, validation_data, n_posterior_samples) ->
         dict[str, float]``.  When ``None`` (default), uses
         ``default_validate_fn()``.
+
+        The returned dict must contain all keys in ``objective_metrics``
+        (default ``["calibration_error", "nrmse"]``).  Missing or
+        non-finite values are replaced with a penalty value and a
+        warning is logged.  Extra keys are silently ignored.
+
+        **Timing caveat:** the wall-clock time of this function is
+        recorded as the trial's inference time.  Unlike the default
+        path, which isolates pure inference timing, a custom
+        ``validate_fn`` lumps inference and metric computation together.
+
+        **Intermediate pruning:** this function is also called during
+        training at the configured interval with a reduced
+        ``n_posterior_samples`` for median-based multi-objective
+        pruning.
     validation_simulator
         Optional simulator used *only* for generating the validation
         dataset.  When ``None`` (default), ``simulator`` is used.

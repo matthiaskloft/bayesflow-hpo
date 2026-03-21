@@ -1,5 +1,6 @@
 """Tests for objective training failure handling and budget enforcement."""
 
+import numpy as np
 import pytest
 
 from bayesflow_hpo.objectives import FAILED_TRIAL_CAL_ERROR, FAILED_TRIAL_COST
@@ -9,6 +10,23 @@ from bayesflow_hpo.optimization.objective import (
     _extract_best_training_loss,
     _training_loss_fallback,
     _validate_metric_keys,
+)
+from bayesflow_hpo.validation.data import ValidationDataset
+
+_DUMMY_VALIDATION_DATA = ValidationDataset(
+    simulations=[],
+    condition_labels=[],
+    param_keys=["p"],
+    data_keys=["x"],
+    seed=0,
+)
+
+_DUMMY_VALIDATION_DATA_1COND = ValidationDataset(
+    simulations=[{"x": np.zeros((2, 1)), "p": np.zeros((2, 1))}],
+    condition_labels=[{}],
+    param_keys=["p"],
+    data_keys=["x"],
+    seed=0,
 )
 
 
@@ -95,7 +113,7 @@ def test_objective_training_failure_sets_user_attr_and_penalty(monkeypatch):
             search_space=_FakeSearchSpace(),
             epochs=1,
             num_batches=1,
-            validation_data=None,
+            validation_data=_DUMMY_VALIDATION_DATA,
             train_fn=_raise_training_error,
         )
     )
@@ -143,7 +161,7 @@ def test_objective_rejects_trial_exceeding_param_budget(monkeypatch):
             search_space=_FakeSearchSpace(),
             epochs=1,
             num_batches=1,
-            validation_data=None,
+            validation_data=_DUMMY_VALIDATION_DATA,
             max_param_count=100_000,
         )
     )
@@ -196,7 +214,7 @@ def test_objective_allows_trial_within_param_budget(monkeypatch):
             search_space=_FakeSearchSpace(),
             epochs=1,
             num_batches=1,
-            validation_data=None,
+            validation_data=_DUMMY_VALIDATION_DATA,
             max_param_count=100_000,
             train_fn=_track_training,
         )
@@ -250,7 +268,7 @@ def test_objective_allows_trial_at_exact_budget_boundary(monkeypatch):
             search_space=_FakeSearchSpace(),
             epochs=1,
             num_batches=1,
-            validation_data=None,
+            validation_data=_DUMMY_VALIDATION_DATA,
             max_param_count=100_000,
             train_fn=_track_training,
         )
@@ -307,7 +325,7 @@ def test_objective_rejects_trial_when_probe_fails(monkeypatch):
             search_space=_FakeSearchSpace(),
             epochs=1,
             num_batches=1,
-            validation_data=None,
+            validation_data=_DUMMY_VALIDATION_DATA,
             train_fn=_track_training,
         )
     )
@@ -357,7 +375,7 @@ def test_objective_reraises_memory_error_from_probe(monkeypatch):
             search_space=_FakeSearchSpace(),
             epochs=1,
             num_batches=1,
-            validation_data=None,
+            validation_data=_DUMMY_VALIDATION_DATA,
         )
     )
 
@@ -374,7 +392,7 @@ def test_objective_config_early_stopping_defaults():
         search_space=_FakeSearchSpace(),
         epochs=1,
         num_batches=1,
-        validation_data=None,
+        validation_data=_DUMMY_VALIDATION_DATA,
     )
     assert config.early_stopping_patience == 5
     assert config.early_stopping_window == 7
@@ -388,7 +406,7 @@ def test_objective_config_early_stopping_custom_values():
         search_space=_FakeSearchSpace(),
         epochs=1,
         num_batches=1,
-        validation_data=None,
+        validation_data=_DUMMY_VALIDATION_DATA,
         early_stopping_patience=10,
         early_stopping_window=5,
     )
@@ -405,7 +423,7 @@ def test_objective_config_rejects_invalid_mode():
             search_space=_FakeSearchSpace(),
             epochs=1,
             num_batches=1,
-            validation_data=None,
+            validation_data=_DUMMY_VALIDATION_DATA,
             objective_mode="paerto",  # typo
         )
 
@@ -419,7 +437,7 @@ def test_objective_config_rejects_invalid_report_frequency():
             search_space=_FakeSearchSpace(),
             epochs=1,
             num_batches=1,
-            validation_data=None,
+            validation_data=_DUMMY_VALIDATION_DATA,
             report_frequency=0,
         )
 
@@ -433,8 +451,19 @@ def test_objective_config_rejects_invalid_cost_metric():
             search_space=_FakeSearchSpace(),
             epochs=1,
             num_batches=1,
-            validation_data=None,
+            validation_data=_DUMMY_VALIDATION_DATA,
             cost_metric="unknown",
+        )
+
+
+def test_objective_config_rejects_none_validation_data():
+    """ObjectiveConfig raises TypeError when validation_data is None."""
+    with pytest.raises(TypeError, match="validation_data must be a ValidationDataset"):
+        ObjectiveConfig(
+            simulator=object(),
+            adapter=object(),
+            search_space=_FakeSearchSpace(),
+            validation_data=None,
         )
 
 
@@ -447,7 +476,7 @@ def test_n_objectives_mean_mode_with_multiple_metrics():
             search_space=_FakeSearchSpace(),
             epochs=1,
             num_batches=1,
-            validation_data=None,
+            validation_data=_DUMMY_VALIDATION_DATA,
             objective_metrics=["calibration_error", "nrmse"],
             objective_mode="mean",
         )
@@ -492,7 +521,7 @@ def test_objective_multi_metric_penalty_shape(monkeypatch):
             search_space=_FakeSearchSpace(),
             epochs=1,
             num_batches=1,
-            validation_data=None,
+            validation_data=_DUMMY_VALIDATION_DATA,
             objective_metrics=["calibration_error", "nrmse"],
             objective_mode="pareto",
             train_fn=_raise_training_error,
@@ -516,6 +545,7 @@ def test_objective_config_default_metrics_and_mode():
         simulator=object(),
         adapter=object(),
         search_space=_FakeSearchSpace(),
+        validation_data=_DUMMY_VALIDATION_DATA,
     )
     assert config.objective_metrics == ["calibration_error", "nrmse"]
     assert config.objective_mode == "pareto"
@@ -527,6 +557,7 @@ def test_objective_config_hooks_default_none():
         simulator=object(),
         adapter=object(),
         search_space=_FakeSearchSpace(),
+        validation_data=_DUMMY_VALIDATION_DATA,
     )
     assert config.build_approximator_fn is None
     assert config.train_fn is None
@@ -566,6 +597,7 @@ def test_objective_uses_custom_build_fn(monkeypatch):
             simulator=_FakeSimulator(),
             adapter=_FakeAdapter(),
             search_space=_FakeSearchSpace(),
+            validation_data=_DUMMY_VALIDATION_DATA,
             epochs=1,
             num_batches=1,
             build_approximator_fn=custom_builder,
@@ -608,6 +640,7 @@ def test_training_config_injected_into_hparams(monkeypatch):
             simulator=_FakeSimulator(),
             adapter=_FakeAdapter(),
             search_space=_FakeSearchSpace(),
+            validation_data=_DUMMY_VALIDATION_DATA,
             epochs=42,
             num_batches=7,
             build_approximator_fn=lambda hp: _FakeApproximator(10_000),
@@ -671,11 +704,6 @@ def test_objective_validate_fn_error_returns_penalty(monkeypatch):
         def __call__(self, data):
             return data
 
-    class _FakeValidationData:
-        param_keys = ["theta"]
-        data_keys = ["x"]
-        simulations = []
-
     def _raise_validate(approx, vd, n):
         raise RuntimeError("custom validation exploded")
 
@@ -686,7 +714,7 @@ def test_objective_validate_fn_error_returns_penalty(monkeypatch):
             search_space=_FakeSearchSpace(),
             epochs=1,
             num_batches=1,
-            validation_data=_FakeValidationData(),
+            validation_data=_DUMMY_VALIDATION_DATA,
             build_approximator_fn=lambda hp: fake_approx,
             train_fn=lambda approx, sim, hp, cb: None,
             validate_fn=_raise_validate,
@@ -724,12 +752,6 @@ def test_objective_custom_validate_fn_called_over_default(monkeypatch):
         def __call__(self, data):
             return data
 
-    class _FakeValidationData:
-        param_keys = ["theta"]
-        data_keys = ["x"]
-        simulations = [{"x": [1, 2, 3]}]
-        sim_time_per_sim = 0.01
-
     def custom_validate(approx, vd, n):
         validate_calls.append(True)
         return {"calibration_error": 0.05, "nrmse": 0.1}
@@ -741,7 +763,7 @@ def test_objective_custom_validate_fn_called_over_default(monkeypatch):
             search_space=_FakeSearchSpace(),
             epochs=1,
             num_batches=1,
-            validation_data=_FakeValidationData(),
+            validation_data=_DUMMY_VALIDATION_DATA_1COND,
             build_approximator_fn=lambda hp: fake_approx,
             train_fn=lambda approx, sim, hp, cb: None,
             validate_fn=custom_validate,
@@ -889,11 +911,6 @@ def test_objective_validation_failure_uses_training_loss_fallback(monkeypatch):
         def __call__(self, data):
             return data
 
-    class _FakeValidationData:
-        param_keys = ["theta"]
-        data_keys = ["x"]
-        simulations = []
-
     def _train_with_loss(approximator, simulator, hparams, callbacks):
         """Simulate training by setting best_ma_loss on early stopping cb."""
         from bayesflow_hpo.optimization.callbacks import MovingAverageEarlyStopping
@@ -913,7 +930,7 @@ def test_objective_validation_failure_uses_training_loss_fallback(monkeypatch):
             search_space=_FakeSearchSpace(),
             epochs=1,
             num_batches=1,
-            validation_data=_FakeValidationData(),
+            validation_data=_DUMMY_VALIDATION_DATA,
             build_approximator_fn=lambda hp: fake_approx,
             train_fn=_train_with_loss,
             validate_fn=_raise_validate,
@@ -957,11 +974,6 @@ def test_objective_validation_failure_without_training_loss_sets_penalty_attr(
         def __call__(self, data):
             return data
 
-    class _FakeValidationData:
-        param_keys = ["theta"]
-        data_keys = ["x"]
-        simulations = []
-
     def _raise_validate(approx, vd, n):
         raise RuntimeError("OOM during validation")
 
@@ -972,7 +984,7 @@ def test_objective_validation_failure_without_training_loss_sets_penalty_attr(
             search_space=_FakeSearchSpace(),
             epochs=1,
             num_batches=1,
-            validation_data=_FakeValidationData(),
+            validation_data=_DUMMY_VALIDATION_DATA,
             build_approximator_fn=lambda hp: fake_approx,
             train_fn=lambda approx, sim, hp, cb: None,  # no loss set
             validate_fn=_raise_validate,
