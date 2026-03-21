@@ -23,6 +23,19 @@ from bayesflow_hpo.search_spaces.registry import (
 )
 
 
+def _register_with_aliases(
+    register_fn: Callable[..., None],
+    name: str,
+    builder: Callable[[dict[str, Any]], Any],
+    aliases: list[str] | None,
+    overwrite: bool,
+) -> None:
+    """Register a builder under *name* and each alias."""
+    register_fn(name=name, builder=builder, overwrite=overwrite)
+    for alias in aliases or []:
+        register_fn(name=alias, builder=builder, overwrite=overwrite)
+
+
 def register_custom_inference_network(
     name: str,
     space_factory: Callable[[], SearchSpace],
@@ -53,9 +66,9 @@ def register_custom_inference_network(
         overwrite=overwrite,
     )
     if builder is not None:
-        register_inference_builder(name=name, builder=builder, overwrite=overwrite)
-        for alias in aliases or []:
-            register_inference_builder(name=alias, builder=builder, overwrite=overwrite)
+        _register_with_aliases(
+            register_inference_builder, name, builder, aliases, overwrite
+        )
 
 
 def register_custom_summary_network(
@@ -87,9 +100,9 @@ def register_custom_summary_network(
         overwrite=overwrite,
     )
     if builder is not None:
-        register_summary_builder(name=name, builder=builder, overwrite=overwrite)
-        for alias in aliases or []:
-            register_summary_builder(name=alias, builder=builder, overwrite=overwrite)
+        _register_with_aliases(
+            register_summary_builder, name, builder, aliases, overwrite
+        )
 
 
 def list_registered_network_spaces() -> dict[str, list[str]]:

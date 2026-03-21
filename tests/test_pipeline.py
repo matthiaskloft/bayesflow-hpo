@@ -3,7 +3,7 @@
 import pytest
 from conftest import canonical_adapter
 
-from bayesflow_hpo.pipeline import PipelineError, check_pipeline
+from bayesflow_hpo.pipeline import PipelineError, _TrackingDict, check_pipeline
 
 
 class _FakeSearchSpace:
@@ -291,3 +291,36 @@ def test_check_pipeline_validate_fn_error_propagates():
             train_fn=lambda approx, sim, hp, cb: None,
             validate_fn=exploding_validate,
         )
+
+
+# ---------------------------------------------------------------------------
+# _TrackingDict tests
+# ---------------------------------------------------------------------------
+
+
+class TestTrackingDict:
+    """Tests for _TrackingDict key-access tracking."""
+
+    def test_items_marks_all_keys_accessed(self):
+        td = _TrackingDict({"a": 1, "b": 2, "c": 3})
+        list(td.items())
+        assert td.accessed_keys == {"a", "b", "c"}
+
+    def test_values_marks_all_keys_accessed(self):
+        td = _TrackingDict({"x": 10, "y": 20})
+        list(td.values())
+        assert td.accessed_keys == {"x", "y"}
+
+    def test_dict_copy_does_not_mark_keys(self):
+        """dict(td) uses __iter__, which must NOT mark keys as accessed."""
+        td = _TrackingDict({"a": 1, "b": 2})
+        _ = dict(td)
+        assert td.accessed_keys == set()
+
+    def test_items_returns_correct_pairs(self):
+        td = _TrackingDict({"a": 1, "b": 2})
+        assert sorted(td.items()) == [("a", 1), ("b", 2)]
+
+    def test_values_returns_correct_values(self):
+        td = _TrackingDict({"a": 1, "b": 2})
+        assert sorted(td.values()) == [1, 2]
