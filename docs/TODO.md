@@ -3,7 +3,7 @@
 Tracked items for ongoing development. Updated by contributors and Claude Code sessions.
 
 Items are grouped into packages of related work that should be shipped together.
-Suggested execution order: D → A → B → G → E → H → I → J.
+Suggested execution order: A → B → G → E → H → I → J.
 Package I (small API fixes) can be done at any time independently.
 
 ## Open
@@ -38,30 +38,10 @@ Validate all `data_keys` exist in `sim_data` before calling `sample()`.
 
 ---
 
-### Package D: `optimize()` Refactor
+### Package D (remaining): Validation Contract Cleanup
 
-Extract helpers first, then the tracking dict fix is testable against
-the cleaner code. Also standardize validation pipeline contracts that
-touch `optimize()` internals.
-
-#### Extract helpers from `optimize()` (~270 lines) (#8)
-
-Extract `_setup_validation_data()` and `_build_objective()` to improve
-readability and testability. No change to the public API.
-**File:** `api.py:96-362`
-
-#### Deduplicate builder registration loop (#9)
-
-Extract a `_register_with_aliases(registry_fn, name, builder, aliases)`
-helper to remove duplicated alias logic.
-**File:** `registration.py:55-58, 90-92`
-
-#### `_TrackingDict` — track `items()`/`values()` or document (#10)
-
-A builder using `for k, v in hparams.items()` won't mark keys as accessed,
-causing false-positive unused-key warnings. Either override iteration methods
-or document the limitation in `check_pipeline`'s docstring.
-**File:** `pipeline.py:51-84`
+Items from original Package D that require design decisions and were
+out of scope for the code-only refactor (PR #49).
 
 #### Document `validate_fn` return contract
 
@@ -88,17 +68,6 @@ fallback path, but `optimize()` always generates the dataset.
 or expose `validate=False` in `optimize()`, or document as
 internal-only.
 **Files:** `optimization/objective.py:226,659-666`, `api.py:329-335`
-
-#### Export `default_validate_fn`
-
-Users writing custom `validate_fn` can't easily see the reference
-implementation. Export it or add a usage example in the docstring.
-**File:** `optimization/objective.py:95-126`
-
-**Prime test case:** The bayesflow-irt IRT model (equivariant summary
-networks, custom approximator) should work flawlessly through the
-custom `build_approximator_fn` / `validate_fn` pathway. Use it as
-the integration test when standardizing these contracts.
 
 ---
 
@@ -372,6 +341,12 @@ lexicographic-Pareto selection (once implemented).
 ---
 
 ## Done
+
+### Package D: `optimize()` Refactor (2026-03-21, PR #49)
+Decomposed `optimize()` into 5 private helpers for readability and
+testability. Fixed `_TrackingDict` false positives by overriding
+`items()`/`values()`. Extracted `_register_with_aliases()` to eliminate
+duplicated alias loops. No public API changes. 23 new tests.
 
 ### Package C: API Consolidation & Search Space Simplification (2026-03-21, PR #48)
 Three-phase API consolidation and search space simplification:
