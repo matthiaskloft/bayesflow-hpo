@@ -8,10 +8,10 @@
 | Phase | Status | Date | Notes |
 |-------|--------|------|-------|
 | Plan | DONE | 2026-03-21 | |
-| Phase 1: warm_start_study edge cases | IMPLEMENTED | 2026-03-21 | 6 new tests |
-| Phase 2: _training_loss_fallback edge cases | IMPLEMENTED | 2026-03-21 | 4 new tests |
-| Phase 3: Validation data edge cases | IMPLEMENTED | 2026-03-21 | 6 new tests |
-| Ship | TODO | | |
+| Phase 1: warm_start_study edge cases | MERGED | 2026-03-21 | 6 new tests |
+| Phase 2: _training_loss_fallback edge cases | MERGED | 2026-03-21 | 4 new tests |
+| Phase 3: Validation data edge cases | MERGED | 2026-03-21 | 6 new tests |
+| Ship | MERGED | 2026-03-21 | [PR #47](https://github.com/matthiaskloft/bayesflow-hpo/pull/47) |
 
 ## Summary
 
