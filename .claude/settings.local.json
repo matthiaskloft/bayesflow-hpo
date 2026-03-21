@@ -1,13 +1,12 @@
 {
+  "_comment": "Maximum-privilege baseline for autonomous workflow operation. Read/Write/Edit wildcards grant unrestricted file access within the sandbox. Narrow these for less-privileged projects (e.g., Write(src/**)).",
   "permissions": {
     "allow": [
       "Bash(git:*)",
+	  "Bash(git fetch:*)",
+	  "WebFetch(domain:api.github.com)",      
+      "WebFetch(domain:github.com)",
       "Bash(gh:*)",
-      "Bash(python3:*)",
-      "Bash(KERAS_BACKEND=torch python3:*)",
-      "Bash(KERAS_BACKEND=torch python:*)",
-      "Bash(pip:*)",
-      "Bash(ruff:*)",
       "Bash(which:*)",
       "Bash(echo:*)",
       "Bash(diff:*)",
@@ -18,9 +17,7 @@
       "Write(*)",
       "Edit(*)",
       "Glob(*)",
-      "Grep(*)",
-      "Bash(git fetch:*)",
-      "WebFetch(domain:api.github.com)"
+      "Grep(*)"	  
     ]
   },
   "sandbox": {
