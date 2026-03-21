@@ -3,41 +3,133 @@
 Tracked items for ongoing development. Updated by contributors and Claude Code sessions.
 
 Items are grouped into packages of related work that should be shipped together.
-Suggested execution order: F → C → D → A → B → G → E.
+Suggested execution order: C → D → A → B → G → E → H → I.
 
 ## Open
 
-### Package H: Metric Constraints & Memory Auto-Detection
+### Package C: API Consolidation & Usability
 
-#### Add metric constraints on objective values
+Naming alignment, explicit key overrides, and silent-failure fixes are all
+about the public API surface.
 
-Add layered metric constraints to the optimization loop:
+#### Consolidate API naming against BayesFlow
 
-- **Soft constraints (feasibility-guided search):** Extend `_budget_constraints_func()`
-  so trials violating user-specified metric thresholds (e.g., `calibration_error > 0.10`)
-  are marked infeasible via Optuna's `constraints_func`. The sampler learns to avoid
-  those regions while still considering them in its model.
-- **Hard constraints (post-validation rejection):** After validation, check metrics
-  against user-specified bounds. Violating trials are marked rejected (like budget
-  rejection) — keeps the Pareto front clean.
-- Both layers compose: hard thresholds reject clearly bad trials; soft constraints
-  guide the sampler away from borderline regions.
+Align parameter/method names with BayesFlow 2.x conventions.
+Example: `batches_per_epoch` → `num_batches`.
 
-Design considerations:
-- New `MetricConstraints` config (or extend `ObjectiveConfig`) with per-metric
-  upper/lower bounds
-- Applies to objective metrics and optionally non-objective diagnostic metrics
-  (e.g., SBC uniformity)
-- Rejected-by-metric trials should not count toward `n_trained` (like budget rejection)
+#### Accept explicit `param_keys`/`data_keys` in optimize() (#5)
 
-#### Auto-detect GPU memory budget
+Add optional `param_keys` / `data_keys` parameters that override
+adapter inference when provided.
+**File:** `api.py:96-362`
 
-Add `auto_detect_memory_budget()` that queries available VRAM via
-`torch.cuda.get_device_properties()` / `torch.cuda.mem_get_info()`, subtracts
-a configurable safety margin (default 20%), and returns usable MB. Wire into
-`optimize()` as `max_memory_mb="auto"` option alongside explicit numeric values.
+#### Add debug logging to `infer_keys_from_adapter` (#4)
 
-Falls back gracefully when no GPU is available (use system RAM estimate or skip).
+When the adapter has no `transforms` attribute, log at `DEBUG` level
+so the inference path is visible.
+**File:** `api.py:63-65`
+
+#### Fix `normalize_param_count` edge case (#3)
+
+Document the intended invariant and add a guard for
+`max_count <= min_count` that returns `0.5` (neutral) instead of `0.0`.
+**File:** `objectives.py:92-99`
+
+#### Validate `data_keys` exist before `sample()` (#18)
+
+`inference.py` silently skips missing data keys via dict comprehension.
+Validate all `data_keys` exist in `sim_data` before calling `sample()`.
+**File:** `validation/inference.py:32`
+
+#### Review: search space fixed-value and optional-inclusion pathways
+
+Review the multiple ways users can fix hyperparameters or make them
+optional in search spaces, and determine if simplification is needed:
+
+- **Fixed values via single-point ranges** — e.g., `FloatDimension(low=0.1, high=0.1)`
+  collapses to a constant. Works but non-obvious.
+- **Fixed values via `__post_init__` overrides** — subclass sets a field
+  to a concrete value, removing it from the search.
+- **Optional parameter inclusion** — `include_X: bool = True` fields on
+  search spaces that toggle whether a dimension is sampled or uses a
+  default. Multiple patterns exist across spaces.
+- **CompositeSearchSpace assembly** — users compose sub-spaces, choosing
+  which to include.
+
+Concerns:
+- Too many pathways to achieve the same goal (fixing a hyperparameter)
+- `include_X` pattern may be confusing alongside single-point ranges
+- Not clear which approach is idiomatic or recommended
+
+**Decision needed:** simplify to fewer, well-documented pathways, or
+keep all and add a "How to fix hyperparameters" guide. Audit all
+search spaces for consistency.
+**Files:** `search_spaces/base.py`, `search_spaces/training.py`,
+all files under `search_spaces/inference/` and `search_spaces/summary/`
+
+---
+
+### Package D: `optimize()` Refactor
+
+Extract helpers first, then the tracking dict fix is testable against
+the cleaner code. Also standardize validation pipeline contracts that
+touch `optimize()` internals.
+
+#### Extract helpers from `optimize()` (~270 lines) (#8)
+
+Extract `_setup_validation_data()` and `_build_objective()` to improve
+readability and testability. No change to the public API.
+**File:** `api.py:96-362`
+
+#### Deduplicate builder registration loop (#9)
+
+Extract a `_register_with_aliases(registry_fn, name, builder, aliases)`
+helper to remove duplicated alias logic.
+**File:** `registration.py:55-58, 90-92`
+
+#### `_TrackingDict` — track `items()`/`values()` or document (#10)
+
+A builder using `for k, v in hparams.items()` won't mark keys as accessed,
+causing false-positive unused-key warnings. Either override iteration methods
+or document the limitation in `check_pipeline`'s docstring.
+**File:** `pipeline.py:51-84`
+
+#### Document `validate_fn` return contract
+
+Must return `dict[str, float]` with at least the keys in `objective_metrics`;
+missing keys get penalty substitution, extra keys are silently ignored.
+Document in `optimize()` docstring and `ValidateFn` alias.
+**Files:** `api.py:167-171`, `types.py:26`, `optimization/objective.py:129-152`
+
+#### Fix timing semantics between default and custom validation paths
+
+Default path extracts pure inference time from `result.timing["inference"]`;
+custom `validate_fn` path measures total wall-clock (inference + metric
+computation). Makes `cost_metric="inference_time"` non-comparable.
+**Decision needed:** ask custom hooks to return timing dict (breaks
+`ValidateFn`), or document the limitation, or drop inference time
+normalization if samplers handle this internally.
+**Files:** `optimization/objective.py:621-643`
+
+#### Make `validation_data` required or expose `validate=False`
+
+`ObjectiveConfig.validation_data` accepts `None` with a penalty
+fallback path, but `optimize()` always generates the dataset.
+**Decision needed:** make required (non-Optional) in ObjectiveConfig,
+or expose `validate=False` in `optimize()`, or document as
+internal-only.
+**Files:** `optimization/objective.py:226,659-666`, `api.py:329-335`
+
+#### Export `default_validate_fn`
+
+Users writing custom `validate_fn` can't easily see the reference
+implementation. Export it or add a usage example in the docstring.
+**File:** `optimization/objective.py:95-126`
+
+**Prime test case:** The bayesflow-irt IRT model (equivariant summary
+networks, custom approximator) should work flawlessly through the
+custom `build_approximator_fn` / `validate_fn` pathway. Use it as
+the integration test when standardizing these contracts.
 
 ---
 
@@ -45,6 +137,58 @@ Falls back gracefully when no GPU is available (use system RAM estimate or skip)
 
 Tightly coupled — presets need researched defaults, and pruning warmup
 depends on sampler config. QMC warm-up composes with sampler presets.
+Includes a deep review of the current pruning implementation as a
+prerequisite for pruner preset design.
+
+#### Deep review: pruning feature
+
+Comprehensive review of the pruning implementation, including literature
+search for best practices and audit of the current code.
+
+**Literature search:**
+- Optuna's built-in pruners (MedianPruner, HyperbandPruner, SHA) and
+  their applicability to multi-objective settings
+- Multi-objective early stopping / pruning in the HPO literature
+  (e.g., BOHB, DEHB, multi-fidelity multi-objective methods)
+- Whether geometric mean of objectives is a sound composite score
+  for pruning decisions, or if dominated-hypervolume-based pruning
+  exists
+- Warm-up heuristics: how many startup trials before pruning is
+  reliable (current default: 5)
+
+**Implementation audit:**
+- `PeriodicValidationCallback` (validation_callback.py): review the
+  custom median-based multi-objective pruning strategy (lines 31–82)
+- Hard-coded intermediate metrics `["calibration_error", "nrmse"]`
+  (line 28) — should these align with `objective_metrics`?
+- `_should_prune_multi_objective()`: median threshold, reference
+  trial selection (COMPLETE + non-rejected only), NaN/Inf handling
+- Single-objective path: delegates to Optuna's `trial.report()` +
+  study pruner — is this sufficient?
+- Interaction with `pruning_n_startup_trials` and sampler startup
+- Pruning score = `sqrt(nrmse * calibration_error)` — is geometric
+  mean the right aggregation? What about user-defined objectives?
+
+**Decision needed:** keep custom pruning, adopt a published
+multi-objective pruning strategy, or make pluggable.
+**Files:** `optimization/validation_callback.py`,
+`optimization/objective.py:573-588`
+
+#### Make intermediate validation configurable
+
+`PeriodicValidationCallback` is always injected when `validation_data`
+exists, hard-coded to `["calibration_error", "nrmse"]` regardless of
+`objective_metrics`. No way to disable or customize.
+**Decision needed:** accept `intermediate_metrics` in ObjectiveConfig,
+provide disable flag, or document as intentional design.
+**Files:** `optimization/validation_callback.py:28`,
+`optimization/objective.py:573-588`
+
+#### Make multi-objective pruning strategy pluggable
+
+Custom median-based pruning is buried in the callback with no
+configuration hooks.
+**File:** `optimization/validation_callback.py:31-82`
 
 #### Add named sampler presets to create_study()
 
@@ -115,92 +259,28 @@ Validate `0 <= select_by < len(study.directions)` at entry of
 
 ---
 
-### Package C: API Consolidation & Usability
+### Package G: Search Space Gaps
 
-Naming alignment, explicit key overrides, and silent-failure fixes are all
-about the public API surface.
+#### Add `mlp_width` and `bidirectional` to `FusionTransformerSpace` (#29)
 
-#### Consolidate API naming against BayesFlow
+`SetTransformerSpace` and `TimeSeriesTransformerSpace` expose `mlp_width`;
+`TimeSeriesNetworkSpace` exposes `bidirectional`. `FusionTransformerSpace`
+has neither — inconsistent across transformer-based summary spaces.
+**File:** `search_spaces/summary/fusion_transformer.py`
 
-Align parameter/method names with BayesFlow 2.x conventions.
-Example: `batches_per_epoch` → `num_batches`.
+#### Validate `IntDimension` rejects `log=True` + `step` (#28)
 
-#### Accept explicit `param_keys`/`data_keys` in optimize() (#5)
-
-Add optional `param_keys` / `data_keys` parameters that override
-adapter inference when provided.
-**File:** `api.py:96-362`
-
-#### Add debug logging to `infer_keys_from_adapter` (#4)
-
-When the adapter has no `transforms` attribute, log at `DEBUG` level
-so the inference path is visible.
-**File:** `api.py:63-65`
-
-#### Fix `normalize_param_count` edge case (#3)
-
-Document the intended invariant and add a guard for
-`max_count <= min_count` that returns `0.5` (neutral) instead of `0.0`.
-**File:** `objectives.py:92-99`
-
-#### Review: search space fixed-value and optional-inclusion pathways
-
-Review the multiple ways users can fix hyperparameters or make them
-optional in search spaces, and determine if simplification is needed:
-
-- **Fixed values via single-point ranges** — e.g., `FloatDimension(low=0.1, high=0.1)`
-  collapses to a constant. Works but non-obvious.
-- **Fixed values via `__post_init__` overrides** — subclass sets a field
-  to a concrete value, removing it from the search.
-- **Optional parameter inclusion** — `include_X: bool = True` fields on
-  search spaces that toggle whether a dimension is sampled or uses a
-  default. Multiple patterns exist across spaces.
-- **CompositeSearchSpace assembly** — users compose sub-spaces, choosing
-  which to include.
-
-Concerns:
-- Too many pathways to achieve the same goal (fixing a hyperparameter)
-- `include_X` pattern may be confusing alongside single-point ranges
-- Not clear which approach is idiomatic or recommended
-
-**Decision needed:** simplify to fewer, well-documented pathways, or
-keep all and add a "How to fix hyperparameters" guide. Audit all
-search spaces for consistency.
-**Files:** `search_spaces/base.py`, `search_spaces/training.py`,
-all files under `search_spaces/inference/` and `search_spaces/summary/`
+Optuna's `trial.suggest_int()` raises `ValueError` when both `log=True`
+and `step` (other than 1) are set. Add validation in
+`BaseSearchSpace.sample()` or `IntDimension.__post_init__`.
+**File:** `search_spaces/base.py:49`
 
 ---
 
-### Package D: `optimize()` Refactor
+### Package E: C2ST Metrics
 
-Extract helpers first, then the tracking dict fix is testable against
-the cleaner code.
-
-#### Extract helpers from `optimize()` (~270 lines) (#8)
-
-Extract `_setup_validation_data()` and `_build_objective()` to improve
-readability and testability. No change to the public API.
-**File:** `api.py:96-362`
-
-#### Deduplicate builder registration loop (#9)
-
-Extract a `_register_with_aliases(registry_fn, name, builder, aliases)`
-helper to remove duplicated alias logic.
-**File:** `registration.py:55-58, 90-92`
-
-#### `_TrackingDict` — track `items()`/`values()` or document (#10)
-
-A builder using `for k, v in hparams.items()` won't mark keys as accessed,
-causing false-positive unused-key warnings. Either override iteration methods
-or document the limitation in `check_pipeline`'s docstring.
-**File:** `pipeline.py:51-84`
-
----
-
-### Package E: Validation & Metrics
-
-C2ST variants and inference key validation are both in the validation
-subsystem.
+New classifier two-sample test metrics for multivariate posterior
+validation. Research-heavy; requires `sklearn` as optional dependency.
 
 #### Background: C2ST variants for SBI
 
@@ -263,6 +343,47 @@ Design considerations:
 - Not usable as an HPO objective (requires MCMC per trial) — purely
   a post-hoc diagnostic
 
+---
+
+### Package H: Metric Constraints & Memory Auto-Detection
+
+#### Add metric constraints on objective values
+
+Add layered metric constraints to the optimization loop:
+
+- **Soft constraints (feasibility-guided search):** Extend `_budget_constraints_func()`
+  so trials violating user-specified metric thresholds (e.g., `calibration_error > 0.10`)
+  are marked infeasible via Optuna's `constraints_func`. The sampler learns to avoid
+  those regions while still considering them in its model.
+- **Hard constraints (post-validation rejection):** After validation, check metrics
+  against user-specified bounds. Violating trials are marked rejected (like budget
+  rejection) — keeps the Pareto front clean.
+- Both layers compose: hard thresholds reject clearly bad trials; soft constraints
+  guide the sampler away from borderline regions.
+
+Design considerations:
+- New `MetricConstraints` config (or extend `ObjectiveConfig`) with per-metric
+  upper/lower bounds
+- Applies to objective metrics and optionally non-objective diagnostic metrics
+  (e.g., SBC uniformity)
+- Rejected-by-metric trials should not count toward `n_trained` (like budget rejection)
+
+#### Auto-detect GPU memory budget
+
+Add `auto_detect_memory_budget()` that queries available VRAM via
+`torch.cuda.get_device_properties()` / `torch.cuda.mem_get_info()`, subtracts
+a configurable safety margin (default 20%), and returns usable MB. Wire into
+`optimize()` as `max_memory_mb="auto"` option alongside explicit numeric values.
+
+Falls back gracefully when no GPU is available (use system RAM estimate or skip).
+
+---
+
+### Package I: Literature Audit
+
+Standalone documentation/verification task. Can run at any point, but
+best done after Packages C–G stabilize the codebase.
+
 #### Audit all metrics and features against literature references
 
 Systematic check that every built-in metric and major feature has a
@@ -279,148 +400,14 @@ Scope: all 13 built-in metrics in `validation/registry.py`, the
 budget-aware sampling design, the pruning strategy, and the
 lexicographic-Pareto selection (once implemented).
 
-#### Validate `data_keys` exist before `sample()` (#18)
-
-`inference.py` silently skips missing data keys via dict comprehension.
-Validate all `data_keys` exist in `sim_data` before calling `sample()`.
-**File:** `validation/inference.py:32`
-
-#### Deep review: pruning feature
-
-Comprehensive review of the pruning implementation, including literature
-search for best practices and audit of the current code.
-
-**Literature search:**
-- Optuna's built-in pruners (MedianPruner, HyperbandPruner, SHA) and
-  their applicability to multi-objective settings
-- Multi-objective early stopping / pruning in the HPO literature
-  (e.g., BOHB, DEHB, multi-fidelity multi-objective methods)
-- Whether geometric mean of objectives is a sound composite score
-  for pruning decisions, or if dominated-hypervolume-based pruning
-  exists
-- Warm-up heuristics: how many startup trials before pruning is
-  reliable (current default: 5)
-
-**Implementation audit:**
-- `PeriodicValidationCallback` (validation_callback.py): review the
-  custom median-based multi-objective pruning strategy (lines 31–82)
-- Hard-coded intermediate metrics `["calibration_error", "nrmse"]`
-  (line 28) — should these align with `objective_metrics`?
-- `_should_prune_multi_objective()`: median threshold, reference
-  trial selection (COMPLETE + non-rejected only), NaN/Inf handling
-- Single-objective path: delegates to Optuna's `trial.report()` +
-  study pruner — is this sufficient?
-- Interaction with `pruning_n_startup_trials` and sampler startup
-  (see Package A: align pruning warmup with sampler startup)
-- Pruning score = `sqrt(nrmse * calibration_error)` — is geometric
-  mean the right aggregation? What about user-defined objectives?
-
-**Decision needed:** keep custom pruning, adopt a published
-multi-objective pruning strategy, or make pluggable.
-**Files:** `optimization/validation_callback.py`,
-`optimization/objective.py:573-588`
-
-#### Review: validation pipeline contracts & standardization
-
-Review of the validation pipeline integration with `optimize()` identified
-six contract issues. Address as documentation, minor cleanup, or redesign:
-
-1. **`validate_fn` return contract undocumented** — must return
-   `dict[str, float]` with at least the keys in `objective_metrics`;
-   missing keys get penalty substitution, extra keys are silently
-   ignored. Document in `optimize()` docstring and `ValidateFn` alias.
-   **Files:** `api.py:167-171`, `types.py:26`, `optimization/objective.py:129-152`
-
-2. **Timing semantics differ between default and custom paths** — default
-   path extracts pure inference time from `result.timing["inference"]`;
-   custom `validate_fn` path measures total wall-clock (inference + metric
-   computation). Makes `cost_metric="inference_time"` non-comparable.
-   **Decision needed:** ask custom hooks to return timing dict (breaks
-   `ValidateFn`), or document the limitation, or drop inference time
-   normalization if samplers handle this internally.
-   **Files:** `optimization/objective.py:621-643`
-
-3. **Intermediate validation is implicit and non-configurable** —
-   `PeriodicValidationCallback` is always injected when `validation_data`
-   exists, hard-coded to `["calibration_error", "nrmse"]` regardless of
-   `objective_metrics`. No way to disable or customize.
-   **Decision needed:** accept `intermediate_metrics` in ObjectiveConfig,
-   provide disable flag, or document as intentional design.
-   **Files:** `optimization/validation_callback.py:28`,
-   `optimization/objective.py:573-588`
-
-4. **`validation_data` typed Optional but never None in practice** —
-   `ObjectiveConfig.validation_data` accepts `None` with a penalty
-   fallback path, but `optimize()` always generates the dataset.
-   **Decision needed:** make required (non-Optional) in ObjectiveConfig,
-   or expose `validate=False` in `optimize()`, or document as
-   internal-only.
-   **Files:** `optimization/objective.py:226,659-666`, `api.py:329-335`
-
-5. **`default_validate_fn` not exported** — users writing custom
-   `validate_fn` can't easily see the reference implementation. Export
-   it or add a usage example in the docstring.
-   **File:** `optimization/objective.py:95-126`
-
-6. **Multi-objective pruning strategy not pluggable** — custom
-   median-based pruning is buried in the callback with no configuration
-   hooks. Overlaps with "Research: multi-objective pruning improvement"
-   above.
-   **File:** `optimization/validation_callback.py:31-82`
-
-**Prime test case:** The bayesflow-irt IRT model (equivariant summary
-networks, custom approximator) should work flawlessly through the
-custom `build_approximator_fn` / `validate_fn` pathway. Use it as
-the integration test when standardizing these contracts.
-
----
-
-### Package F: Testing Gaps
-
-Independent test additions. Ideally done first to establish a safety net
-before the other packages.
-
-#### Test `warm_start_study` (#23)
-
-**File:** `optimization/study.py:169-218`
-Warm-start logic (ranking, trial copying, edge cases) has no unit tests.
-
-#### Test `_training_loss_fallback` (#24)
-
-**File:** `optimization/objective.py:281-334`
-The validation-failure fallback path is critical but not directly tested.
-
-#### Test `load_validation_dataset` round-trip (#25)
-
-**File:** `validation/data.py:214-244`
-`save_validation_dataset` → `load_validation_dataset` round-trip is not tested.
-
-#### Test `make_condition_grid` edge cases (#26)
-
-**File:** `validation/data.py:149-182`
-`logspace` and mixed-mode grids are not tested.
-
----
-
-### Package G: Search Space Gaps
-
-#### Add `mlp_width` and `bidirectional` to `FusionTransformerSpace` (#29)
-
-`SetTransformerSpace` and `TimeSeriesTransformerSpace` expose `mlp_width`;
-`TimeSeriesNetworkSpace` exposes `bidirectional`. `FusionTransformerSpace`
-has neither — inconsistent across transformer-based summary spaces.
-**File:** `search_spaces/summary/fusion_transformer.py`
-
-#### Validate `IntDimension` rejects `log=True` + `step` (#28)
-
-Optuna's `trial.suggest_int()` raises `ValueError` when both `log=True`
-and `step` (other than 1) are set. Add validation in
-`BaseSearchSpace.sample()` or `IntDimension.__post_init__`.
-**File:** `search_spaces/base.py:49`
-
 ---
 
 ## Done
+
+### Add edge-case tests — Package F (2026-03-21, PR #47)
+16 new edge-case tests across `warm_start_study`, `_training_loss_fallback`,
+`make_condition_grid`, and `load/save_validation_dataset`. Covers boundary
+conditions, error paths, and mixed trial states.
 
 ### Redesign plot_study() for multi-objective support (2026-03-16, PRs #43, #45)
 Two-phase redesign of the visualization module:
