@@ -8,6 +8,15 @@ import pytest
 from conftest import FakeBroadcast, FakeConcatenate, FakeRename, make_adapter
 
 from bayesflow_hpo.api import infer_keys_from_adapter, optimize
+from bayesflow_hpo.validation.data import ValidationDataset
+
+_DUMMY_VALIDATION_DATA = ValidationDataset(
+    simulations=[],
+    condition_labels=[],
+    param_keys=["p"],
+    data_keys=["x"],
+    seed=0,
+)
 
 # ---------------------------------------------------------------------------
 # infer_keys_from_adapter: unit tests
@@ -119,7 +128,7 @@ def _patched_optimize(adapter, **extra_kwargs):
         mock_instance = MagicMock()
         mock_instance.n_objectives = 3
         mock_obj_cls.return_value = mock_instance
-        mock_gen.return_value = MagicMock()
+        mock_gen.return_value = _DUMMY_VALIDATION_DATA
 
         kwargs = {
             "storage": None,

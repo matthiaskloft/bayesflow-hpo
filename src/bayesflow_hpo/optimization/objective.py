@@ -163,7 +163,9 @@ class ObjectiveConfig:
     search_space
         Composite search space defining the tunable dimensions.
     validation_data
-        Pre-generated :class:`ValidationDataset`.
+        Pre-generated :class:`ValidationDataset` (required).
+        Use :func:`~bayesflow_hpo.validation.data.generate_validation_dataset`
+        to create one.
     epochs
         Maximum training epochs per trial (default 200).
     num_batches
@@ -218,12 +220,26 @@ class ObjectiveConfig:
         Optional custom validation function
         ``(approximator, validation_data, n_posterior_samples) ->
         dict[str, float]``.
+
+        The returned dict must contain all keys listed in
+        ``objective_metrics``.  Missing or non-finite values are
+        replaced with a penalty and a warning is logged.  Extra keys
+        are silently ignored.
+
+        **Timing caveat:** wall-clock time of this function is used as
+        the trial's inference time, lumping inference and metric
+        computation together (unlike the default path which isolates
+        pure inference timing).
+
+        **Intermediate pruning:** also called during training at the
+        configured interval with reduced ``n_posterior_samples`` for
+        median-based multi-objective pruning.
     """
 
     simulator: bf.simulators.Simulator
     adapter: bf.adapters.Adapter
     search_space: CompositeSearchSpace
-    validation_data: ValidationDataset | None = None
+    validation_data: ValidationDataset
     epochs: int = 200
     num_batches: int = 50
     early_stopping_patience: int = 5
@@ -247,6 +263,12 @@ class ObjectiveConfig:
     validate_fn: ValidateFn | None = None
 
     def __post_init__(self):
+        if not isinstance(self.validation_data, ValidationDataset):
+            raise TypeError(
+                f"validation_data must be a ValidationDataset, "
+                f"got {type(self.validation_data).__name__}. "
+                f"Use generate_validation_dataset() to create one."
+            )
         if self.objective_mode not in ("mean", "pareto"):
             raise ValueError(
                 f"Unknown objective_mode: {self.objective_mode!r}. "
@@ -570,23 +592,22 @@ class GenericObjective:
             ),
         ]
 
-        if config.validation_data is not None:
-            from bayesflow_hpo.optimization.validation_callback import (
-                PeriodicValidationCallback,
-            )
+        from bayesflow_hpo.optimization.validation_callback import (
+            PeriodicValidationCallback,
+        )
 
-            callbacks.append(
-                PeriodicValidationCallback(
-                    trial=trial,
-                    approximator=approximator,
-                    validation_data=config.validation_data,
-                    interval=config.intermediate_validation_interval,
-                    warmup=config.intermediate_validation_warmup,
-                    n_posterior_samples=config.n_intermediate_posterior_samples,
-                    n_startup_trials=config.pruning_n_startup_trials,
-                    validate_fn=config.validate_fn,
-                )
+        callbacks.append(
+            PeriodicValidationCallback(
+                trial=trial,
+                approximator=approximator,
+                validation_data=config.validation_data,
+                interval=config.intermediate_validation_interval,
+                warmup=config.intermediate_validation_warmup,
+                n_posterior_samples=config.n_intermediate_posterior_samples,
+                n_startup_trials=config.pruning_n_startup_trials,
+                validate_fn=config.validate_fn,
             )
+        )
 
         # --- Step 7: TRAIN ---
         t_train_start = time.perf_counter()
@@ -613,58 +634,49 @@ class GenericObjective:
         inference_time = 0.0
         n_conditions = 0
         try:
-            if config.validation_data is not None:
-                n_conditions = len(config.validation_data.simulations)
+            n_conditions = len(config.validation_data.simulations)
 
-                if config.validate_fn is not None:
-                    # Custom validation hook — wall-clock time includes
-                    # metric computation; pure inference timing unavailable.
-                    t_val_start = time.perf_counter()
-                    raw = config.validate_fn(
-                        approximator,
-                        config.validation_data,
-                        config.n_posterior_samples,
-                    )
-                    inference_time = time.perf_counter() - t_val_start
-                    metrics_summary = _validate_metric_keys(
-                        raw, config.objective_metrics,
-                    )
-                else:
-                    # Default path — call pipeline directly to get pure
-                    # inference timing from result.timing["inference"].
-                    from bayesflow_hpo.validation.pipeline import (
-                        run_validation_pipeline,
-                    )
-
-                    result = run_validation_pipeline(
-                        approximator=approximator,
-                        validation_data=config.validation_data,
-                        n_posterior_samples=config.n_posterior_samples,
-                    )
-                    inference_time = result.timing.get("inference", 0.0)
-                    metrics_summary = _validate_metric_keys(
-                        dict(result.summary), config.objective_metrics,
-                    )
-
-                inference_time_s = compute_inference_time_per_dataset(
-                    inference_time, n_conditions,
+            if config.validate_fn is not None:
+                # Custom validation hook — wall-clock time includes
+                # metric computation; pure inference timing unavailable.
+                t_val_start = time.perf_counter()
+                raw = config.validate_fn(
+                    approximator,
+                    config.validation_data,
+                    config.n_posterior_samples,
                 )
-                trial.set_user_attr(
-                    "inference_time_s", round(inference_time_s, 4),
+                inference_time = time.perf_counter() - t_val_start
+                metrics_summary = _validate_metric_keys(
+                    raw, config.objective_metrics,
                 )
-                for key, val in metrics_summary.items():
-                    trial.set_user_attr(key, round(float(val), 6))
-
-                # Wrap for extract_multi_objective_values compatibility.
-                metrics = {"summary": metrics_summary}
             else:
-                # No validation data — use a penalty-like fallback.
-                metrics = {
-                    "summary": {
-                        k: FAILED_TRIAL_CAL_ERROR
-                        for k in config.objective_metrics
-                    }
-                }
+                # Default path — call pipeline directly to get pure
+                # inference timing from result.timing["inference"].
+                from bayesflow_hpo.validation.pipeline import (
+                    run_validation_pipeline,
+                )
+
+                result = run_validation_pipeline(
+                    approximator=approximator,
+                    validation_data=config.validation_data,
+                    n_posterior_samples=config.n_posterior_samples,
+                )
+                inference_time = result.timing.get("inference", 0.0)
+                metrics_summary = _validate_metric_keys(
+                    dict(result.summary), config.objective_metrics,
+                )
+
+            inference_time_s = compute_inference_time_per_dataset(
+                inference_time, n_conditions,
+            )
+            trial.set_user_attr(
+                "inference_time_s", round(inference_time_s, 4),
+            )
+            for key, val in metrics_summary.items():
+                trial.set_user_attr(key, round(float(val), 6))
+
+            # Wrap for extract_multi_objective_values compatibility.
+            metrics = {"summary": metrics_summary}
 
         except optuna.TrialPruned:
             cleanup_trial()

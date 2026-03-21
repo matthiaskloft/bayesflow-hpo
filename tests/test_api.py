@@ -15,6 +15,15 @@ from bayesflow_hpo.api import (
     _setup_validation_data,
     optimize,
 )
+from bayesflow_hpo.validation.data import ValidationDataset
+
+_DUMMY_VALIDATION_DATA = ValidationDataset(
+    simulations=[],
+    condition_labels=[],
+    param_keys=["p"],
+    data_keys=["x"],
+    seed=0,
+)
 
 
 def _make_fake_search_space():
@@ -41,8 +50,8 @@ def _patched_optimize(adapter=None, **extra_kwargs):
         mock_instance.n_objectives = 3  # pareto default: 2 metrics + cost
         mock_obj_cls.return_value = mock_instance
 
-        # Return a mock validation dataset
-        mock_gen.return_value = MagicMock()
+        # Return a real ValidationDataset to pass isinstance check.
+        mock_gen.return_value = _DUMMY_VALIDATION_DATA
 
         kwargs = {"storage": None, "search_space": _make_fake_search_space()}
         kwargs.update(extra_kwargs)
@@ -211,7 +220,7 @@ def test_optimize_uses_validation_simulator_for_dataset():
         mock_instance = MagicMock()
         mock_instance.n_objectives = 3
         mock_obj_cls.return_value = mock_instance
-        mock_gen.return_value = MagicMock()
+        mock_gen.return_value = _DUMMY_VALIDATION_DATA
 
         optimize(
             simulator=train_sim,
@@ -241,7 +250,7 @@ def test_optimize_defaults_to_training_simulator_for_dataset():
         mock_instance = MagicMock()
         mock_instance.n_objectives = 3
         mock_obj_cls.return_value = mock_instance
-        mock_gen.return_value = MagicMock()
+        mock_gen.return_value = _DUMMY_VALIDATION_DATA
 
         optimize(
             simulator=train_sim,
@@ -268,7 +277,7 @@ def test_optimize_calls_check_pipeline():
         mock_instance = MagicMock()
         mock_instance.n_objectives = 3
         mock_obj_cls.return_value = mock_instance
-        mock_gen.return_value = MagicMock()
+        mock_gen.return_value = _DUMMY_VALIDATION_DATA
 
         optimize(
             simulator=MagicMock(),
@@ -321,7 +330,7 @@ class TestSetupValidationData:
         val_sim = MagicMock(name="val_sim")
         train_sim = MagicMock(name="train_sim")
         with patch("bayesflow_hpo.api.generate_validation_dataset") as mock_gen:
-            mock_gen.return_value = MagicMock()
+            mock_gen.return_value = _DUMMY_VALIDATION_DATA
             _setup_validation_data(
                 simulator=train_sim,
                 validation_simulator=val_sim,
@@ -335,7 +344,7 @@ class TestSetupValidationData:
     def test_falls_back_to_simulator(self):
         train_sim = MagicMock(name="train_sim")
         with patch("bayesflow_hpo.api.generate_validation_dataset") as mock_gen:
-            mock_gen.return_value = MagicMock()
+            mock_gen.return_value = _DUMMY_VALIDATION_DATA
             _setup_validation_data(
                 simulator=train_sim,
                 validation_simulator=None,
@@ -349,7 +358,7 @@ class TestSetupValidationData:
     def test_passes_condition_grid(self):
         conds = {"N": [50, 100]}
         with patch("bayesflow_hpo.api.generate_validation_dataset") as mock_gen:
-            mock_gen.return_value = MagicMock()
+            mock_gen.return_value = _DUMMY_VALIDATION_DATA
             _setup_validation_data(
                 simulator=MagicMock(),
                 validation_simulator=None,

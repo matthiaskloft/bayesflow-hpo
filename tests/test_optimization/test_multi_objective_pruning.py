@@ -9,6 +9,15 @@ from optuna.trial import TrialState
 from bayesflow_hpo.optimization.validation_callback import (
     _should_prune_multi_objective,
 )
+from bayesflow_hpo.validation.data import ValidationDataset
+
+_DUMMY_VALIDATION_DATA = ValidationDataset(
+    simulations=[],
+    condition_labels=[],
+    param_keys=["p"],
+    data_keys=["x"],
+    seed=0,
+)
 
 _PRUNE = _should_prune_multi_objective
 
@@ -172,7 +181,7 @@ def test_callback_stores_step_keyed_attr():
     cb = PeriodicValidationCallback(
         trial=trial,
         approximator=None,
-        validation_data=None,
+        validation_data=_DUMMY_VALIDATION_DATA,
         interval=1,
         warmup=0,
         n_startup_trials=5,
@@ -200,7 +209,7 @@ def test_callback_raises_trial_pruned():
     cb = PeriodicValidationCallback(
         trial=trial,
         approximator=None,
-        validation_data=None,
+        validation_data=_DUMMY_VALIDATION_DATA,
         interval=1,
         warmup=0,
         n_startup_trials=5,
@@ -224,7 +233,7 @@ def test_single_objective_uses_trial_report():
     cb = PeriodicValidationCallback(
         trial=trial,
         approximator=None,
-        validation_data=None,
+        validation_data=_DUMMY_VALIDATION_DATA,
         interval=1,
         warmup=0,
     )
