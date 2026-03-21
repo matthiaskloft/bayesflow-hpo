@@ -1,4 +1,4 @@
-"""Tests for multi-objective pruning in PeriodicValidationCallback."""
+"""Tests for PeriodicValidationCallback with pluggable pruning strategies."""
 
 from unittest.mock import patch
 
@@ -7,7 +7,7 @@ import pytest
 from optuna.trial import TrialState
 
 from bayesflow_hpo.optimization.validation_callback import (
-    _should_prune_multi_objective,
+    PeriodicValidationCallback,
 )
 from bayesflow_hpo.validation.data import ValidationDataset
 
@@ -19,18 +19,10 @@ _DUMMY_VALIDATION_DATA = ValidationDataset(
     seed=0,
 )
 
-_PRUNE = _should_prune_multi_objective
-
-
-# -------------------------------------------------------------------
-# Helpers
-# -------------------------------------------------------------------
-
 
 def _make_study(n_objectives: int = 2) -> optuna.Study:
     """Create an in-memory multi- or single-objective study."""
-    directions = ["minimize"] * n_objectives
-    return optuna.create_study(directions=directions)
+    return optuna.create_study(directions=["minimize"] * n_objectives)
 
 
 def _add_completed_trial(
@@ -49,199 +41,348 @@ def _add_completed_trial(
     study.add_trial(trial)
 
 
-# -------------------------------------------------------------------
-# _should_prune_multi_objective
-# -------------------------------------------------------------------
+def _make_metric_attrs(
+    metrics: dict[str, float],
+    step: int,
+) -> dict[str, float]:
+    """Build ``val_{metric}_step_{step}`` user attrs from a metric dict."""
+    return {f"val_{m}_step_{step}": v for m, v in metrics.items()}
 
 
-def test_no_pruning_below_startup_threshold():
-    """Should not prune when fewer than n_startup_trials references exist."""
-    study = _make_study()
-    for i in range(3):
-        _add_completed_trial(study, [0.1, 0.5], {"val_score_step_1": 0.1 + i * 0.1})
+class TestCallbackPerMetricAttrs:
+    """Verify per-metric user attribute storage."""
 
-    # Start a real trial so we get a live Trial object.
-    trial = study.ask()
-    assert not _PRUNE(trial, score=0.9, step=1, n_startup_trials=5)
+    def test_stores_per_metric_attrs(self):
+        """Multi-objective callback should store val_{metric}_step_{step}."""
+        study = _make_study()
+        for s in [0.01, 0.02, 0.03, 0.04, 0.05]:
+            _add_completed_trial(
+                study,
+                [s, 0.5],
+                _make_metric_attrs(
+                    {"calibration_error": s, "nrmse": s + 0.01}, step=1
+                ),
+            )
 
+        trial = study.ask()
+        cb = PeriodicValidationCallback(
+            trial=trial,
+            approximator=None,
+            validation_data=_DUMMY_VALIDATION_DATA,
+            interval=1,
+            warmup=0,
+            n_startup_trials=5,
+            objective_metrics=["calibration_error", "nrmse"],
+        )
 
-def test_no_pruning_at_median():
-    """Score equal to the median should NOT trigger pruning."""
-    study = _make_study()
-    scores = [0.1, 0.2, 0.3, 0.4, 0.5]
-    for s in scores:
-        _add_completed_trial(study, [s, 0.5], {"val_score_step_1": s})
+        mock_scores = {"calibration_error": 0.01, "nrmse": 0.02}
+        with patch.object(
+            cb, "_run_lightweight_validation", return_value=mock_scores
+        ):
+            cb.on_epoch_end(epoch=0)
 
-    trial = study.ask()
-    # Median is 0.3 — equal should not prune.
-    assert not _PRUNE(trial, score=0.3, step=1, n_startup_trials=5)
-
-
-def test_prune_above_median():
-    """Score above the median should trigger pruning."""
-    study = _make_study()
-    scores = [0.1, 0.2, 0.3, 0.4, 0.5]
-    for s in scores:
-        _add_completed_trial(study, [s, 0.5], {"val_score_step_1": s})
-
-    trial = study.ask()
-    assert _PRUNE(trial, score=0.4, step=1, n_startup_trials=5)
-
-
-def test_budget_rejected_trials_excluded():
-    """Trials with rejected_reason should not count as references."""
-    study = _make_study()
-    # 5 completed trials, but 3 are budget-rejected.
-    for s in [0.1, 0.2, 0.3, 0.4, 0.5]:
-        attrs = {"val_score_step_1": s}
-        if s >= 0.3:
-            attrs["rejected_reason"] = "param_budget"
-        _add_completed_trial(study, [s, 0.5], attrs)
-
-    trial = study.ask()
-    # Only 2 non-rejected trials → below startup threshold of 5.
-    assert not _PRUNE(trial, score=0.9, step=1, n_startup_trials=5)
+        assert "val_calibration_error_step_1" in trial.user_attrs
+        assert trial.user_attrs["val_calibration_error_step_1"] == 0.01
+        assert "val_nrmse_step_1" in trial.user_attrs
+        assert trial.user_attrs["val_nrmse_step_1"] == 0.02
 
 
-def test_different_steps_independent():
-    """Scores at step 1 should not affect pruning decision at step 2."""
-    study = _make_study()
-    for s in [0.1, 0.2, 0.3, 0.4, 0.5]:
-        _add_completed_trial(study, [s, 0.5], {"val_score_step_1": s})
+class TestCallbackPruning:
+    """Verify pruning dispatch."""
 
-    trial = study.ask()
-    # No completed trials have val_score_step_2 → below startup threshold.
-    assert not _PRUNE(trial, score=0.9, step=2, n_startup_trials=5)
+    def test_dominance_raises_trial_pruned(self):
+        """Dominance strategy should raise TrialPruned for bad trial."""
+        study = _make_study()
+        for s in [0.01, 0.02, 0.03, 0.04, 0.05]:
+            _add_completed_trial(
+                study,
+                [s, 0.5],
+                _make_metric_attrs(
+                    {"calibration_error": s, "nrmse": s}, step=1
+                ),
+            )
 
+        trial = study.ask()
+        cb = PeriodicValidationCallback(
+            trial=trial,
+            approximator=None,
+            validation_data=_DUMMY_VALIDATION_DATA,
+            interval=1,
+            warmup=0,
+            n_startup_trials=5,
+            pruning_strategy="dominance",
+            objective_metrics=["calibration_error", "nrmse"],
+        )
 
-def test_nan_score_triggers_pruning():
-    """A NaN intermediate score should trigger immediate pruning."""
-    study = _make_study()
-    for s in [0.1, 0.2, 0.3, 0.4, 0.5]:
-        _add_completed_trial(study, [s, 0.5], {"val_score_step_1": s})
+        mock_scores = {"calibration_error": 0.99, "nrmse": 0.99}
+        with patch.object(
+            cb, "_run_lightweight_validation", return_value=mock_scores
+        ):
+            with pytest.raises(optuna.TrialPruned):
+                cb.on_epoch_end(epoch=0)
+        # Confirm strategy ran at step 1, matching seeded attrs.
+        assert cb._step == 1
 
-    trial = study.ask()
-    assert _PRUNE(trial, score=float("nan"), step=1, n_startup_trials=5)
+    def test_none_strategy_never_prunes(self):
+        """Strategy 'none' should never raise TrialPruned."""
+        study = _make_study()
+        for s in [0.01, 0.02, 0.03, 0.04, 0.05]:
+            _add_completed_trial(
+                study,
+                [s, 0.5],
+                _make_metric_attrs(
+                    {"calibration_error": s, "nrmse": s}, step=1
+                ),
+            )
 
+        trial = study.ask()
+        cb = PeriodicValidationCallback(
+            trial=trial,
+            approximator=None,
+            validation_data=_DUMMY_VALIDATION_DATA,
+            interval=1,
+            warmup=0,
+            n_startup_trials=5,
+            pruning_strategy="none",
+            objective_metrics=["calibration_error", "nrmse"],
+        )
 
-def test_inf_score_triggers_pruning():
-    """An Inf intermediate score should trigger immediate pruning."""
-    study = _make_study()
-    trial = study.ask()
-    assert _PRUNE(trial, score=float("inf"), step=1, n_startup_trials=5)
-
-
-def test_nan_in_completed_scores_ignored():
-    """NaN scores from completed trials should be filtered out."""
-    study = _make_study()
-    # 5 trials with valid scores + 2 with NaN.
-    for s in [0.1, 0.2, 0.3, 0.4, 0.5]:
-        _add_completed_trial(study, [s, 0.5], {"val_score_step_1": s})
-    _add_completed_trial(
-        study, [0.9, 0.5], {"val_score_step_1": float("nan")}
-    )
-    _add_completed_trial(
-        study, [0.9, 0.5], {"val_score_step_1": float("nan")}
-    )
-
-    trial = study.ask()
-    # Median of [0.1, 0.2, 0.3, 0.4, 0.5] is 0.3.
-    # NaN entries should be excluded, not corrupt the median.
-    assert not _PRUNE(trial, score=0.2, step=1, n_startup_trials=5)
-    assert _PRUNE(trial, score=0.4, step=1, n_startup_trials=5)
-
-
-def test_n_startup_trials_zero_never_prunes():
-    """n_startup_trials=0 should be treated as disabled (no pruning)."""
-    study = _make_study()
-    for s in [0.1, 0.2]:
-        _add_completed_trial(study, [s, 0.5], {"val_score_step_1": s})
-
-    trial = study.ask()
-    assert not _PRUNE(trial, score=0.9, step=1, n_startup_trials=0)
-
-
-# -------------------------------------------------------------------
-# PeriodicValidationCallback integration
-# -------------------------------------------------------------------
-
-
-def test_callback_stores_step_keyed_attr():
-    """Multi-objective callback should store val_score_step_{step}."""
-    from bayesflow_hpo.optimization.validation_callback import (
-        PeriodicValidationCallback,
-    )
-
-    study = _make_study()
-    # Add enough completed trials so pruning could activate.
-    for s in [0.01, 0.02, 0.03, 0.04, 0.05]:
-        _add_completed_trial(study, [s, 0.5], {"val_score_step_1": s})
-
-    trial = study.ask()
-    cb = PeriodicValidationCallback(
-        trial=trial,
-        approximator=None,
-        validation_data=_DUMMY_VALIDATION_DATA,
-        interval=1,
-        warmup=0,
-        n_startup_trials=5,
-    )
-
-    # Mock _run_lightweight_validation to return a low score (no pruning).
-    with patch.object(cb, "_run_lightweight_validation", return_value=0.01):
-        cb.on_epoch_end(epoch=0)
-
-    assert "val_score_step_1" in trial.user_attrs
-    assert trial.user_attrs["val_score_step_1"] == 0.01
-
-
-def test_callback_raises_trial_pruned():
-    """Callback should raise TrialPruned when score exceeds median."""
-    from bayesflow_hpo.optimization.validation_callback import (
-        PeriodicValidationCallback,
-    )
-
-    study = _make_study()
-    for s in [0.01, 0.02, 0.03, 0.04, 0.05]:
-        _add_completed_trial(study, [s, 0.5], {"val_score_step_1": s})
-
-    trial = study.ask()
-    cb = PeriodicValidationCallback(
-        trial=trial,
-        approximator=None,
-        validation_data=_DUMMY_VALIDATION_DATA,
-        interval=1,
-        warmup=0,
-        n_startup_trials=5,
-    )
-
-    # Mock _run_lightweight_validation to return a bad score.
-    with patch.object(cb, "_run_lightweight_validation", return_value=0.99):
-        with pytest.raises(optuna.TrialPruned):
+        mock_scores = {"calibration_error": 0.99, "nrmse": 0.99}
+        with patch.object(
+            cb, "_run_lightweight_validation", return_value=mock_scores
+        ):
+            # Should NOT raise.
             cb.on_epoch_end(epoch=0)
 
 
-def test_single_objective_uses_trial_report():
-    """Single-objective path should still call trial.report + should_prune."""
-    from bayesflow_hpo.optimization.validation_callback import (
-        PeriodicValidationCallback,
-    )
+class TestCallbackStrategyDispatch:
+    """Verify the correct strategy function is called."""
 
-    study = optuna.create_study(direction="minimize")
-    trial = study.ask()
+    def test_dominance_dispatches(self):
+        """pruning_strategy='dominance' calls should_prune_dominance."""
+        study = _make_study()
+        trial = study.ask()
+        cb = PeriodicValidationCallback(
+            trial=trial,
+            approximator=None,
+            validation_data=_DUMMY_VALIDATION_DATA,
+            interval=1,
+            warmup=0,
+            pruning_strategy="dominance",
+            objective_metrics=["calibration_error", "nrmse"],
+        )
 
-    cb = PeriodicValidationCallback(
-        trial=trial,
-        approximator=None,
-        validation_data=_DUMMY_VALIDATION_DATA,
-        interval=1,
-        warmup=0,
-    )
+        with (
+            patch.object(
+                cb,
+                "_run_lightweight_validation",
+                return_value={"calibration_error": 0.5, "nrmse": 0.5},
+            ),
+            patch(
+                "bayesflow_hpo.optimization.validation_callback"
+                ".should_prune_dominance",
+                return_value=False,
+            ) as mock_fn,
+        ):
+            cb.on_epoch_end(epoch=0)
 
-    with (
-        patch.object(cb, "_run_lightweight_validation", return_value=0.5),
-        patch.object(trial, "report") as mock_report,
-    ):
+        mock_fn.assert_called_once()
+
+    def test_mo_sha_dispatches(self):
+        """pruning_strategy='mo-sha' calls should_prune_mo_sha."""
+        study = _make_study()
+        trial = study.ask()
+        cb = PeriodicValidationCallback(
+            trial=trial,
+            approximator=None,
+            validation_data=_DUMMY_VALIDATION_DATA,
+            interval=1,
+            warmup=0,
+            pruning_strategy="mo-sha",
+            objective_metrics=["calibration_error", "nrmse"],
+        )
+
+        with (
+            patch.object(
+                cb,
+                "_run_lightweight_validation",
+                return_value={"calibration_error": 0.5, "nrmse": 0.5},
+            ),
+            patch(
+                "bayesflow_hpo.optimization.validation_callback"
+                ".should_prune_mo_sha",
+                return_value=False,
+            ) as mock_fn,
+        ):
+            cb.on_epoch_end(epoch=0)
+
+        mock_fn.assert_called_once()
+
+    def test_primary_dispatches(self):
+        """pruning_strategy='primary' calls should_prune_primary."""
+        study = _make_study()
+        trial = study.ask()
+        cb = PeriodicValidationCallback(
+            trial=trial,
+            approximator=None,
+            validation_data=_DUMMY_VALIDATION_DATA,
+            interval=1,
+            warmup=0,
+            pruning_strategy="primary",
+            objective_metrics=["calibration_error", "nrmse"],
+        )
+
+        with (
+            patch.object(
+                cb,
+                "_run_lightweight_validation",
+                return_value={"calibration_error": 0.5, "nrmse": 0.5},
+            ),
+            patch(
+                "bayesflow_hpo.optimization.validation_callback"
+                ".should_prune_primary",
+                return_value=False,
+            ) as mock_fn,
+        ):
+            cb.on_epoch_end(epoch=0)
+
+        mock_fn.assert_called_once()
+
+    def test_primary_tuple_dispatches_with_metric(self):
+        """Tuple ('primary', 'nrmse') passes correct metric."""
+        study = _make_study()
+        trial = study.ask()
+        cb = PeriodicValidationCallback(
+            trial=trial,
+            approximator=None,
+            validation_data=_DUMMY_VALIDATION_DATA,
+            interval=1,
+            warmup=0,
+            pruning_strategy=("primary", "nrmse"),
+            objective_metrics=["calibration_error", "nrmse"],
+        )
+
+        with (
+            patch.object(
+                cb,
+                "_run_lightweight_validation",
+                return_value={"calibration_error": 0.5, "nrmse": 0.5},
+            ),
+            patch(
+                "bayesflow_hpo.optimization.validation_callback"
+                ".should_prune_primary",
+                return_value=False,
+            ) as mock_fn,
+        ):
+            cb.on_epoch_end(epoch=0)
+
+        # Check the metric argument was "nrmse".
+        call_args = mock_fn.call_args
+        assert call_args[0][2] == "nrmse"  # 3rd positional: metric
+
+
+class TestSingleObjective:
+    """Verify single-objective path."""
+
+    def test_uses_trial_report(self):
+        """Single-objective path calls trial.report with first metric."""
+        study = optuna.create_study(direction="minimize")
+        trial = study.ask()
+
+        cb = PeriodicValidationCallback(
+            trial=trial,
+            approximator=None,
+            validation_data=_DUMMY_VALIDATION_DATA,
+            interval=1,
+            warmup=0,
+            objective_metrics=["calibration_error"],
+        )
+
+        mock_scores = {"calibration_error": 0.5}
+        with (
+            patch.object(
+                cb, "_run_lightweight_validation", return_value=mock_scores
+            ),
+            patch.object(trial, "report") as mock_report,
+        ):
+            cb.on_epoch_end(epoch=0)
+
+        mock_report.assert_called_once_with(0.5, step=1)
+
+    def test_empty_scores_does_not_crash(self):
+        """Empty dict from validation should not cause KeyError."""
+        study = optuna.create_study(direction="minimize")
+        trial = study.ask()
+
+        cb = PeriodicValidationCallback(
+            trial=trial,
+            approximator=None,
+            validation_data=_DUMMY_VALIDATION_DATA,
+            interval=1,
+            warmup=0,
+            objective_metrics=["calibration_error"],
+        )
+
+        # Simulate validation returning None (missing metrics path).
+        with patch.object(
+            cb, "_run_lightweight_validation", return_value=None
+        ):
+            cb.on_epoch_end(epoch=0)
+
+        # Step should not advance.
+        assert cb._step == 0
+
+
+class TestValidateFnMissingMetrics:
+    """Verify missing metric handling from validate_fn."""
+
+    def test_missing_metrics_returns_none(self):
+        """validate_fn missing required metrics → skip pruning step."""
+        study = _make_study()
+        trial = study.ask()
+
+        def bad_validate_fn(approx, data, n):
+            return {"calibration_error": 0.5}  # Missing "nrmse".
+
+        cb = PeriodicValidationCallback(
+            trial=trial,
+            approximator=None,
+            validation_data=_DUMMY_VALIDATION_DATA,
+            interval=1,
+            warmup=0,
+            validate_fn=bad_validate_fn,
+            objective_metrics=["calibration_error", "nrmse"],
+        )
+
+        # Should not crash — returns None → no pruning.
         cb.on_epoch_end(epoch=0)
+        # Step counter should not have advanced.
+        assert cb._step == 0
 
-    mock_report.assert_called_once_with(0.5, step=1)
+
+class TestStrategyValidation:
+    """Verify invalid strategy names are rejected."""
+
+    def test_invalid_strategy_raises(self):
+        """Unknown strategy string should raise ValueError."""
+        study = _make_study()
+        trial = study.ask()
+        with pytest.raises(ValueError, match="Unknown pruning_strategy"):
+            PeriodicValidationCallback(
+                trial=trial,
+                approximator=None,
+                validation_data=_DUMMY_VALIDATION_DATA,
+                pruning_strategy="invalid",
+            )
+
+    def test_invalid_tuple_raises(self):
+        """Invalid tuple form should raise ValueError."""
+        study = _make_study()
+        trial = study.ask()
+        with pytest.raises(ValueError, match="Tuple pruning_strategy"):
+            PeriodicValidationCallback(
+                trial=trial,
+                approximator=None,
+                validation_data=_DUMMY_VALIDATION_DATA,
+                pruning_strategy=("dominance", "metric"),
+            )

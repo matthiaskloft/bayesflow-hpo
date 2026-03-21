@@ -1,16 +1,25 @@
 """Periodic validation callback for mid-training pruning.
 
-Runs a lightweight validation (calibration_error + nrmse only) every
-*interval* epochs and uses the geometric mean for pruning decisions.
+Runs a lightweight validation every *interval* epochs and uses a
+pluggable pruning strategy for multi-objective studies.
 
 For single-objective studies, the standard ``trial.report()`` /
 ``trial.should_prune()`` API is used with the study's pruner.
 
 For multi-objective studies (the default in bayesflow_hpo), Optuna
-does not support ``trial.report()``.  Instead, a custom median-based
-pruning strategy compares the current trial's intermediate score
-against completed trials at the same step and prunes if it exceeds
-the median.
+does not support ``trial.report()`` (Issue #3450, open since April
+2022).  Instead, one of three custom pruning strategies is applied:
+
+- ``"dominance"`` — per-objective normalized median check (AND rule).
+  Simplified adaptation of MO-ASHA's dominance-based promotion
+  (Schmucker et al., 2021).
+- ``"mo-sha"`` — non-dominated sorting at each step, bottom-fraction
+  pruning per MO-ASHA Algorithm 2 (Schmucker et al., 2021).
+- ``"primary"`` — single-metric median pruning on a user-chosen
+  objective (equivalent to Optuna's MedianPruner; Akiba et al., 2019).
+
+Strategy implementations live in
+:mod:`bayesflow_hpo.optimization.pruning_strategies`.
 """
 
 from __future__ import annotations
@@ -18,84 +27,29 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-import numpy as np
 import optuna
 from keras.callbacks import Callback
 
+from bayesflow_hpo.optimization.pruning_strategies import (
+    should_prune_dominance,
+    should_prune_mo_sha,
+    should_prune_primary,
+)
 from bayesflow_hpo.types import ValidateFn
 
 logger = logging.getLogger(__name__)
 
-# Metrics computed during intermediate validation (fast subset).
-_INTERMEDIATE_METRICS = ["calibration_error", "nrmse"]
-
-
-def _should_prune_multi_objective(
-    trial: optuna.Trial,
-    score: float,
-    step: int,
-    n_startup_trials: int = 5,
-) -> bool:
-    """Return True if this trial should be pruned (multi-objective).
-
-    Collects ``val_score_step_{step}`` from all COMPLETE non-rejected
-    trials and prunes when the current *score* exceeds the median.
-    Requires at least *n_startup_trials* reference scores before
-    activating.
-
-    Parameters
-    ----------
-    trial
-        The running Optuna trial.
-    score
-        Current intermediate pruning score (geometric mean).
-    step
-        Monotonic step counter (1-indexed).
-    n_startup_trials
-        Minimum completed trials before pruning activates.
-    """
-    if n_startup_trials < 1:
-        return False
-
-    # NaN/Inf scores indicate a degenerate trial — prune immediately.
-    if not np.isfinite(score):
-        return True
-
-    attr_key = f"val_score_step_{step}"
-    completed_scores: list[float] = []
-
-    for t in trial.study.get_trials(
-        deepcopy=False, states=[optuna.trial.TrialState.COMPLETE]
-    ):
-        if "rejected_reason" in t.user_attrs:
-            continue
-        if t.number == trial.number:
-            continue
-        stored = t.user_attrs.get(attr_key)
-        if stored is not None:
-            val = float(stored)
-            if np.isfinite(val):
-                completed_scores.append(val)
-
-    if len(completed_scores) < n_startup_trials:
-        return False
-
-    median_score = float(np.median(completed_scores))
-    return score > median_score
+_VALID_STRATEGIES = {"none", "dominance", "mo-sha", "primary"}
 
 
 class PeriodicValidationCallback(Callback):
     """Run validation every *interval* epochs and report to Optuna.
 
-    The pruning score is ``sqrt(nrmse * calibration_error)`` (geometric
-    mean).  If either metric is missing the callback falls back to
-    ``calibration_error`` alone.
-
-    For single-objective studies the score is reported via
-    ``trial.report()`` and pruning uses the study's pruner.  For
-    multi-objective studies (where ``trial.report()`` is unsupported),
-    a custom median-based strategy prunes trials whose intermediate
-    score exceeds the median of completed trials at the same step.
+    For single-objective studies the first metric in ``objective_metrics``
+    is reported via ``trial.report()`` and pruning uses the study's
+    pruner.  For multi-objective studies (where ``trial.report()`` is
+    unsupported), per-metric user attributes are stored and the
+    configured ``pruning_strategy`` decides whether to prune.
 
     Parameters
     ----------
@@ -105,7 +59,8 @@ class PeriodicValidationCallback(Callback):
         Trained approximator with a ``.sample()`` method (updated
         in-place during training).
     validation_data
-        Pre-generated :class:`~bayesflow_hpo.validation.data.ValidationDataset`.
+        Pre-generated
+        :class:`~bayesflow_hpo.validation.data.ValidationDataset`.
     interval
         Run validation every *interval* epochs.  Default 10.
     warmup
@@ -122,9 +77,16 @@ class PeriodicValidationCallback(Callback):
         ``(approximator, validation_data, n_posterior_samples) ->
         dict[str, float]``.  When provided, replaces the default
         ``run_validation_pipeline`` for intermediate pruning.  The
-        returned dict must contain ``"calibration_error"``; if it
-        also contains ``"nrmse"``, the pruning score uses their
-        geometric mean.
+        returned dict must contain all keys in ``objective_metrics``.
+    pruning_strategy
+        Multi-objective pruning strategy.  One of ``"dominance"``
+        (default), ``"mo-sha"``, ``"primary"``, or ``"none"``.
+        For ``"primary"``, pass a tuple ``("primary", metric_name)``
+        to specify which metric to prune on (defaults to
+        ``objective_metrics[0]``).
+    objective_metrics
+        Metric keys to compute during intermediate validation.
+        Defaults to ``["calibration_error", "nrmse"]``.
     """
 
     def __init__(
@@ -137,6 +99,8 @@ class PeriodicValidationCallback(Callback):
         n_posterior_samples: int = 250,
         n_startup_trials: int = 5,
         validate_fn: ValidateFn | None = None,
+        pruning_strategy: str | tuple[str, str] = "dominance",
+        objective_metrics: list[str] | None = None,
     ):
         super().__init__()
         self.trial = trial
@@ -151,6 +115,38 @@ class PeriodicValidationCallback(Callback):
         self._consecutive_failures = 0
         self._is_multi_objective = len(trial.study.directions) > 1
 
+        # Parse pruning strategy.
+        if isinstance(pruning_strategy, tuple):
+            if (
+                len(pruning_strategy) != 2
+                or pruning_strategy[0] != "primary"
+            ):
+                raise ValueError(
+                    f"Tuple pruning_strategy must be "
+                    f"('primary', metric_name), got {pruning_strategy!r}"
+                )
+            self._strategy_name = "primary"
+            self._primary_metric = pruning_strategy[1]
+        else:
+            if pruning_strategy not in _VALID_STRATEGIES:
+                raise ValueError(
+                    f"Unknown pruning_strategy: {pruning_strategy!r}. "
+                    f"Expected one of {sorted(_VALID_STRATEGIES)}."
+                )
+            self._strategy_name = pruning_strategy
+            self._primary_metric = None
+
+        # Resolve objective_metrics with backward-compatible default.
+        self.objective_metrics = (
+            objective_metrics
+            if objective_metrics is not None
+            else ["calibration_error", "nrmse"]
+        )
+
+        # Default primary metric to first objective metric.
+        if self._strategy_name == "primary" and self._primary_metric is None:
+            self._primary_metric = self.objective_metrics[0]
+
     def on_epoch_end(self, epoch: int, logs: Any = None) -> None:
         """Run validation and check for pruning at scheduled intervals.
 
@@ -163,8 +159,8 @@ class PeriodicValidationCallback(Callback):
         if (epoch - self.warmup) % self.interval != 0:
             return
 
-        score = self._run_lightweight_validation()
-        if score is None:
+        scores = self._run_lightweight_validation()
+        if scores is None:
             self._consecutive_failures += 1
             if self._consecutive_failures == 3:
                 logger.warning(
@@ -179,15 +175,20 @@ class PeriodicValidationCallback(Callback):
         self._step += 1
 
         if self._is_multi_objective:
-            self.trial.set_user_attr(
-                f"val_score_step_{self._step}", round(float(score), 6)
-            )
-            if _should_prune_multi_objective(
-                self.trial, score, self._step, self.n_startup_trials
-            ):
+            # Store per-metric user attrs for strategy functions.
+            for metric, val in scores.items():
+                self.trial.set_user_attr(
+                    f"val_{metric}_step_{self._step}",
+                    round(float(val), 6),
+                )
+
+            should_prune = self._evaluate_pruning(scores)
+            if should_prune:
                 raise optuna.TrialPruned()
         else:
-            self.trial.report(float(score), step=self._step)
+            # Single-objective: use first metric with Optuna's pruner.
+            primary_val = float(scores[self.objective_metrics[0]])
+            self.trial.report(primary_val, step=self._step)
             if self.trial.should_prune():
                 raise optuna.TrialPruned()
 
@@ -195,8 +196,31 @@ class PeriodicValidationCallback(Callback):
     # Internal
     # ------------------------------------------------------------------
 
-    def _run_lightweight_validation(self) -> float | None:
-        """Compute geometric mean of nrmse and calibration_error."""
+    def _evaluate_pruning(self, scores: dict[str, float]) -> bool:
+        """Dispatch to the configured pruning strategy."""
+        if self._strategy_name == "none":
+            return False
+        if self._strategy_name == "dominance":
+            return should_prune_dominance(
+                self.trial, scores, self._step, self.n_startup_trials
+            )
+        if self._strategy_name == "mo-sha":
+            return should_prune_mo_sha(
+                self.trial, scores, self._step, self.n_startup_trials
+            )
+        if self._strategy_name == "primary":
+            primary_score = scores[self._primary_metric]
+            return should_prune_primary(
+                self.trial,
+                float(primary_score),
+                self._primary_metric,
+                self._step,
+                self.n_startup_trials,
+            )
+        return False  # pragma: no cover
+
+    def _run_lightweight_validation(self) -> dict[str, float] | None:
+        """Compute objective_metrics via validation pipeline."""
         try:
             if self.validate_fn is not None:
                 result_dict = self.validate_fn(
@@ -204,26 +228,50 @@ class PeriodicValidationCallback(Callback):
                     self.validation_data,
                     self.n_posterior_samples,
                 )
-                cal_err = result_dict.get("calibration_error")
-                nrmse = result_dict.get("nrmse")
+                # Validate that all objective_metrics are present.
+                missing = [
+                    k for k in self.objective_metrics
+                    if k not in result_dict
+                ]
+                if missing:
+                    logger.warning(
+                        "validate_fn output missing metrics %s — "
+                        "skipping pruning this step.",
+                        missing,
+                    )
+                    return None
+                return {
+                    k: float(result_dict[k])
+                    for k in self.objective_metrics
+                }
             else:
-                from bayesflow_hpo.validation.pipeline import run_validation_pipeline
+                from bayesflow_hpo.validation.pipeline import (
+                    run_validation_pipeline,
+                )
 
                 result = run_validation_pipeline(
                     approximator=self.approximator,
                     validation_data=self.validation_data,
                     n_posterior_samples=self.n_posterior_samples,
-                    metrics=_INTERMEDIATE_METRICS,
+                    metrics=self.objective_metrics,
                 )
-                cal_err = result.summary.get("calibration_error")
-                nrmse = result.summary.get("nrmse")
-
-            if cal_err is not None and nrmse is not None:
-                # Geometric mean — both should be positive.
-                return float(np.sqrt(max(cal_err, 1e-12) * max(nrmse, 1e-12)))
-            if cal_err is not None:
-                return float(cal_err)
-            return None
+                extracted = {
+                    k: float(result.summary[k])
+                    for k in self.objective_metrics
+                    if k in result.summary
+                }
+                missing = [
+                    k for k in self.objective_metrics
+                    if k not in extracted
+                ]
+                if missing:
+                    logger.warning(
+                        "run_validation_pipeline output missing "
+                        "metrics %s — skipping pruning this step.",
+                        missing,
+                    )
+                    return None
+                return extracted
         except optuna.TrialPruned:
             raise
         except Exception:

@@ -10,7 +10,7 @@
 |-------|--------|------|-------|
 | Plan | DONE | 2026-03-21 | |
 | Phase 1: Strategy functions + unit tests | IMPLEMENTED | 2026-03-22 | 41 tests, lint clean, review findings addressed |
-| Phase 2: Callback refactor + metric alignment | TODO | | |
+| Phase 2: Callback refactor + metric alignment | IMPLEMENTED | 2026-03-22 | 11 tests, lint clean, review in progress |
 | Phase 3: API wiring + startup auto-detect | TODO | | |
 | Phase 4: Pruner string presets in create_study() | TODO | | |
 | Ship | TODO | | |
