@@ -62,13 +62,13 @@ class _MockTrial:
 class _TrackingDict(dict):
     """Dict wrapper that records which keys are accessed.
 
-    Tracks ``__getitem__``, ``get``, ``__contains__``, and ``pop``
-    so that unused-key detection works regardless of how the builder
-    accesses parameters.
+    Tracks ``__getitem__``, ``get``, ``__contains__``, ``pop``,
+    ``items()``, and ``values()`` so that unused-key detection works
+    regardless of how the builder accesses parameters.
 
-    Note: ``__iter__``, ``items()``, and ``values()`` are intentionally
-    **not** overridden because ``dict(tracking_dict)`` calls ``__iter__``
-    internally, which would falsely mark all keys as accessed.
+    Note: ``__iter__`` is intentionally **not** overridden because
+    ``dict(tracking_dict)`` calls ``__iter__`` internally, which would
+    falsely mark all keys as accessed.
     """
 
     def __init__(self, *args, **kwargs):
@@ -93,6 +93,14 @@ class _TrackingDict(dict):
     def pop(self, key, *args):
         self.accessed_keys.add(key)
         return super().pop(key, *args)
+
+    def items(self):
+        self.accessed_keys.update(self.keys())
+        return super().items()
+
+    def values(self):
+        self.accessed_keys.update(self.keys())
+        return super().values()
 
 
 def _check_hook_arity(fn: Callable[..., Any], expected: int, name: str) -> None:

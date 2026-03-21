@@ -19,6 +19,7 @@ from bayesflow_hpo.pipeline import check_pipeline
 from bayesflow_hpo.search_spaces.composite import CompositeSearchSpace
 from bayesflow_hpo.types import BuildApproximatorFn, TrainFn, ValidateFn
 from bayesflow_hpo.validation.data import (
+    ValidationDataset,
     generate_validation_dataset,
 )
 
@@ -310,7 +311,99 @@ def optimize(
             f"report_frequency must be >= 1, got {report_frequency}."
         )
 
-    # --- Derive keys from adapter ---
+    # Step 1: Infer keys
+    param_keys, data_keys = _infer_and_validate_keys(adapter)
+
+    # Step 2: Validation data
+    validation_data = _setup_validation_data(
+        simulator=simulator,
+        validation_simulator=validation_simulator,
+        param_keys=param_keys,
+        data_keys=data_keys,
+        validation_conditions=validation_conditions,
+        sims_per_condition=sims_per_condition,
+    )
+
+    # Step 3: Pre-flight check
+    check_pipeline(
+        simulator=simulator,
+        adapter=adapter,
+        search_space=search_space,
+        build_approximator_fn=build_approximator_fn,
+        train_fn=train_fn,
+        validate_fn=validate_fn,
+        objective_metrics=objective_metrics,
+        validation_conditions=validation_conditions,
+    )
+
+    # Step 4: Build objective
+    objective = _build_objective(
+        simulator=simulator,
+        adapter=adapter,
+        search_space=search_space,
+        validation_data=validation_data,
+        epochs=epochs,
+        num_batches=num_batches,
+        early_stopping_patience=early_stopping_patience,
+        early_stopping_window=early_stopping_window,
+        max_param_count=max_param_count,
+        max_memory_mb=max_memory_mb,
+        n_posterior_samples=n_posterior_samples,
+        objective_metrics=objective_metrics,
+        objective_mode=objective_mode,
+        cost_metric=cost_metric,
+        report_frequency=report_frequency,
+        build_approximator_fn=build_approximator_fn,
+        train_fn=train_fn,
+        validate_fn=validate_fn,
+        checkpoint_pool=checkpoint_pool,
+    )
+
+    # Step 5: Derive directions
+    directions, metric_names = _derive_directions(
+        objective=objective,
+        directions=directions,
+        objective_metrics=objective_metrics,
+        objective_mode=objective_mode,
+        cost_metric=cost_metric,
+    )
+
+    # Step 6: Run study
+    return _create_and_run_study(
+        objective=objective,
+        study_name=study_name,
+        directions=directions,
+        metric_names=metric_names,
+        storage=storage,
+        resume=resume,
+        warm_start_from=warm_start_from,
+        warm_start_top_k=warm_start_top_k,
+        n_trials=n_trials,
+        max_total_trials=max_total_trials,
+        show_progress_bar=show_progress_bar,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Private helpers — extracted from optimize() for readability & testability
+# ---------------------------------------------------------------------------
+
+
+def _infer_and_validate_keys(
+    adapter: bf.adapters.Adapter,
+) -> tuple[list[str], list[str]]:
+    """Infer and validate ``param_keys`` and ``data_keys`` from *adapter*.
+
+    Returns
+    -------
+    tuple[list[str], list[str]]
+        ``(param_keys, data_keys)``.
+
+    Raises
+    ------
+    TypeError
+        When required keys cannot be inferred from the adapter.
+    """
     adapter_keys = infer_keys_from_adapter(adapter)
     param_keys = adapter_keys["param_keys"]
     data_keys = adapter_keys["data_keys"]
@@ -332,9 +425,25 @@ def optimize(
             "'inference_conditions'."
         )
 
-    # --- Always build validation data internally ---
+    return param_keys, data_keys
+
+
+def _setup_validation_data(
+    *,
+    simulator: bf.simulators.Simulator,
+    validation_simulator: bf.simulators.Simulator | None,
+    param_keys: list[str],
+    data_keys: list[str],
+    validation_conditions: dict[str, list[Any]] | None,
+    sims_per_condition: int,
+) -> ValidationDataset:
+    """Generate the fixed validation dataset.
+
+    Uses *validation_simulator* when provided, otherwise falls back to
+    *simulator*.
+    """
     val_sim = validation_simulator if validation_simulator is not None else simulator
-    validation_data = generate_validation_dataset(
+    return generate_validation_dataset(
         simulator=val_sim,
         param_keys=param_keys,
         data_keys=data_keys,
@@ -342,20 +451,31 @@ def optimize(
         sims_per_condition=sims_per_condition,
     )
 
-    # --- Pre-flight validation ---
-    check_pipeline(
-        simulator=simulator,
-        adapter=adapter,
-        search_space=search_space,
-        build_approximator_fn=build_approximator_fn,
-        train_fn=train_fn,
-        validate_fn=validate_fn,
-        objective_metrics=objective_metrics,
-        validation_conditions=validation_conditions,
-    )
 
-    # --- Build objective ---
-    objective = GenericObjective(
+def _build_objective(
+    *,
+    simulator: bf.simulators.Simulator,
+    adapter: bf.adapters.Adapter,
+    search_space: CompositeSearchSpace,
+    validation_data: ValidationDataset,
+    epochs: int,
+    num_batches: int,
+    early_stopping_patience: int,
+    early_stopping_window: int,
+    max_param_count: int,
+    max_memory_mb: float | None,
+    n_posterior_samples: int,
+    objective_metrics: list[str],
+    objective_mode: str,
+    cost_metric: str,
+    report_frequency: int,
+    build_approximator_fn: BuildApproximatorFn | None,
+    train_fn: TrainFn | None,
+    validate_fn: ValidateFn | None,
+    checkpoint_pool: CheckpointPool | None,
+) -> GenericObjective:
+    """Construct the :class:`GenericObjective` from configuration."""
+    return GenericObjective(
         ObjectiveConfig(
             simulator=simulator,
             adapter=adapter,
@@ -379,7 +499,22 @@ def optimize(
         )
     )
 
-    # --- Derive directions ---
+
+def _derive_directions(
+    *,
+    objective: GenericObjective,
+    directions: list[str] | None,
+    objective_metrics: list[str],
+    objective_mode: str,
+    cost_metric: str,
+) -> tuple[list[str], list[str]]:
+    """Validate or auto-derive optimization directions and metric names.
+
+    Returns
+    -------
+    tuple[list[str], list[str]]
+        ``(directions, metric_names)``.
+    """
     n_obj = objective.n_objectives
     if directions is None:
         directions = ["minimize"] * n_obj
@@ -393,12 +528,29 @@ def optimize(
             f"provide exactly {n_obj} directions."
         )
 
-    cost_label = cost_metric
     if objective_mode == "pareto":
-        metric_names = list(objective_metrics) + [cost_label]
+        metric_names = list(objective_metrics) + [cost_metric]
     else:
-        metric_names = ["mean(" + "+".join(objective_metrics) + ")", cost_label]
+        metric_names = ["mean(" + "+".join(objective_metrics) + ")", cost_metric]
 
+    return directions, metric_names
+
+
+def _create_and_run_study(
+    *,
+    objective: GenericObjective,
+    study_name: str,
+    directions: list[str],
+    metric_names: list[str],
+    storage: str | None,
+    resume: bool,
+    warm_start_from: Any | None,
+    warm_start_top_k: int,
+    n_trials: int,
+    max_total_trials: int | None,
+    show_progress_bar: bool,
+) -> optuna.Study:
+    """Create (or resume) an Optuna study and run optimization."""
     if not resume and storage is not None:
         try:
             optuna.delete_study(study_name=study_name, storage=storage)
