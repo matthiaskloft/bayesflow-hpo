@@ -18,9 +18,13 @@ from bayesflow_hpo.search_spaces.base import (
 
 @dataclass
 class FusionTransformerSpace(BaseSearchSpace):
-    """Search space for `bf.networks.FusionTransformer`."""
+    """Search space for `bf.networks.FusionTransformer`.
 
-    include_optional: bool = False
+    Fixed dimensions (widen to tune)
+    --------------------------------
+    ft_template_type : str
+        Template type. Fixed at ``"lstm"``.
+    """
 
     summary_dim: IntDimension = field(
         default_factory=lambda: IntDimension("ft_summary_dim", low=8, high=64, step=8)
@@ -44,10 +48,9 @@ class FusionTransformerSpace(BaseSearchSpace):
     dropout: FloatDimension = field(
         default_factory=lambda: FloatDimension("ft_dropout", low=0.0, high=0.3)
     )
-
     template_type: CategoricalDimension = field(
         default_factory=lambda: CategoricalDimension(
-            "ft_template_type", choices=["lstm", "gru"], enabled=False
+            "ft_template_type", constant="lstm"
         )
     )
 
@@ -73,14 +76,11 @@ class FusionTransformerSpace(BaseSearchSpace):
         embed_dim = int(params["ft_embed_dim"])
         num_heads = int(params["ft_num_heads"])
 
-        kwargs: dict[str, Any] = {
-            "summary_dim": int(params["ft_summary_dim"]),
-            "embed_dims": tuple([embed_dim] * num_layers),
-            "num_heads": tuple([num_heads] * num_layers),
-            "template_dim": int(params["ft_template_dim"]),
-            "dropout": float(params["ft_dropout"]),
-        }
-        if "ft_template_type" in params:
-            kwargs["template_type"] = params["ft_template_type"]
-
-        return bf.networks.FusionTransformer(**kwargs)
+        return bf.networks.FusionTransformer(
+            summary_dim=int(params["ft_summary_dim"]),
+            embed_dims=tuple([embed_dim] * num_layers),
+            num_heads=tuple([num_heads] * num_layers),
+            template_dim=int(params["ft_template_dim"]),
+            dropout=float(params["ft_dropout"]),
+            template_type=params["ft_template_type"],
+        )

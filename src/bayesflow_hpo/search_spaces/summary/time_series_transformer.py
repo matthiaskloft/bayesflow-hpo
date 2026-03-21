@@ -19,25 +19,16 @@ from bayesflow_hpo.search_spaces.base import (
 class TimeSeriesTransformerSpace(BaseSearchSpace):
     """Search space for `bf.networks.TimeSeriesTransformer`.
 
-    Default dimensions
-    ------------------
-    tst_summary_dim : int
-        Output summary dimensionality (8--64, step 8).
-    tst_embed_dim : int
-        Embedding width (32--256, step 32).
-    tst_num_heads : int
-        Number of attention heads (1, 2, 4, or 8).
-    tst_num_layers : int
-        Number of transformer layers (1--4).
-    tst_dropout : float
-        Dropout rate (0.0--0.3).
+    Default dimensions (tuned)
+    --------------------------
+    tst_summary_dim, tst_embed_dim, tst_num_heads, tst_num_layers, tst_dropout.
 
-    Optional dimensions (enabled via ``include_optional=True``)
-    -----------------------------------------------------------
+    Fixed dimensions (widen to tune)
+    --------------------------------
     tst_mlp_width : int
-        Feed-forward MLP width (64--512, step 64).
-    tst_time_embed : str
-        Time embedding type (``"time2vec"``, ``"lstm"``, or ``"gru"``).
+        Feed-forward MLP width. Fixed at ``128``.
+    tst_time_embedding : str
+        Time embedding type. Fixed at ``"time2vec"``.
     """
 
     summary_dim: IntDimension = field(
@@ -57,15 +48,12 @@ class TimeSeriesTransformerSpace(BaseSearchSpace):
     dropout: FloatDimension = field(
         default_factory=lambda: FloatDimension("tst_dropout", low=0.0, high=0.3)
     )
-
     mlp_width: IntDimension = field(
-        default_factory=lambda: IntDimension(
-            "tst_mlp_width", low=64, high=512, step=64, enabled=False
-        )
+        default_factory=lambda: IntDimension("tst_mlp_width", constant=128)
     )
     time_embed: CategoricalDimension = field(
         default_factory=lambda: CategoricalDimension(
-            "tst_time_embed", choices=["time2vec", "lstm", "gru"], enabled=False
+            "tst_time_embedding", constant="time2vec"
         )
     )
 
@@ -87,19 +75,13 @@ class TimeSeriesTransformerSpace(BaseSearchSpace):
         num_layers = int(params["tst_num_layers"])
         embed_dim = int(params["tst_embed_dim"])
         num_heads = int(params["tst_num_heads"])
+        mlp_width = int(params["tst_mlp_width"])
 
-        kwargs: dict[str, Any] = {
-            "summary_dim": int(params["tst_summary_dim"]),
-            "embed_dims": tuple([embed_dim] * num_layers),
-            "num_heads": tuple([num_heads] * num_layers),
-            "dropout": float(params["tst_dropout"]),
-        }
-        if "tst_mlp_width" in params:
-            mlp_width = int(params["tst_mlp_width"])
-            kwargs["mlp_widths"] = tuple(
-                [mlp_width] * num_layers
-            )
-        if "tst_time_embed" in params:
-            kwargs["time_embedding"] = params["tst_time_embed"]
-
-        return bf.networks.TimeSeriesTransformer(**kwargs)
+        return bf.networks.TimeSeriesTransformer(
+            summary_dim=int(params["tst_summary_dim"]),
+            embed_dims=tuple([embed_dim] * num_layers),
+            num_heads=tuple([num_heads] * num_layers),
+            dropout=float(params["tst_dropout"]),
+            mlp_widths=tuple([mlp_width] * num_layers),
+            time_embedding=params["tst_time_embedding"],
+        )

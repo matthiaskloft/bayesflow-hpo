@@ -6,11 +6,11 @@ Changes implemented during the v0.2.0 workover (quality fixes, BayesFlow decoupl
 
 ## Bug Fixes
 
-### `decay_steps` used `batch_size` instead of `batches_per_epoch`
+### `decay_steps` used `batch_size` instead of `num_batches`
 
 **File:** `builders/workflow.py`
 
-The LR schedule decayed every `batch_size` optimizer steps — far too aggressive. Fixed by adding `batches_per_epoch: int = 50` to `WorkflowBuildConfig` and using `decay_steps = max(1, config.batches_per_epoch)`.
+The LR schedule decayed every `batch_size` optimizer steps — far too aggressive. Fixed by adding `num_batches: int = 50` to `WorkflowBuildConfig` and using `decay_steps = max(1, config.num_batches)`.
 
 ### `estimate_param_count` included learning rate
 

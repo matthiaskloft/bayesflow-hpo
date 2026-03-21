@@ -141,7 +141,7 @@ def check_pipeline(
     n_posterior_samples: int = 2,
     validation_conditions: dict[str, list[Any]] | None = None,
     epochs: int = 1,
-    batches_per_epoch: int = 1,
+    num_batches: int = 1,
 ) -> None:
     """Dry-run the full pipeline to catch interface errors early.
 
@@ -187,7 +187,7 @@ def check_pipeline(
         Optional condition grid for validation data generation.
     epochs
         Training epochs for dry run (default 1).
-    batches_per_epoch
+    num_batches
         Batches per epoch for dry run (default 1).
 
     Raises
@@ -216,7 +216,7 @@ def check_pipeline(
 
     hparams = _TrackingDict(raw_hparams)
     hparams["epochs"] = epochs
-    hparams["batches_per_epoch"] = batches_per_epoch
+    hparams["num_batches"] = num_batches
 
     # --- Step 2: Build approximator ---
     try:
@@ -289,7 +289,7 @@ def check_pipeline(
             "provide a custom train_fn that compiles with its own optimizer."
         )
     initial_lr = float(hparams.get("initial_lr", 1e-3))
-    decay_steps = batches_per_epoch * epochs
+    decay_steps = num_batches * epochs
     try:
         optimizer = _make_cosine_decay_optimizer(initial_lr, decay_steps)
         _compile_for_compat(approximator, optimizer)

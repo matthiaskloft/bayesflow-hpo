@@ -68,7 +68,7 @@ def default_train_fn(
     """Train via ``approximator.fit(simulator=..., ...)``.
 
     This is the default used by ``optimize()`` when ``train_fn`` is ``None``.
-    Reads ``epochs``, ``batches_per_epoch``, and ``batch_size`` from
+    Reads ``epochs``, ``num_batches``, and ``batch_size`` from
     ``hparams`` (injected by the objective before calling).
 
     Parameters
@@ -78,7 +78,7 @@ def default_train_fn(
     simulator
         BayesFlow simulator for online training.
     hparams
-        Hyperparameters dict (must contain ``epochs``, ``batches_per_epoch``,
+        Hyperparameters dict (must contain ``epochs``, ``num_batches``,
         and optionally ``batch_size``).
     callbacks
         Keras callbacks (early stopping, Optuna reporter, etc.).
@@ -87,7 +87,7 @@ def default_train_fn(
         simulator=simulator,
         epochs=int(hparams["epochs"]),
         batch_size=int(hparams.get("batch_size", 256)),
-        batches_per_epoch=int(hparams["batches_per_epoch"]),
+        num_batches=int(hparams["num_batches"]),
         callbacks=callbacks,
     )
 
@@ -166,7 +166,7 @@ class ObjectiveConfig:
         Pre-generated :class:`ValidationDataset`.
     epochs
         Maximum training epochs per trial (default 200).
-    batches_per_epoch
+    num_batches
         Online simulation batches per epoch (default 50).
     early_stopping_patience
         Moving-average patience epochs (default 5).
@@ -225,7 +225,7 @@ class ObjectiveConfig:
     search_space: CompositeSearchSpace
     validation_data: ValidationDataset | None = None
     epochs: int = 200
-    batches_per_epoch: int = 50
+    num_batches: int = 50
     early_stopping_patience: int = 5
     early_stopping_window: int = 7
     max_param_count: int = MAX_PARAM_COUNT
@@ -467,7 +467,7 @@ class GenericObjective:
 
         # --- Step 2: Inject training config ---
         params["epochs"] = config.epochs
-        params["batches_per_epoch"] = config.batches_per_epoch
+        params["num_batches"] = config.num_batches
 
         # --- Step 3: Budget pre-check (memory) ---
         estimated_memory = estimate_peak_memory_mb(params)
@@ -509,7 +509,7 @@ class GenericObjective:
                 trial.number,
             )
         initial_lr = float(params.get("initial_lr", 1e-3))
-        decay_steps = config.batches_per_epoch * config.epochs
+        decay_steps = config.num_batches * config.epochs
         try:
             optimizer = _make_cosine_decay_optimizer(
                 initial_lr, decay_steps,

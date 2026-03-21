@@ -20,24 +20,26 @@ from bayesflow_hpo.search_spaces.base import (
 class FlowMatchingSpace(BaseSearchSpace):
     """Search space for `bf.networks.FlowMatching`.
 
-    Default ranges
-    --------------
+    Default dimensions (tuned)
+    --------------------------
     fm_subnet_width : int
         MLP width (32--256, step 32).
     fm_subnet_depth : int
         MLP depth (1--6).  BayesFlow default TimeMLP uses 5 layers.
     fm_dropout : float
         Dropout rate (0.0--0.2).
+
+    Fixed dimensions (widen to tune)
+    --------------------------------
     fm_activation : str
-        **Optional** (off by default). Falls back to BayesFlow's TimeMLP
-        default ``"mish"``.
-
-    Optional dimensions (enabled via ``include_optional=True``)
-    -----------------------------------------------------------
-    fm_use_ot, fm_time_alpha.
+        Subnet activation. Fixed at ``"mish"`` (TimeMLP default).
+    fm_use_optimal_transport : bool
+        Optimal transport. Fixed at ``False``.
+    fm_time_power_law_alpha : float
+        Time power-law alpha. Fixed at ``0.0``.
+    fm_time_embedding_dim : int
+        Time embedding dimensionality. Fixed at ``8``.
     """
-
-    include_optional: bool = False
 
     subnet_width: IntDimension = field(
         default_factory=lambda: IntDimension(
@@ -52,23 +54,22 @@ class FlowMatchingSpace(BaseSearchSpace):
     )
     activation: CategoricalDimension = field(
         default_factory=lambda: CategoricalDimension(
-            "fm_activation", choices=["mish", "silu"], enabled=False
+            "fm_activation", constant="mish"
         )
     )
-
     use_optimal_transport: CategoricalDimension = field(
         default_factory=lambda: CategoricalDimension(
-            "fm_use_ot", choices=[True, False], enabled=False
+            "fm_use_optimal_transport", constant=False
         )
     )
     time_alpha: FloatDimension = field(
         default_factory=lambda: FloatDimension(
-            "fm_time_alpha", low=0.0, high=2.0, enabled=False
+            "fm_time_power_law_alpha", constant=0.0
         )
     )
     time_embedding_dim: IntDimension = field(
         default_factory=lambda: IntDimension(
-            "fm_time_embedding_dim", low=8, high=64, step=4, enabled=False
+            "fm_time_embedding_dim", constant=8
         )
     )
 
@@ -96,20 +97,12 @@ class FlowMatchingSpace(BaseSearchSpace):
         subnet_kwargs: dict[str, Any] = {
             "widths": tuple([width] * depth),
             "dropout": float(params["fm_dropout"]),
+            "activation": params["fm_activation"],
+            "time_embedding_dim": int(params["fm_time_embedding_dim"]),
         }
-        if "fm_activation" in params:
-            subnet_kwargs["activation"] = params["fm_activation"]
-        if "fm_time_embedding_dim" in params:
-            subnet_kwargs["time_embedding_dim"] = int(
-                params["fm_time_embedding_dim"]
-            )
 
-        kwargs: dict[str, Any] = {
-            "subnet_kwargs": subnet_kwargs,
-        }
-        if "fm_use_ot" in params:
-            kwargs["use_optimal_transport"] = bool(params["fm_use_ot"])
-        if "fm_time_alpha" in params:
-            kwargs["time_power_law_alpha"] = float(params["fm_time_alpha"])
-
-        return bf.networks.FlowMatching(**kwargs)
+        return bf.networks.FlowMatching(
+            subnet_kwargs=subnet_kwargs,
+            use_optimal_transport=bool(params["fm_use_optimal_transport"]),
+            time_power_law_alpha=float(params["fm_time_power_law_alpha"]),
+        )

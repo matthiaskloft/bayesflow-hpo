@@ -112,7 +112,7 @@ def optimize(
     cost_metric: str = "inference_time",
     # Training
     epochs: int = 200,
-    batches_per_epoch: int = 50,
+    num_batches: int = 50,
     early_stopping_patience: int = 5,
     early_stopping_window: int = 7,
     # Logging
@@ -227,7 +227,7 @@ def optimize(
         ``"inference_time"`` (default) or ``"param_count"``.
     epochs
         Maximum training epochs per trial (default 200).
-    batches_per_epoch
+    num_batches
         Number of online simulation batches per epoch (default 50).
     early_stopping_patience
         Moving-average patience epochs for early stopping (default 5).
@@ -362,7 +362,7 @@ def optimize(
             search_space=search_space,
             validation_data=validation_data,
             epochs=epochs,
-            batches_per_epoch=batches_per_epoch,
+            num_batches=num_batches,
             early_stopping_patience=early_stopping_patience,
             early_stopping_window=early_stopping_window,
             max_param_count=max_param_count,

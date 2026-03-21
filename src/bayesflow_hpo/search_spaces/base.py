@@ -14,13 +14,21 @@ Design decision: dimensions are *declared as dataclass fields* rather than
 returned from a method because this lets users override ranges by simply
 passing new ``IntDimension(...)`` values at construction time, without
 subclassing.
+
+Dimensions can use ``constant=<value>`` to fix a parameter at a specific
+value without going through Optuna's ``suggest_*`` machinery.  The
+``constant`` and ``low``/``high`` (or ``choices``) fields are mutually
+exclusive.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from typing import Any, Protocol
+
+# Sentinel to distinguish "no constant set" from "constant is None".
+_UNSET: Any = object()
 
 
 @dataclass
@@ -32,23 +40,39 @@ class IntDimension:
     name
         Optuna parameter name (must be unique within a search space).
     low, high
-        Inclusive lower and upper bounds.
+        Inclusive lower and upper bounds.  Required when ``constant``
+        is not set.
     step
         Optional step size for discrete grids (e.g. ``step=32`` for
         widths).  When ``None``, any integer in [low, high] is valid.
     log
         Sample on a log scale (useful for learning rates or wide ranges).
-    enabled
-        When ``False``, this dimension is only sampled if the parent
-        space has ``include_optional=True``.
+    constant
+        Fix this dimension to a specific value.  When set, the dimension
+        is not sampled via Optuna — the value is injected directly.
+        Mutually exclusive with ``low``/``high``.
     """
 
     name: str
-    low: int
-    high: int
+    low: int | None = None
+    high: int | None = None
     step: int | None = None
     log: bool = False
-    enabled: bool = True
+    constant: Any = field(default=_UNSET)
+
+    def __post_init__(self) -> None:
+        has_range = self.low is not None or self.high is not None
+        has_constant = self.constant is not _UNSET
+        if has_range and has_constant:
+            raise ValueError(
+                f"IntDimension({self.name!r}): cannot set both "
+                f"constant and low/high."
+            )
+        if not has_range and not has_constant:
+            raise ValueError(
+                f"IntDimension({self.name!r}): must set either "
+                f"constant or low/high."
+            )
 
 
 @dataclass
@@ -60,18 +84,34 @@ class FloatDimension:
     name
         Optuna parameter name (must be unique within a search space).
     low, high
-        Inclusive lower and upper bounds.
+        Inclusive lower and upper bounds.  Required when ``constant``
+        is not set.
     log
         Sample on a log scale (common for learning rates).
-    enabled
-        When ``False``, only sampled if ``include_optional=True``.
+    constant
+        Fix this dimension to a specific value.  Mutually exclusive
+        with ``low``/``high``.
     """
 
     name: str
-    low: float
-    high: float
+    low: float | None = None
+    high: float | None = None
     log: bool = False
-    enabled: bool = True
+    constant: Any = field(default=_UNSET)
+
+    def __post_init__(self) -> None:
+        has_range = self.low is not None or self.high is not None
+        has_constant = self.constant is not _UNSET
+        if has_range and has_constant:
+            raise ValueError(
+                f"FloatDimension({self.name!r}): cannot set both "
+                f"constant and low/high."
+            )
+        if not has_range and not has_constant:
+            raise ValueError(
+                f"FloatDimension({self.name!r}): must set either "
+                f"constant or low/high."
+            )
 
 
 @dataclass
@@ -83,14 +123,30 @@ class CategoricalDimension:
     name
         Optuna parameter name (must be unique within a search space).
     choices
-        Possible values.  Optuna picks uniformly among them.
-    enabled
-        When ``False``, only sampled if ``include_optional=True``.
+        Possible values.  Optuna picks uniformly among them.  Required
+        when ``constant`` is not set.
+    constant
+        Fix this dimension to a specific value.  Mutually exclusive
+        with ``choices``.
     """
 
     name: str
-    choices: Sequence[str | int | float | bool | None]
-    enabled: bool = True
+    choices: Sequence[str | int | float | bool | None] | None = None
+    constant: Any = field(default=_UNSET)
+
+    def __post_init__(self) -> None:
+        has_choices = self.choices is not None
+        has_constant = self.constant is not _UNSET
+        if has_choices and has_constant:
+            raise ValueError(
+                f"CategoricalDimension({self.name!r}): cannot set both "
+                f"constant and choices."
+            )
+        if not has_choices and not has_constant:
+            raise ValueError(
+                f"CategoricalDimension({self.name!r}): must set either "
+                f"constant or choices."
+            )
 
 
 Dimension = IntDimension | FloatDimension | CategoricalDimension
@@ -122,11 +178,10 @@ class BaseSearchSpace:
     method, and ``_validate`` helper are derived automatically — subclasses
     only need to implement ``build``.
 
-    Dimensions with ``enabled=False`` are *optional*: they are only sampled
-    when ``include_optional=True``.
+    Dimensions with ``constant`` set are injected directly into the params
+    dict without going through Optuna.  Use the ``.constants`` property to
+    retrieve all fixed values.
     """
-
-    include_optional: bool = False
 
     @property
     def dimensions(self) -> list[Dimension]:
@@ -150,9 +205,18 @@ class BaseSearchSpace:
             if isinstance(getattr(self, f.name), _DIMENSION_TYPES)
         ]
 
+    @property
+    def constants(self) -> dict[str, Any]:
+        """Return ``{name: value}`` for all fixed dimensions."""
+        return {
+            d.name: d.constant
+            for d in self.dimensions
+            if d.constant is not _UNSET
+        }
+
     def _validate(self, params: dict[str, Any]) -> None:
-        """Raise ``ValueError`` if any required dimension key is missing."""
-        required = [d.name for d in self.dimensions if d.enabled]
+        """Raise ``ValueError`` if any dimension key is missing."""
+        required = [d.name for d in self.dimensions]
         missing = [k for k in required if k not in params]
         if missing:
             raise ValueError(
@@ -164,8 +228,8 @@ class BaseSearchSpace:
         """Sample hyperparameters from an Optuna trial.
 
         Dispatches each dimension to the appropriate
-        ``trial.suggest_*`` method.  Disabled dimensions are skipped
-        unless ``self.include_optional`` is ``True``.
+        ``trial.suggest_*`` method.  Dimensions with ``constant`` set
+        are injected directly without calling Optuna.
 
         Parameters
         ----------
@@ -179,7 +243,9 @@ class BaseSearchSpace:
         """
         params: dict[str, Any] = {}
         for dim in self.dimensions:
-            if not dim.enabled and not self.include_optional:
+            # Constants bypass Optuna entirely.
+            if dim.constant is not _UNSET:
+                params[dim.name] = dim.constant
                 continue
 
             if isinstance(dim, IntDimension):

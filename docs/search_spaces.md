@@ -75,7 +75,7 @@ Consistency model (`ConsistencyModel`).
 | `cm_s0` | int | [2, 30] | no |
 | `cm_s1` | int | [20, 100] | no |
 
-**Note:** `ConsistencyModelSpace` accepts `epochs` and `batches_per_epoch` in its constructor to compute `total_steps` for the consistency model schedule.
+**Note:** `ConsistencyModelSpace` accepts `epochs` and `num_batches` in its constructor to compute `total_steps` for the consistency model schedule.
 
 ### StableConsistencyModelSpace
 
