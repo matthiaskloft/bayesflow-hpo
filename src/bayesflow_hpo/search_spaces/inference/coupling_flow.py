@@ -19,8 +19,8 @@ from bayesflow_hpo.search_spaces.base import (
 class CouplingFlowSpace(BaseSearchSpace):
     """Search space for `bf.networks.CouplingFlow`.
 
-    Default dimensions
-    ------------------
+    Default dimensions (tuned)
+    --------------------------
     cf_depth : int
         Number of coupling layers (2--8).
     cf_subnet_width : int
@@ -30,16 +30,17 @@ class CouplingFlowSpace(BaseSearchSpace):
     cf_dropout : float
         Dropout rate (0.0--0.3).
 
-    Optional dimensions (enabled via ``include_optional=True``)
-    -----------------------------------------------------------
+    Fixed dimensions (widen to tune)
+    --------------------------------
     cf_activation : str
-        Subnet activation function. Defaults to ``"mish"`` when omitted.
+        Subnet activation. Fixed at BayesFlow default (not exposed by BF
+        as a top-level kwarg; uses subnet default).
     cf_transform : str
-        Coupling transform type (``"affine"`` or ``"spline"``).
+        Coupling transform type. Fixed at ``"affine"``.
     cf_permutation : str
-        Permutation strategy (``"random"`` or ``"orthogonal"``).
-    cf_actnorm : bool
-        Whether to use activation normalization between coupling layers.
+        Permutation strategy. Fixed at ``"random"``.
+    cf_use_actnorm : bool
+        Activation normalization. Fixed at ``True``.
     """
 
     depth: IntDimension = field(
@@ -58,33 +59,27 @@ class CouplingFlowSpace(BaseSearchSpace):
     )
     activation: CategoricalDimension = field(
         default_factory=lambda: CategoricalDimension(
-            "cf_activation", choices=["silu", "relu", "mish"], enabled=False
+            "cf_activation", constant="silu"
         )
     )
-
     transform: CategoricalDimension = field(
         default_factory=lambda: CategoricalDimension(
-            "cf_transform", choices=["affine", "spline"], enabled=False
+            "cf_transform", constant="affine"
         )
     )
     permutation: CategoricalDimension = field(
         default_factory=lambda: CategoricalDimension(
-            "cf_permutation", choices=["random", "orthogonal"], enabled=False
+            "cf_permutation", constant="random"
         )
     )
     use_actnorm: CategoricalDimension = field(
         default_factory=lambda: CategoricalDimension(
-            "cf_actnorm", choices=[True, False], enabled=False
+            "cf_use_actnorm", constant=True
         )
     )
 
     def build(self, params: dict[str, Any]) -> bf.networks.CouplingFlow:
         """Construct a ``bf.networks.CouplingFlow`` from sampled parameters.
-
-        The subnet MLP uses a uniform-width architecture: all hidden
-        layers share ``cf_subnet_width``.  Optional parameters (transform,
-        permutation, actnorm) are only passed when present in *params*,
-        allowing BayesFlow to apply its own defaults.
 
         Parameters
         ----------
@@ -101,24 +96,16 @@ class CouplingFlowSpace(BaseSearchSpace):
         width = int(params["cf_subnet_width"])
         n_layers = int(params["cf_subnet_depth"])
 
-        # Uniform-width MLP: every hidden layer has the same width.
         subnet_kwargs: dict[str, Any] = {
             "widths": tuple([width] * n_layers),
             "dropout": float(params["cf_dropout"]),
+            "activation": params["cf_activation"],
         }
-        if "cf_activation" in params:
-            subnet_kwargs["activation"] = params["cf_activation"]
 
-        kwargs: dict[str, Any] = {
-            "depth": int(params["cf_depth"]),
-            "subnet_kwargs": subnet_kwargs,
-        }
-        # Optional structural choices — omitted keys fall back to BayesFlow defaults.
-        if "cf_transform" in params:
-            kwargs["transform"] = params["cf_transform"]
-        if "cf_permutation" in params:
-            kwargs["permutation"] = params["cf_permutation"]
-        if "cf_actnorm" in params:
-            kwargs["use_actnorm"] = bool(params["cf_actnorm"])
-
-        return bf.networks.CouplingFlow(**kwargs)
+        return bf.networks.CouplingFlow(
+            depth=int(params["cf_depth"]),
+            subnet_kwargs=subnet_kwargs,
+            transform=params["cf_transform"],
+            permutation=params["cf_permutation"],
+            use_actnorm=bool(params["cf_use_actnorm"]),
+        )

@@ -443,7 +443,7 @@ class ObjectiveConfig:
 
     # Training config
     epochs: int = 200
-    batches_per_epoch: int = 50
+    num_batches: int = 50
     early_stopping_patience: int = 15
     early_stopping_window: int = 15
 
@@ -1407,5 +1407,5 @@ bayesflow 2.x (external)
    → Yes, as a simpler entry point. Multi-objective is the default for power users.
 
 4. **How to handle ConsistencyModel's `total_steps` requirement?**
-   → Calculate from `epochs * batches_per_epoch` and inject into the builder automatically.
+   → Calculate from `epochs * num_batches` and inject into the builder automatically.
    User doesn't need to think about it.

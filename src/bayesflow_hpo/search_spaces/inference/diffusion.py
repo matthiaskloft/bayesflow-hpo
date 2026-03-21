@@ -19,23 +19,23 @@ from bayesflow_hpo.search_spaces.base import (
 class DiffusionModelSpace(BaseSearchSpace):
     """Search space for `bf.networks.DiffusionModel`.
 
-    Default dimensions
-    ------------------
+    Default dimensions (tuned)
+    --------------------------
     dm_subnet_width : int
         MLP width (32--256, step 32).
     dm_subnet_depth : int
-        MLP depth (1--6).  BayesFlow default TimeMLP uses 5 layers.
+        MLP depth (1--6).
     dm_dropout : float
         Dropout rate (0.0--0.2).
     dm_activation : str
         Subnet activation function (``"mish"`` or ``"silu"``).
 
-    Optional dimensions (enabled via ``include_optional=True``)
-    -----------------------------------------------------------
+    Fixed dimensions (widen to tune)
+    --------------------------------
     dm_noise_schedule : str
-        Noise schedule type (``"edm"`` or ``"cosine"``).
+        Noise schedule type. Fixed at ``"edm"``.
     dm_prediction_type : str
-        Prediction target (``"F"``, ``"velocity"``, ``"noise"``, ``"x"``).
+        Prediction target. Fixed at ``"F"``.
     """
 
     subnet_width: IntDimension = field(
@@ -54,15 +54,14 @@ class DiffusionModelSpace(BaseSearchSpace):
             "dm_activation", choices=["mish", "silu"]
         )
     )
-
     noise_schedule: CategoricalDimension = field(
         default_factory=lambda: CategoricalDimension(
-            "dm_noise_schedule", choices=["edm", "cosine"], enabled=False
+            "dm_noise_schedule", constant="edm"
         )
     )
     prediction_type: CategoricalDimension = field(
         default_factory=lambda: CategoricalDimension(
-            "dm_prediction_type", choices=["F", "velocity", "noise", "x"], enabled=False
+            "dm_prediction_type", constant="F"
         )
     )
 
@@ -84,16 +83,12 @@ class DiffusionModelSpace(BaseSearchSpace):
         width = int(params["dm_subnet_width"])
         depth = int(params["dm_subnet_depth"])
 
-        kwargs: dict[str, Any] = {
-            "subnet_kwargs": {
+        return bf.networks.DiffusionModel(
+            subnet_kwargs={
                 "widths": tuple([width] * depth),
                 "activation": params["dm_activation"],
                 "dropout": float(params["dm_dropout"]),
             },
-        }
-        if "dm_noise_schedule" in params:
-            kwargs["noise_schedule"] = params["dm_noise_schedule"]
-        if "dm_prediction_type" in params:
-            kwargs["prediction_type"] = params["dm_prediction_type"]
-
-        return bf.networks.DiffusionModel(**kwargs)
+            noise_schedule=params["dm_noise_schedule"],
+            prediction_type=params["dm_prediction_type"],
+        )

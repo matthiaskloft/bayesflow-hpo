@@ -94,7 +94,7 @@ def test_objective_training_failure_sets_user_attr_and_penalty(monkeypatch):
             adapter=_FakeAdapter(),
             search_space=_FakeSearchSpace(),
             epochs=1,
-            batches_per_epoch=1,
+            num_batches=1,
             validation_data=None,
             train_fn=_raise_training_error,
         )
@@ -142,7 +142,7 @@ def test_objective_rejects_trial_exceeding_param_budget(monkeypatch):
             adapter=_FakeAdapter(),
             search_space=_FakeSearchSpace(),
             epochs=1,
-            batches_per_epoch=1,
+            num_batches=1,
             validation_data=None,
             max_param_count=100_000,
         )
@@ -195,7 +195,7 @@ def test_objective_allows_trial_within_param_budget(monkeypatch):
             adapter=_FakeAdapter(),
             search_space=_FakeSearchSpace(),
             epochs=1,
-            batches_per_epoch=1,
+            num_batches=1,
             validation_data=None,
             max_param_count=100_000,
             train_fn=_track_training,
@@ -249,7 +249,7 @@ def test_objective_allows_trial_at_exact_budget_boundary(monkeypatch):
             adapter=_FakeAdapter(),
             search_space=_FakeSearchSpace(),
             epochs=1,
-            batches_per_epoch=1,
+            num_batches=1,
             validation_data=None,
             max_param_count=100_000,
             train_fn=_track_training,
@@ -306,7 +306,7 @@ def test_objective_rejects_trial_when_probe_fails(monkeypatch):
             adapter=_FakeAdapter(),
             search_space=_FakeSearchSpace(),
             epochs=1,
-            batches_per_epoch=1,
+            num_batches=1,
             validation_data=None,
             train_fn=_track_training,
         )
@@ -356,7 +356,7 @@ def test_objective_reraises_memory_error_from_probe(monkeypatch):
             adapter=_FakeAdapter(),
             search_space=_FakeSearchSpace(),
             epochs=1,
-            batches_per_epoch=1,
+            num_batches=1,
             validation_data=None,
         )
     )
@@ -373,7 +373,7 @@ def test_objective_config_early_stopping_defaults():
         adapter=object(),
         search_space=_FakeSearchSpace(),
         epochs=1,
-        batches_per_epoch=1,
+        num_batches=1,
         validation_data=None,
     )
     assert config.early_stopping_patience == 5
@@ -387,7 +387,7 @@ def test_objective_config_early_stopping_custom_values():
         adapter=object(),
         search_space=_FakeSearchSpace(),
         epochs=1,
-        batches_per_epoch=1,
+        num_batches=1,
         validation_data=None,
         early_stopping_patience=10,
         early_stopping_window=5,
@@ -404,7 +404,7 @@ def test_objective_config_rejects_invalid_mode():
             adapter=object(),
             search_space=_FakeSearchSpace(),
             epochs=1,
-            batches_per_epoch=1,
+            num_batches=1,
             validation_data=None,
             objective_mode="paerto",  # typo
         )
@@ -418,7 +418,7 @@ def test_objective_config_rejects_invalid_report_frequency():
             adapter=object(),
             search_space=_FakeSearchSpace(),
             epochs=1,
-            batches_per_epoch=1,
+            num_batches=1,
             validation_data=None,
             report_frequency=0,
         )
@@ -432,7 +432,7 @@ def test_objective_config_rejects_invalid_cost_metric():
             adapter=object(),
             search_space=_FakeSearchSpace(),
             epochs=1,
-            batches_per_epoch=1,
+            num_batches=1,
             validation_data=None,
             cost_metric="unknown",
         )
@@ -446,7 +446,7 @@ def test_n_objectives_mean_mode_with_multiple_metrics():
             adapter=object(),
             search_space=_FakeSearchSpace(),
             epochs=1,
-            batches_per_epoch=1,
+            num_batches=1,
             validation_data=None,
             objective_metrics=["calibration_error", "nrmse"],
             objective_mode="mean",
@@ -491,7 +491,7 @@ def test_objective_multi_metric_penalty_shape(monkeypatch):
             adapter=_FakeAdapter(),
             search_space=_FakeSearchSpace(),
             epochs=1,
-            batches_per_epoch=1,
+            num_batches=1,
             validation_data=None,
             objective_metrics=["calibration_error", "nrmse"],
             objective_mode="pareto",
@@ -567,7 +567,7 @@ def test_objective_uses_custom_build_fn(monkeypatch):
             adapter=_FakeAdapter(),
             search_space=_FakeSearchSpace(),
             epochs=1,
-            batches_per_epoch=1,
+            num_batches=1,
             build_approximator_fn=custom_builder,
             train_fn=_raise,
         )
@@ -579,7 +579,7 @@ def test_objective_uses_custom_build_fn(monkeypatch):
 
 
 def test_training_config_injected_into_hparams(monkeypatch):
-    """epochs and batches_per_epoch are injected into hparams before training."""
+    """epochs and num_batches are injected into hparams before training."""
     monkeypatch.setattr(
         "bayesflow_hpo.optimization.objective.estimate_peak_memory_mb",
         lambda params: 1.0,
@@ -609,7 +609,7 @@ def test_training_config_injected_into_hparams(monkeypatch):
             adapter=_FakeAdapter(),
             search_space=_FakeSearchSpace(),
             epochs=42,
-            batches_per_epoch=7,
+            num_batches=7,
             build_approximator_fn=lambda hp: _FakeApproximator(10_000),
             train_fn=custom_train,
         )
@@ -618,7 +618,7 @@ def test_training_config_injected_into_hparams(monkeypatch):
     trial = _FakeTrial()
     objective(trial)
     assert captured_hparams["epochs"] == 42
-    assert captured_hparams["batches_per_epoch"] == 7
+    assert captured_hparams["num_batches"] == 7
 
 
 def test_validate_metric_keys_passes_clean_dict():
@@ -685,7 +685,7 @@ def test_objective_validate_fn_error_returns_penalty(monkeypatch):
             adapter=_FakeAdapter(),
             search_space=_FakeSearchSpace(),
             epochs=1,
-            batches_per_epoch=1,
+            num_batches=1,
             validation_data=_FakeValidationData(),
             build_approximator_fn=lambda hp: fake_approx,
             train_fn=lambda approx, sim, hp, cb: None,
@@ -740,7 +740,7 @@ def test_objective_custom_validate_fn_called_over_default(monkeypatch):
             adapter=_FakeAdapter(),
             search_space=_FakeSearchSpace(),
             epochs=1,
-            batches_per_epoch=1,
+            num_batches=1,
             validation_data=_FakeValidationData(),
             build_approximator_fn=lambda hp: fake_approx,
             train_fn=lambda approx, sim, hp, cb: None,
@@ -912,7 +912,7 @@ def test_objective_validation_failure_uses_training_loss_fallback(monkeypatch):
             adapter=_FakeAdapter(),
             search_space=_FakeSearchSpace(),
             epochs=1,
-            batches_per_epoch=1,
+            num_batches=1,
             validation_data=_FakeValidationData(),
             build_approximator_fn=lambda hp: fake_approx,
             train_fn=_train_with_loss,
@@ -971,7 +971,7 @@ def test_objective_validation_failure_without_training_loss_sets_penalty_attr(
             adapter=_FakeAdapter(),
             search_space=_FakeSearchSpace(),
             epochs=1,
-            batches_per_epoch=1,
+            num_batches=1,
             validation_data=_FakeValidationData(),
             build_approximator_fn=lambda hp: fake_approx,
             train_fn=lambda approx, sim, hp, cb: None,  # no loss set

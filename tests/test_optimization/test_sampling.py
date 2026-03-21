@@ -22,9 +22,9 @@ class _FakeTrial:
 
 def test_sample_returns_dict():
     space = CompositeSearchSpace(
-        inference_space=CouplingFlowSpace(include_optional=False),
-        summary_space=DeepSetSpace(include_optional=False),
-        training_space=TrainingSpace(include_optional=False),
+        inference_space=CouplingFlowSpace(),
+        summary_space=DeepSetSpace(),
+        training_space=TrainingSpace(),
     )
     params = sample_hyperparameters(_FakeTrial(), space)
     assert isinstance(params, dict)
@@ -33,10 +33,10 @@ def test_sample_returns_dict():
 
 def test_sample_contains_inference_and_training_keys():
     space = CompositeSearchSpace(
-        inference_space=CouplingFlowSpace(include_optional=False),
-        training_space=TrainingSpace(include_optional=False),
+        inference_space=CouplingFlowSpace(),
+        training_space=TrainingSpace(),
     )
     params = sample_hyperparameters(_FakeTrial(), space)
-    # Should contain keys from both sub-spaces (enabled dimensions only)
     assert "cf_depth" in params  # inference key
     assert "initial_lr" in params  # training key
+    assert params["batch_size"] == 256  # training constant

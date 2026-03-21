@@ -22,15 +22,29 @@ def _compute_total_steps(params: dict[str, Any]) -> int:
         return max(1, int(params["total_steps"]))
 
     epochs = int(params.get("epochs", params.get("n_epochs", 200)))
-    batches_per_epoch = int(params.get("batches_per_epoch", 50))
-    return max(1, epochs * batches_per_epoch)
+    num_batches = int(params.get("num_batches", 50))
+    return max(1, epochs * num_batches)
 
 
 @dataclass
 class ConsistencyModelSpace(BaseSearchSpace):
-    """Search space for `bf.networks.ConsistencyModel`."""
+    """Search space for `bf.networks.ConsistencyModel`.
 
-    include_optional: bool = False
+    Default dimensions (tuned)
+    --------------------------
+    cm_subnet_width, cm_subnet_depth, cm_dropout.
+
+    Fixed dimensions (widen to tune)
+    --------------------------------
+    cm_max_time : int
+        Fixed at ``200``.
+    cm_sigma2 : float
+        Fixed at ``1.0``.
+    cm_s0 : int
+        Fixed at ``10``.
+    cm_s1 : int
+        Fixed at ``50``.
+    """
 
     subnet_width: IntDimension = field(
         default_factory=lambda: IntDimension(
@@ -43,22 +57,17 @@ class ConsistencyModelSpace(BaseSearchSpace):
     dropout: FloatDimension = field(
         default_factory=lambda: FloatDimension("cm_dropout", low=0.0, high=0.2)
     )
-
     max_time: IntDimension = field(
-        default_factory=lambda: IntDimension(
-            "cm_max_time", low=50, high=500, enabled=False
-        )
+        default_factory=lambda: IntDimension("cm_max_time", constant=200)
     )
     sigma2: FloatDimension = field(
-        default_factory=lambda: FloatDimension(
-            "cm_sigma2", low=0.1, high=2.0, enabled=False
-        )
+        default_factory=lambda: FloatDimension("cm_sigma2", constant=1.0)
     )
     s0: IntDimension = field(
-        default_factory=lambda: IntDimension("cm_s0", low=2, high=30, enabled=False)
+        default_factory=lambda: IntDimension("cm_s0", constant=10)
     )
     s1: IntDimension = field(
-        default_factory=lambda: IntDimension("cm_s1", low=20, high=100, enabled=False)
+        default_factory=lambda: IntDimension("cm_s1", constant=50)
     )
 
     @property
@@ -83,20 +92,14 @@ class ConsistencyModelSpace(BaseSearchSpace):
         depth = int(params["cm_subnet_depth"])
         total_steps = _compute_total_steps(params)
 
-        kwargs: dict[str, Any] = {
-            "total_steps": total_steps,
-            "subnet_kwargs": {
+        return bf.networks.ConsistencyModel(
+            total_steps=total_steps,
+            subnet_kwargs={
                 "widths": tuple([width] * depth),
                 "dropout": float(params["cm_dropout"]),
             },
-        }
-        if "cm_max_time" in params:
-            kwargs["max_time"] = int(params["cm_max_time"])
-        if "cm_sigma2" in params:
-            kwargs["sigma2"] = float(params["cm_sigma2"])
-        if "cm_s0" in params:
-            kwargs["s0"] = int(params["cm_s0"])
-        if "cm_s1" in params:
-            kwargs["s1"] = int(params["cm_s1"])
-
-        return bf.networks.ConsistencyModel(**kwargs)
+            max_time=int(params["cm_max_time"]),
+            sigma2=float(params["cm_sigma2"]),
+            s0=int(params["cm_s0"]),
+            s1=int(params["cm_s1"]),
+        )

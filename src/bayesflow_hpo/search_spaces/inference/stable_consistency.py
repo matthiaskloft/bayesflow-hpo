@@ -17,9 +17,13 @@ from bayesflow_hpo.search_spaces.base import (
 
 @dataclass
 class StableConsistencyModelSpace(BaseSearchSpace):
-    """Search space for `bf.networks.StableConsistencyModel`."""
+    """Search space for `bf.networks.StableConsistencyModel`.
 
-    include_optional: bool = False
+    Fixed dimensions (widen to tune)
+    --------------------------------
+    scm_sigma : float
+        Fixed at ``1.0``.
+    """
 
     subnet_width: IntDimension = field(
         default_factory=lambda: IntDimension(
@@ -32,11 +36,8 @@ class StableConsistencyModelSpace(BaseSearchSpace):
     dropout: FloatDimension = field(
         default_factory=lambda: FloatDimension("scm_dropout", low=0.0, high=0.2)
     )
-
     sigma: FloatDimension = field(
-        default_factory=lambda: FloatDimension(
-            "scm_sigma", low=0.1, high=2.0, enabled=False
-        )
+        default_factory=lambda: FloatDimension("scm_sigma", constant=1.0)
     )
 
     @property
@@ -56,13 +57,11 @@ class StableConsistencyModelSpace(BaseSearchSpace):
 
         width = int(params["scm_subnet_width"])
         depth = int(params["scm_subnet_depth"])
-        kwargs: dict[str, Any] = {
-            "subnet_kwargs": {
+
+        return bf.networks.StableConsistencyModel(
+            subnet_kwargs={
                 "widths": tuple([width] * depth),
                 "dropout": float(params["scm_dropout"]),
             },
-        }
-        if "scm_sigma" in params:
-            kwargs["sigma"] = float(params["scm_sigma"])
-
-        return bf.networks.StableConsistencyModel(**kwargs)
+            sigma=float(params["scm_sigma"]),
+        )

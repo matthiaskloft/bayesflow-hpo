@@ -15,7 +15,7 @@ about the public API surface.
 #### Consolidate API naming against BayesFlow
 
 Align parameter/method names with BayesFlow 2.x conventions.
-Example: `batches_per_epoch` → `num_batches`.
+Example: `num_batches` → `num_batches`.
 
 #### Accept explicit `param_keys`/`data_keys` in optimize() (#5)
 
@@ -471,7 +471,7 @@ Removed the `examples/multi_objective.ipynb` notebook and updated README example
 
 ### Dev docs: BayesFlow fit() compatibility note (2026-03-15)
 Updated developer-facing docs to record BayesFlow 2.0.8 fit() keyword behavior:
-- Added quickstart guidance using a compatibility `train_fn` that maps `batches_per_epoch` -> `num_batches`.
+- Added quickstart guidance using a compatibility `train_fn` that maps `num_batches` -> `num_batches`.
 - Updated optimization/index docs to match the current approximator-based `train_fn` signature and default training path.
 
 ### Trial counting docs & reporting (2026-03-15)

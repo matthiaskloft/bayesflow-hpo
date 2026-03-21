@@ -19,25 +19,18 @@ from bayesflow_hpo.search_spaces.base import (
 class TimeSeriesNetworkSpace(BaseSearchSpace):
     """Search space for `bf.networks.TimeSeriesNetwork`.
 
-    Default dimensions
-    ------------------
-    tsn_summary_dim : int
-        Output summary dimensionality (8--64, step 8).
-    tsn_recurrent_dim : int
-        Recurrent hidden size (32--256, step 32).
-    tsn_filters : int
-        Convolutional filter count (16--128, step 16).
-    tsn_dropout : float
-        Dropout rate (0.0--0.3).
+    Default dimensions (tuned)
+    --------------------------
+    tsn_summary_dim, tsn_recurrent_dim, tsn_filters, tsn_dropout.
 
-    Optional dimensions (enabled via ``include_optional=True``)
-    -----------------------------------------------------------
+    Fixed dimensions (widen to tune)
+    --------------------------------
     tsn_recurrent_type : str
-        Recurrent cell type (``"gru"`` or ``"lstm"``). Defaults to ``"gru"``.
+        Recurrent cell type. Fixed at ``"gru"``.
     tsn_bidirectional : bool
-        Whether to use a bidirectional recurrent layer. Defaults to ``True``.
+        Bidirectional recurrent layer. Fixed at ``True``.
     tsn_skip_steps : int
-        Skip-connection stride (1--8). Defaults to ``4``.
+        Skip-connection stride. Fixed at ``4``.
     """
 
     summary_dim: IntDimension = field(
@@ -54,21 +47,18 @@ class TimeSeriesNetworkSpace(BaseSearchSpace):
     dropout: FloatDimension = field(
         default_factory=lambda: FloatDimension("tsn_dropout", low=0.0, high=0.3)
     )
-
     recurrent_type: CategoricalDimension = field(
         default_factory=lambda: CategoricalDimension(
-            "tsn_recurrent_type", choices=["gru", "lstm"], enabled=False
+            "tsn_recurrent_type", constant="gru"
         )
     )
     bidirectional: CategoricalDimension = field(
         default_factory=lambda: CategoricalDimension(
-            "tsn_bidirectional", choices=[True, False], enabled=False
+            "tsn_bidirectional", constant=True
         )
     )
     skip_steps: IntDimension = field(
-        default_factory=lambda: IntDimension(
-            "tsn_skip_steps", low=1, high=8, enabled=False
-        )
+        default_factory=lambda: IntDimension("tsn_skip_steps", constant=4)
     )
 
     def build(self, params: dict[str, Any]) -> bf.networks.TimeSeriesNetwork:
@@ -86,19 +76,12 @@ class TimeSeriesNetworkSpace(BaseSearchSpace):
         """
         self._validate(params)
 
-        kwargs: dict[str, Any] = {
-            "summary_dim": int(params["tsn_summary_dim"]),
-            "recurrent_dim": int(params["tsn_recurrent_dim"]),
-            "filters": int(params["tsn_filters"]),
-            "dropout": float(params["tsn_dropout"]),
-        }
-        if "tsn_recurrent_type" in params:
-            kwargs["recurrent_type"] = params["tsn_recurrent_type"]
-        if "tsn_bidirectional" in params:
-            kwargs["bidirectional"] = bool(
-                params["tsn_bidirectional"]
-            )
-        if "tsn_skip_steps" in params:
-            kwargs["skip_steps"] = int(params["tsn_skip_steps"])
-
-        return bf.networks.TimeSeriesNetwork(**kwargs)
+        return bf.networks.TimeSeriesNetwork(
+            summary_dim=int(params["tsn_summary_dim"]),
+            recurrent_dim=int(params["tsn_recurrent_dim"]),
+            filters=int(params["tsn_filters"]),
+            dropout=float(params["tsn_dropout"]),
+            recurrent_type=params["tsn_recurrent_type"],
+            bidirectional=bool(params["tsn_bidirectional"]),
+            skip_steps=int(params["tsn_skip_steps"]),
+        )

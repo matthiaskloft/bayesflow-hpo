@@ -97,7 +97,7 @@ def default_train_fn(
 ```
 
 Implementation: calls `approximator.fit(simulator=simulator, epochs=hparams["epochs"],
-batch_size=hparams["batch_size"], batches_per_epoch=hparams["batches_per_epoch"],
+batch_size=hparams["batch_size"], num_batches=hparams["num_batches"],
 callbacks=callbacks)`.
 
 ### Step 1.4: Extract `default_validate_fn()`
@@ -152,7 +152,7 @@ def check_pipeline(
     n_posterior_samples: int = 2,
     validation_conditions: dict[str, list[Any]] | None = None,
     epochs: int = 1,
-    batches_per_epoch: int = 1,
+    num_batches: int = 1,
 ) -> None:
 ```
 
@@ -177,7 +177,7 @@ Custom exception with a clear message identifying which component failed and why
    `sims_per_condition=5`.
 
 4. **Inject training config**: `hparams["epochs"] = epochs`,
-   `hparams["batches_per_epoch"] = batches_per_epoch`.
+   `hparams["num_batches"] = num_batches`.
 
 5. **Compile + train one step**: Create optimizer with CosineDecay from
    `hparams["initial_lr"]`. Compile approximator. Call `train_fn` or
@@ -216,7 +216,7 @@ Changes to the dataclass:
 - **Change:** `objective_mode` default from `"mean"` to `"pareto"`
 
 Keep: `simulator`, `adapter`, `search_space`, `validation_data`, `epochs`,
-`batches_per_epoch`, `early_stopping_patience`, `early_stopping_window`,
+`num_batches`, `early_stopping_patience`, `early_stopping_window`,
 `max_param_count`, `max_memory_mb`, `n_posterior_samples`, `cost_metric`,
 `checkpoint_pool`, and the intermediate validation / pruning fields.
 
@@ -228,7 +228,7 @@ Rewrite the trial lifecycle following the spec's 11-step sequence:
 1.  sample hparams from search_space
 2.  inject training config into hparams
       hparams["epochs"] = config.epochs
-      hparams["batches_per_epoch"] = config.batches_per_epoch
+      hparams["num_batches"] = config.num_batches
 3.  budget pre-check (memory estimate from hparams)
 4.  BUILD approximator
       if build_approximator_fn:
@@ -422,7 +422,7 @@ Pass `build_approximator_fn`, `train_fn`, and `validate_fn` through to
   - Custom `validate_fn` output is validated via `_validate_metric_keys()`
   - Missing metric keys in `validate_fn` output → penalty + warning
   - NaN/Inf values in `validate_fn` output → penalty + warning
-  - Training config injection (`epochs`, `batches_per_epoch` in hparams)
+  - Training config injection (`epochs`, `num_batches` in hparams)
   - Compile happens in objective (step 5), not in builder
 
 ### Step 6.4: Add `tests/test_pipeline.py` (new)
