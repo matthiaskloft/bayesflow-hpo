@@ -4,7 +4,7 @@ Tracked items for ongoing development. Updated by contributors and Claude Code s
 
 Items are grouped into packages of related work that should be shipped together.
 Suggested execution order: A1 → A2 → A3 → B → G → E → H → I → J.
-Packages I (small API fixes) and D-remaining can be done at any time independently.
+Package I (small API fixes) can be done at any time independently.
 
 ## Open
 
@@ -38,36 +38,33 @@ Validate all `data_keys` exist in `sim_data` before calling `sample()`.
 
 ---
 
-### Package D (remaining): Validation Contract Cleanup
+### Deferred: Pre-existing Code Quality
 
-Items from original Package D that require design decisions and were
-out of scope for the code-only refactor (PR #49).
+Small issues found during the validation contract cleanup review
+(PR #50) that were out of scope.
 
-#### Document `validate_fn` return contract
+#### Narrow `except TypeError: pass` in objective compile step
 
-Must return `dict[str, float]` with at least the keys in `objective_metrics`;
-missing keys get penalty substitution, extra keys are silently ignored.
-Document in `optimize()` docstring and `ValidateFn` alias.
-**Files:** `api.py:167-171`, `types.py:26`, `optimization/objective.py:129-152`
+The `except TypeError: pass` around `_make_cosine_decay_optimizer` +
+`_compile_for_compat` swallows TypeErrors from *both* calls. Only
+`_compile_for_compat` is expected to raise TypeError. A TypeError
+from `_make_cosine_decay_optimizer` (e.g. wrong type to CosineDecay)
+would be silently eaten, and the trial proceeds without an optimizer.
+**File:** `optimization/objective.py` (Step 5: COMPILE)
 
-#### Fix timing semantics between default and custom validation paths
+#### `_validate_metric_keys` uses same penalty constant for all metrics
 
-Default path extracts pure inference time from `result.timing["inference"]`;
-custom `validate_fn` path measures total wall-clock (inference + metric
-computation). Makes `cost_metric="inference_time"` non-comparable.
-**Decision needed:** ask custom hooks to return timing dict (breaks
-`ValidateFn`), or document the limitation, or drop inference time
-normalization if samplers handle this internally.
-**Files:** `optimization/objective.py:621-643`
+Missing or non-finite values are replaced with `FAILED_TRIAL_CAL_ERROR`
+regardless of which metric they correspond to. The constant name
+suggests calibration-error scale, which may not be meaningful for
+other metrics (e.g. NRMSE). Could distort Optuna's search landscape.
+**File:** `optimization/objective.py:129-152`
 
-#### Make `validation_data` required or expose `validate=False`
+#### Tighten `PeriodicValidationCallback.validation_data` type
 
-`ObjectiveConfig.validation_data` accepts `None` with a penalty
-fallback path, but `optimize()` always generates the dataset.
-**Decision needed:** make required (non-Optional) in ObjectiveConfig,
-or expose `validate=False` in `optimize()`, or document as
-internal-only.
-**Files:** `optimization/objective.py:226,659-666`, `api.py:329-335`
+Currently typed `Any`. Could be tightened to `ValidationDataset` for
+consistency with the `ObjectiveConfig` contract cleanup.
+**File:** `optimization/validation_callback.py`
 
 ---
 
@@ -353,6 +350,14 @@ lexicographic-Pareto selection (once implemented).
 ---
 
 ## Done
+
+### Package D (remaining): Validation Contract Cleanup (2026-03-22, PR #50)
+Made `ObjectiveConfig.validation_data` required (non-Optional) with
+`isinstance` guard. Removed dead `None`-fallback branch and `is not None`
+guards. Documented `validate_fn` contract (required keys, penalty fallback,
+timing caveat, intermediate pruning) in `types.py`, `api.py`, and
+`objective.py`. Timing semantics difference between default and custom
+`validate_fn` paths documented as a known limitation.
 
 ### Package D: `optimize()` Refactor (2026-03-21, PR #49)
 Decomposed `optimize()` into 5 private helpers for readability and
