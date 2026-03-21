@@ -3,8 +3,8 @@
 Tracked items for ongoing development. Updated by contributors and Claude Code sessions.
 
 Items are grouped into packages of related work that should be shipped together.
-Suggested execution order: A → B → G → E → H → I → J.
-Package I (small API fixes) can be done at any time independently.
+Suggested execution order: A1 → A2 → A3 → B → G → E → H → I → J.
+Packages I (small API fixes) and D-remaining can be done at any time independently.
 
 ## Open
 
@@ -71,12 +71,10 @@ internal-only.
 
 ---
 
-### Package A: Sampler & Pruner Presets
+### Package A1: Pruning Review & Refactor
 
-Tightly coupled — presets need researched defaults, and pruning warmup
-depends on sampler config. QMC warm-up composes with sampler presets.
-Includes a deep review of the current pruning implementation as a
-prerequisite for pruner preset design.
+Deep review of the current pruning implementation, then make it
+configurable and pluggable. Prerequisite for A2 (sampler presets).
 
 #### Deep review: pruning feature
 
@@ -128,6 +126,18 @@ Custom median-based pruning is buried in the callback with no
 configuration hooks.
 **File:** `optimization/validation_callback.py:31-82`
 
+#### Add pruner string presets to create_study()
+
+Add `pruner="none"` (NopPruner) and `pruner="median"` (current default) as
+convenience presets.
+
+---
+
+### Package A2: Sampler Presets
+
+String-based sampler selection with researched defaults. Depends on A1
+for pruning warmup alignment.
+
 #### Add named sampler presets to create_study()
 
 Add string-based sampler selection (`"tpe"`, `"botorch"`, `"gp"`, `"nsga2"`,
@@ -149,17 +159,19 @@ parameters:
 - Document each sampler's internal HP scaling behavior (confirms no external
   transform layer needed)
 
-#### Add pruner string presets to create_study()
-
-Add `pruner="none"` (NopPruner) and `pruner="median"` (current default) as
-convenience presets.
-
 #### Align pruning warmup with sampler startup
 
 Auto-align `PeriodicValidationCallback.n_startup_trials` with the sampler's
 startup count. Current default (5) is too few for `NetworkSelectionSpace`
 (25 architecture combos). Default to `sampler.n_startup_trials` (25 for TPE,
 10 for BoTorch/GP, population_size for NSGA-II). User-overridable.
+
+---
+
+### Package A3: QMC Warm-up
+
+Independent feature — Sobol-sequence warm-up before the main sampler.
+Composes with any sampler preset from A2.
 
 #### Add QMC warm-up option to optimize()
 
