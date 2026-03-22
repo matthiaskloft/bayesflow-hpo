@@ -3,8 +3,8 @@
 Tracked items for ongoing development. Updated by contributors and Claude Code sessions.
 
 Items are grouped into packages of related work that should be shipped together.
-Suggested execution order: A1 → A2 → A3 → B → G → E → H → I → J.
-Package I (small API fixes) can be done at any time independently.
+Suggested execution order: A3 → B → G → E → H → I → J.
+Package I (literature audit) can be done at any time independently.
 
 ## Open
 
@@ -40,81 +40,10 @@ consistency with the `ObjectiveConfig` contract cleanup.
 
 ---
 
-### Package A1: Pruning Review & Refactor
+### Package A2: Research — Detailed Sampler Preset Defaults
 
-Deep review of the current pruning implementation, then make it
-configurable and pluggable. Prerequisite for A2 (sampler presets).
-
-#### Deep review: pruning feature
-
-Comprehensive review of the pruning implementation, including literature
-search for best practices and audit of the current code.
-
-**Literature search:**
-- Optuna's built-in pruners (MedianPruner, HyperbandPruner, SHA) and
-  their applicability to multi-objective settings
-- Multi-objective early stopping / pruning in the HPO literature
-  (e.g., BOHB, DEHB, multi-fidelity multi-objective methods)
-- Whether geometric mean of objectives is a sound composite score
-  for pruning decisions, or if dominated-hypervolume-based pruning
-  exists
-- Warm-up heuristics: how many startup trials before pruning is
-  reliable (current default: 5)
-
-**Implementation audit:**
-- `PeriodicValidationCallback` (validation_callback.py): review the
-  custom median-based multi-objective pruning strategy (lines 31–82)
-- Hard-coded intermediate metrics `["calibration_error", "nrmse"]`
-  (line 28) — should these align with `objective_metrics`?
-- `_should_prune_multi_objective()`: median threshold, reference
-  trial selection (COMPLETE + non-rejected only), NaN/Inf handling
-- Single-objective path: delegates to Optuna's `trial.report()` +
-  study pruner — is this sufficient?
-- Interaction with `pruning_n_startup_trials` and sampler startup
-- Pruning score = `sqrt(nrmse * calibration_error)` — is geometric
-  mean the right aggregation? What about user-defined objectives?
-
-**Decision needed:** keep custom pruning, adopt a published
-multi-objective pruning strategy, or make pluggable.
-**Files:** `optimization/validation_callback.py`,
-`optimization/objective.py:573-588`
-
-#### Make intermediate validation configurable
-
-`PeriodicValidationCallback` is always injected when `validation_data`
-exists, hard-coded to `["calibration_error", "nrmse"]` regardless of
-`objective_metrics`. No way to disable or customize.
-**Decision needed:** accept `intermediate_metrics` in ObjectiveConfig,
-provide disable flag, or document as intentional design.
-**Files:** `optimization/validation_callback.py:28`,
-`optimization/objective.py:573-588`
-
-#### Make multi-objective pruning strategy pluggable
-
-Custom median-based pruning is buried in the callback with no
-configuration hooks.
-**File:** `optimization/validation_callback.py:31-82`
-
-#### Add pruner string presets to create_study()
-
-Add `pruner="none"` (NopPruner) and `pruner="median"` (current default) as
-convenience presets.
-
----
-
-### Package A2: Sampler Presets
-
-String-based sampler selection with researched defaults. Depends on A1
-for pruning warmup alignment.
-
-#### Add named sampler presets to create_study()
-
-Add string-based sampler selection (`"tpe"`, `"botorch"`, `"gp"`, `"nsga2"`,
-`"nsga3"`, `"auto"`, `"random"`) to `create_study()` alongside existing object
-parameter. Each preset wires sensible defaults and auto-wires `constraints_func`
-when `budget_aware=True`. `"botorch"` requires `optuna-integration[botorch]`
-(lazy import with clear error). See `HPO-BENCHMARK-PAPER_PLAN.md` in
-bayesflow_projects for full design and `docs/references.md` for citations.
+The sampler presets are implemented (PR #56). This research task remains
+open to optimize the defaults.
 
 #### Research: detailed sampler preset defaults
 
@@ -127,13 +56,6 @@ parameters:
 - Auto: verify it selects sensibly for BayesFlow HPO workloads
 - Document each sampler's internal HP scaling behavior (confirms no external
   transform layer needed)
-
-#### Align pruning warmup with sampler startup
-
-Auto-align `PeriodicValidationCallback.n_startup_trials` with the sampler's
-startup count. Current default (5) is too few for `NetworkSelectionSpace`
-(25 architecture combos). Default to `sampler.n_startup_trials` (25 for TPE,
-10 for BoTorch/GP, population_size for NSGA-II). User-overridable.
 
 ---
 
@@ -322,6 +244,37 @@ lexicographic-Pareto selection (once implemented).
 ---
 
 ## Done
+
+### Package A2: Sampler Presets (2026-03-22, PR #56)
+Added 7 named sampler presets (`"tpe"`, `"gp"`, `"botorch"`, `"nsga2"`,
+`"nsga3"`, `"auto"`, `"random"`) to `create_study()` and `optimize()`.
+All presets auto-wire `constraints_func` for budget-aware sampling.
+BoTorch and Auto use lazy imports with clear `ImportError` messages.
+Added `_resolve_n_startup_trials()` for smarter pruning warmup alignment
+(checks `_n_startup_trials`, `population_size`, fallback 10).
+Bumped `optuna>=3.0.0` to `>=4.0.0`. 32 new tests.
+
+### Package A1: Pruning Review & Refactor (2026-03-22, PRs #51–#54)
+Four-phase rework of multi-objective pruning:
+- **Phase 1** (PR #51): New `optimization/pruning_strategies.py` with three
+  literature-backed strategy functions: `should_prune_dominance()` (normalized
+  median AND rule, adapted from MO-ASHA; Schmucker et al., 2021),
+  `should_prune_mo_sha()` (non-dominated sorting + bottom-fraction pruning;
+  Schmucker et al., 2021, Algorithm 2), `should_prune_primary()` (single-metric
+  median; Akiba et al., 2019). Pure-numpy `_non_dominated_sort()` (Deb et al.,
+  2002). 41 tests.
+- **Phase 2** (PR #52): Refactored `PeriodicValidationCallback` for pluggable
+  strategies. Replaced hard-coded `["calibration_error", "nrmse"]` with
+  `objective_metrics` parameter. Per-metric user attrs (`val_{metric}_step_{N}`)
+  replace single composite `val_score_step_*`. Strategy dispatch via
+  `_evaluate_pruning()`. 11 tests.
+- **Phase 3** (PR #53): Wired `pruning_strategy` through `optimize()` →
+  `ObjectiveConfig` → callback. Auto-detect `n_startup_trials` from
+  `sampler.n_startup_trials` (fallback 10). `pruning_strategy="none"` skips
+  callback entirely. 12 tests.
+- **Phase 4** (PR #54): Added pruner string presets (`"median"`, `"hyperband"`,
+  `"none"`) to `create_study()`. 10 tests. 3 new references (Schmucker et al.,
+  Li et al., Emmerich & Deutz).
 
 ### Package I: Small API Fixes (2026-03-22, PR #55)
 Three standalone fixes: `normalize_param_count` / `denormalize_param_count`

@@ -9,10 +9,10 @@
 |-------|--------|------|-------|
 | Spec | DONE | 2026-03-22 | 3 blockers resolved |
 | Plan | DONE | 2026-03-22 | 3 phases, batched into 1 PR |
-| Phase 1: Sampler presets in create_study() | IMPLEMENTED | 2026-03-22 | |
-| Phase 2: Wire sampler through optimize() | IMPLEMENTED | 2026-03-22 | |
-| Phase 3: Pruning warmup alignment | IMPLEMENTED | 2026-03-22 | |
-| Ship | TODO | | |
+| Phase 1: Sampler presets in create_study() | MERGED | 2026-03-22 | PR #56 |
+| Phase 2: Wire sampler through optimize() | MERGED | 2026-03-22 | PR #56 |
+| Phase 3: Pruning warmup alignment | MERGED | 2026-03-22 | PR #56 |
+| Ship | MERGED | 2026-03-22 | All phases in one PR |
 
 ## Spec
 
