@@ -49,10 +49,16 @@ def run_validation_pipeline(
         metrics = list(DEFAULT_METRICS)
     metric_fns = resolve_metrics(list(metrics))
 
+    available_keys = (
+        set(validation_data.simulations[0].keys())
+        if validation_data.simulations
+        else None
+    )
     infer_fn = make_bayesflow_infer_fn(
         approximator=approximator,
         param_keys=validation_data.param_keys,
         data_keys=validation_data.data_keys,
+        available_keys=available_keys,
     )
 
     timing: dict[str, float] = {"inference": 0.0, "metrics": 0.0}

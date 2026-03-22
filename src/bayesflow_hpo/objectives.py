@@ -83,6 +83,11 @@ def normalize_param_count(
         Lower reference (maps to 0.0).  Default ``1_000``.
     max_count
         Upper reference (maps to 1.0).  Default ``1_000_000``.
+
+    Raises
+    ------
+    ValueError
+        If *max_count* <= *min_count* after auto-tightening.
     """
     # Auto-tighten min_count when user specified a smaller max_count
     # but left min_count at its default.
@@ -93,7 +98,9 @@ def normalize_param_count(
     if min_count <= 0:
         min_count = 1
     if max_count <= min_count:
-        return 0.0
+        raise ValueError(
+            f"max_count ({max_count}) must be greater than min_count ({min_count})"
+        )
     clamped = max(min(param_count, max_count), min_count)
     return float(np.log10(clamped / min_count) / np.log10(max_count / min_count))
 
@@ -103,11 +110,21 @@ def denormalize_param_count(
     min_count: int = MIN_PARAM_COUNT,
     max_count: int = MAX_PARAM_COUNT,
 ) -> int:
-    """Invert :func:`normalize_param_count` back to a raw count."""
+    """Invert :func:`normalize_param_count` back to a raw count.
+
+    Raises
+    ------
+    ValueError
+        If *max_count* <= *min_count*.
+    """
     if normalized <= 0:
         return 0
     if min_count <= 0:
         min_count = 1
+    if max_count <= min_count:
+        raise ValueError(
+            f"max_count ({max_count}) must be greater than min_count ({min_count})"
+        )
     log_range = np.log10(max_count / min_count)
     return int(min_count * 10 ** (normalized * log_range))
 

@@ -163,3 +163,4 @@ examples/checkpoints/
 *.weights.h5
 *.keras
 examples/quickstart_model.json
+.workflow-state.json
