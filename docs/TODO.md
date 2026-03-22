@@ -8,34 +8,6 @@ Package I (small API fixes) can be done at any time independently.
 
 ## Open
 
-### Package I: Small API Fixes
-
-Standalone fixes that don't depend on Package C.
-
-#### Accept explicit `param_keys`/`data_keys` in optimize() (#5)
-
-Add optional `param_keys` / `data_keys` parameters that override
-adapter inference when provided.
-**File:** `api.py:96-362`
-
-#### Add debug logging to `infer_keys_from_adapter` (#4)
-
-When the adapter has no `transforms` attribute, log at `DEBUG` level
-so the inference path is visible.
-**File:** `api.py:63-65`
-
-#### Fix `normalize_param_count` edge case (#3)
-
-Document the intended invariant and add a guard for
-`max_count <= min_count` that returns `0.5` (neutral) instead of `0.0`.
-**File:** `objectives.py:92-99`
-
-#### Validate `data_keys` exist before `sample()` (#18)
-
-`inference.py` silently skips missing data keys via dict comprehension.
-Validate all `data_keys` exist in `sim_data` before calling `sample()`.
-**File:** `validation/inference.py:32`
-
 ---
 
 ### Deferred: Pre-existing Code Quality
@@ -350,6 +322,14 @@ lexicographic-Pareto selection (once implemented).
 ---
 
 ## Done
+
+### Package I: Small API Fixes (2026-03-22, PR #55)
+Three standalone fixes: `normalize_param_count` / `denormalize_param_count`
+raise `ValueError` on degenerate bounds instead of silent `return 0.0`;
+`infer_keys_from_adapter` logs at DEBUG when adapter has no `transforms`;
+`make_bayesflow_infer_fn` validates `data_keys` via `available_keys` param
+and removes silent skip. #5 (explicit keys in `optimize()`) dropped as YAGNI.
+10 new tests.
 
 ### Package D (remaining): Validation Contract Cleanup (2026-03-22, PR #50)
 Made `ObjectiveConfig.validation_data` required (non-Optional) with

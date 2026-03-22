@@ -9,8 +9,8 @@
 |-------|--------|------|-------|
 | Spec | DONE | 2026-03-22 | Decisions resolved in brainstorm |
 | Plan | DONE | 2026-03-22 | |
-| Phase 1: All three fixes + tests | IMPLEMENTED | 2026-03-22 | Single bundled PR |
-| Ship | TODO | | |
+| Phase 1: All three fixes + tests | MERGED | 2026-03-22 | PR #55 |
+| Ship | MERGED | 2026-03-22 | |
 
 ## Spec
 
