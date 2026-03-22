@@ -64,14 +64,15 @@ src/bayesflow_hpo/
 │   ├── adapter.py      # Adapter-related build logic
 │   └── registry.py     # Builder registries for custom networks
 ├── optimization/       # Optuna study management + trial logic
-│   ├── study.py        # create_study(), optimize_until(), warm_start, resume_study()
+│   ├── study.py        # create_study(), sampler/pruner presets, optimize_until(), warm_start
 │   ├── objective.py    # GenericObjective, ObjectiveConfig
 │   ├── sampling.py     # sample_hyperparameters()
 │   ├── callbacks.py    # OptunaReportCallback, MovingAverageEarlyStopping
 │   ├── constraints.py  # Memory/param budget checks (pre-training rejection)
 │   ├── checkpoint_pool.py  # CheckpointPool for trial weight persistence
 │   ├── cleanup.py      # cleanup_trial()
-│   └── validation_callback.py  # PeriodicValidationCallback
+│   ├── pruning_strategies.py  # Multi-objective pruning (dominance, mo-sha, primary)
+│   └── validation_callback.py  # PeriodicValidationCallback (pluggable pruning)
 ├── validation/         # Fixed-dataset validation pipeline
 │   ├── data.py         # ValidationDataset generation + save/load
 │   ├── registry.py     # 13 built-in metrics (calibration, NRMSE, SBC, etc.)

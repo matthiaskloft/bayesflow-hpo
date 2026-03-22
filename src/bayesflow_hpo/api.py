@@ -12,6 +12,7 @@ from bayesflow_hpo.optimization.checkpoint_pool import CheckpointPool
 from bayesflow_hpo.optimization.objective import GenericObjective, ObjectiveConfig
 from bayesflow_hpo.optimization.study import (
     DEFAULT_STORAGE,
+    _resolve_n_startup_trials,
     create_study,
     optimize_until,
 )
@@ -131,6 +132,7 @@ def optimize(
     storage: str | None = DEFAULT_STORAGE,
     resume: bool = False,
     # Optional
+    sampler: str | optuna.samplers.BaseSampler | None = None,
     directions: list[str] | None = None,
     warm_start_from: Any | None = None,
     warm_start_top_k: int = 25,
@@ -290,6 +292,10 @@ def optimize(
     resume
         If ``True``, continue a previously persisted study.  If
         ``False`` (default), any existing study is deleted first.
+    sampler
+        Optuna sampler.  Accepts a string preset, a ``BaseSampler``
+        instance, or ``None`` (default ``"tpe"``).  See
+        :func:`~bayesflow_hpo.create_study` for the full preset table.
     directions
         Optimization directions.  Default ``None`` (auto-derived as
         ``["minimize"] * n_objectives``).
@@ -410,6 +416,7 @@ def optimize(
         metric_names=metric_names,
         storage=storage,
         resume=resume,
+        sampler=sampler,
         warm_start_from=warm_start_from,
         warm_start_top_k=warm_start_top_k,
         n_trials=n_trials,
@@ -580,6 +587,7 @@ def _create_and_run_study(
     metric_names: list[str],
     storage: str | None,
     resume: bool,
+    sampler: str | optuna.samplers.BaseSampler | None = None,
     warm_start_from: Any | None,
     warm_start_top_k: int,
     n_trials: int,
@@ -604,6 +612,7 @@ def _create_and_run_study(
         metric_names=metric_names,
         storage=storage,
         load_if_exists=resume or storage is None,
+        sampler=sampler,
         warm_start_from=warm_start_from,
         warm_start_top_k=warm_start_top_k,
     )
@@ -611,7 +620,7 @@ def _create_and_run_study(
     # Auto-detect n_startup_trials from sampler if not set explicitly.
     cfg = objective.config
     if cfg.pruning_n_startup_trials is None:
-        resolved = getattr(study.sampler, "n_startup_trials", 10)
+        resolved = _resolve_n_startup_trials(study.sampler)
         cfg.pruning_n_startup_trials = resolved
         logger.debug(
             "Auto-detected pruning_n_startup_trials=%d from %s",

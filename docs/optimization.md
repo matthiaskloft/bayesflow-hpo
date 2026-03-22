@@ -12,7 +12,7 @@ class ObjectiveConfig:
     simulator: bf.simulators.Simulator
     adapter: bf.adapters.Adapter
     search_space: CompositeSearchSpace
-    validation_data: ValidationDataset | None = None
+    validation_data: ValidationDataset
     epochs: int = 200
     num_batches: int = 50
     early_stopping_patience: int = 5
@@ -23,7 +23,8 @@ class ObjectiveConfig:
     n_intermediate_posterior_samples: int = 250
     intermediate_validation_interval: int = 10
     intermediate_validation_warmup: int = 10
-    pruning_n_startup_trials: int = 5
+    pruning_strategy: str | tuple[str, str] = "dominance"
+    pruning_n_startup_trials: int | None = None
     objective_metrics: list[str] = field(default_factory=lambda: ["calibration_error", "nrmse"])
     objective_mode: str = "pareto"
     cost_metric: str = "inference_time"
@@ -39,6 +40,19 @@ class ObjectiveConfig:
 `objective_metrics` controls which validation metrics are optimized. It accepts a list of metric names resolved via the [metric registry](validation.md#metric-registry). Defaults to `["calibration_error", "nrmse"]`.
 
 `objective_mode` chooses whether metrics are aggregated (`"mean"`) or optimized jointly (`"pareto"`). `cost_metric` selects the cost objective (`"inference_time"` or `"param_count"`).
+
+#### Pruning Strategy
+
+`pruning_strategy` controls how multi-objective trials are pruned during training. Optuna does not support `trial.report()` for multi-objective studies, so `PeriodicValidationCallback` dispatches to a custom strategy:
+
+| Value | Behavior |
+|-------|----------|
+| `"dominance"` (default) | Per-objective normalized median check; prunes only if worse than median on ALL objectives. Adapted from MO-ASHA (Schmucker et al., 2021). |
+| `"mo-sha"` | Non-dominated sorting at each step; prunes trials outside the top 1/η fraction. Full MO-ASHA Algorithm 2 (Schmucker et al., 2021). |
+| `("primary", "metric_name")` | Single-metric median pruning on the named metric. Equivalent to Optuna's MedianPruner (Akiba et al., 2019). |
+| `"none"` | No intermediate validation or pruning. |
+
+`pruning_n_startup_trials` controls how many completed trials are needed before pruning activates. When `None` (default), it is auto-detected from the sampler: `_n_startup_trials` for TPE/GP (25/10), `population_size` for NSGA-II/III (50), fallback 10 for others.
 
 #### Custom Training Function
 
@@ -153,15 +167,39 @@ The moving average prevents noisy loss curves from triggering premature stops.
 ```python
 study = create_study(
     study_name="my_hpo",
-    directions=["minimize", "minimize"],  # quality metric, param_score
-    storage="sqlite:///hpo.db",           # Persistent storage (optional)
-    load_if_exists=True,                  # Resume interrupted runs
-    sampler=optuna.samplers.TPESampler(multivariate=True),
-    pruner=optuna.pruners.MedianPruner(n_startup_trials=10),
+    directions=["minimize", "minimize"],
+    storage="sqlite:///hpo.db",
+    load_if_exists=True,
+    sampler="gp",       # String preset or BaseSampler
+    pruner="median",    # String preset or BasePruner
 )
 ```
 
-Defaults: `TPESampler(multivariate=True)` and `MedianPruner(n_startup_trials=10, n_warmup_steps=20)`.
+Both `sampler` and `pruner` accept string presets or Optuna instances.
+
+**Sampler presets** (all use `seed=42`; budget constraints auto-wired when `budget_aware=True`):
+
+| Preset | Sampler | Notes |
+|--------|---------|-------|
+| `"tpe"` | `TPESampler(multivariate=True, n_startup_trials=25)` | Default |
+| `"gp"` | `GPSampler(n_startup_trials=10)` | Gaussian process BO |
+| `"botorch"` | `BoTorchSampler(n_startup_trials=10)` | Requires `optuna-integration[botorch]` |
+| `"nsga2"` | `NSGAIISampler(population_size=50)` | Evolutionary multi-objective |
+| `"nsga3"` | `NSGAIIISampler(population_size=50)` | Reference-point-based, for >3 objectives |
+| `"auto"` | `AutoSampler()` | Requires newer Optuna version |
+| `"random"` | `RandomSampler()` | Baseline |
+| `None` | Same as `"tpe"` | Backwards compatible |
+
+**Pruner presets** (single-objective only):
+
+| Preset | Pruner | Notes |
+|--------|--------|-------|
+| `"median"` | `MedianPruner(n_startup_trials=5, n_warmup_steps=1)` | Default-like behavior |
+| `"hyperband"` | `HyperbandPruner(min_resource=1, reduction_factor=3)` | Better with TPE (Li et al., 2018) |
+| `"none"` | `NopPruner()` | Disable single-objective pruning |
+| `None` | Default `MedianPruner` | Existing behavior |
+
+Note: For multi-objective studies, `trial.report()` is unsupported so the study pruner is ignored; pruning is handled by the `pruning_strategy` parameter on `optimize()`.
 
 ### Resuming a Study
 

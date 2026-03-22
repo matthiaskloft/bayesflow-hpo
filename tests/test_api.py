@@ -705,8 +705,11 @@ class TestStartupAutoDetect:
             patch("bayesflow_hpo.api.optimize_until"),
         ):
             mock_study = MagicMock()
-            # Remove n_startup_trials attr from sampler.
+            # Remove all startup-related attrs from sampler so
+            # _resolve_n_startup_trials falls back to 10.
             del mock_study.sampler.n_startup_trials
+            del mock_study.sampler._n_startup_trials
+            del mock_study.sampler.population_size
             mock_create.return_value = mock_study
 
             _create_and_run_study(
@@ -724,3 +727,34 @@ class TestStartupAutoDetect:
             )
 
         assert mock_obj.config.pruning_n_startup_trials == 10
+
+    def test_sampler_forwarded_to_create_study(self):
+        """sampler= is passed through _create_and_run_study to create_study."""
+        from bayesflow_hpo.api import _create_and_run_study
+
+        mock_obj = MagicMock()
+        mock_obj.config.pruning_n_startup_trials = 5
+
+        with (
+            patch("bayesflow_hpo.api.create_study") as mock_create,
+            patch("bayesflow_hpo.api.optimize_until"),
+        ):
+            mock_create.return_value = MagicMock()
+
+            _create_and_run_study(
+                objective=mock_obj,
+                study_name="test",
+                directions=["minimize"],
+                metric_names=["a"],
+                storage=None,
+                resume=False,
+                sampler="gp",
+                warm_start_from=None,
+                warm_start_top_k=25,
+                n_trials=1,
+                max_total_trials=3,
+                show_progress_bar=False,
+            )
+
+        _, kwargs = mock_create.call_args
+        assert kwargs["sampler"] == "gp"
