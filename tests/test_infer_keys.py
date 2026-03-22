@@ -101,6 +101,14 @@ class TestInferKeysFromAdapter:
             "inference_conditions": None,
         }
 
+    def test_debug_log_on_missing_transforms(self):
+        adapter = MagicMock(spec=[])  # no .transforms
+        with patch("bayesflow_hpo.api.logger") as mock_logger:
+            infer_keys_from_adapter(adapter)
+            mock_logger.debug.assert_called_once_with(
+                "Adapter has no 'transforms' attribute; skipping key inference"
+            )
+
 
 # ---------------------------------------------------------------------------
 # optimize() integration: keys derived from adapter

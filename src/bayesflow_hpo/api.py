@@ -63,6 +63,7 @@ def infer_keys_from_adapter(
 
     transforms = getattr(adapter, "transforms", None)
     if transforms is None:
+        logger.debug("Adapter has no 'transforms' attribute; skipping key inference")
         return result
 
     for transform in transforms:

@@ -8,6 +8,7 @@ from bayesflow_hpo.objectives import (
     MIN_PARAM_COUNT,
     _metric_to_minimize,
     compute_inference_time_per_dataset,
+    denormalize_param_count,
     extract_multi_objective_values,
     extract_objective_values,
     normalize_param_count,
@@ -186,6 +187,36 @@ def test_normalize_explicit_min_skips_auto_tighten():
     # min=500 is not the default 1000, so no auto-tightening
     score = normalize_param_count(500, min_count=500, max_count=100_000)
     assert score == 0.0  # at the lower bound
+
+
+def test_normalize_raises_on_max_le_min():
+    """Contradictory bounds (max < min) raise ValueError."""
+    with pytest.raises(ValueError, match="max_count.*must be greater"):
+        normalize_param_count(500, min_count=100, max_count=10)
+
+
+def test_normalize_raises_on_max_eq_min():
+    """Equal bounds raise ValueError."""
+    with pytest.raises(ValueError, match="max_count.*must be greater"):
+        normalize_param_count(100, min_count=100, max_count=100)
+
+
+def test_normalize_raises_after_auto_tightening():
+    """max_count=1 auto-tightens min_count to max(1, 0)=1, producing equal bounds."""
+    with pytest.raises(ValueError, match="max_count.*must be greater"):
+        normalize_param_count(1, max_count=1)
+
+
+def test_denormalize_raises_on_max_eq_min():
+    """denormalize_param_count raises ValueError when max_count equals min_count."""
+    with pytest.raises(ValueError, match="max_count.*must be greater"):
+        denormalize_param_count(0.5, min_count=100, max_count=100)
+
+
+def test_denormalize_raises_on_max_lt_min():
+    """denormalize_param_count raises ValueError when max_count < min_count."""
+    with pytest.raises(ValueError, match="max_count.*must be greater"):
+        denormalize_param_count(0.5, min_count=100, max_count=10)
 
 
 # --- compute_inference_time_per_dataset tests ---
