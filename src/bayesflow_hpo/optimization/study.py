@@ -105,13 +105,161 @@ def _resolve_pruner(name: str) -> optuna.pruners.BasePruner:
     return presets[name]()
 
 
+def _resolve_sampler(
+    name: str,
+    budget_aware: bool = True,
+) -> optuna.samplers.BaseSampler:
+    """Resolve a string preset to a configured Optuna sampler.
+
+    All presets that accept ``constraints_func`` auto-wire the budget
+    constraint when *budget_aware* is ``True``, teaching the sampler to
+    avoid oversized configurations.
+
+    Parameters
+    ----------
+    name
+        One of ``"tpe"``, ``"gp"``, ``"botorch"``, ``"nsga2"``,
+        ``"nsga3"``, ``"auto"``, or ``"random"``.
+    budget_aware
+        Whether to attach :func:`_budget_constraints_func` to samplers
+        that support it.
+
+    Returns
+    -------
+    optuna.samplers.BaseSampler
+
+    Raises
+    ------
+    ValueError
+        If *name* is not a recognized preset.
+    ImportError
+        If *name* requires an optional dependency that is not installed
+        (``"botorch"`` needs ``optuna-integration[botorch]``;
+        ``"auto"`` needs a newer Optuna version).
+
+    References
+    ----------
+    Bergstra, J., et al. (2011). Algorithms for hyper-parameter
+        optimization. *NeurIPS 24*.
+    Balandat, M., et al. (2020). BoTorch. *NeurIPS 33*.
+    Deb, K., et al. (2002). NSGA-II. *IEEE TEVC*, *6*(2), 182--197.
+    Deb, K., & Jain, H. (2014). NSGA-III. *IEEE TEVC*, *18*(4), 577--601.
+    """
+    constraints = _budget_constraints_func if budget_aware else None
+
+    def _make_tpe() -> optuna.samplers.TPESampler:
+        return optuna.samplers.TPESampler(
+            seed=42,
+            multivariate=True,
+            n_startup_trials=25,
+            warn_independent_sampling=False,
+            constraints_func=constraints,
+        )
+
+    def _make_gp() -> optuna.samplers.GPSampler:
+        return optuna.samplers.GPSampler(
+            seed=42,
+            n_startup_trials=10,
+            constraints_func=constraints,
+        )
+
+    def _make_botorch() -> optuna.samplers.BaseSampler:
+        try:
+            from optuna.integration import BoTorchSampler
+        except ImportError:
+            raise ImportError(
+                'Sampler preset "botorch" requires optuna-integration[botorch]. '
+                "Install with: pip install optuna-integration[botorch]"
+            ) from None
+        return BoTorchSampler(
+            seed=42,
+            n_startup_trials=10,
+            constraints_func=constraints,
+        )
+
+    def _make_nsga2() -> optuna.samplers.NSGAIISampler:
+        return optuna.samplers.NSGAIISampler(
+            population_size=50,
+            seed=42,
+            constraints_func=constraints,
+        )
+
+    def _make_nsga3() -> optuna.samplers.NSGAIIISampler:
+        return optuna.samplers.NSGAIIISampler(
+            population_size=50,
+            seed=42,
+            constraints_func=constraints,
+        )
+
+    def _make_auto() -> optuna.samplers.BaseSampler:
+        try:
+            from optuna.samplers import AutoSampler
+        except ImportError:
+            raise ImportError(
+                'Sampler preset "auto" requires a newer version of Optuna '
+                "that provides AutoSampler. It is not available in "
+                f"optuna {optuna.__version__}."
+            ) from None
+        return AutoSampler(seed=42)
+
+    def _make_random() -> optuna.samplers.RandomSampler:
+        return optuna.samplers.RandomSampler(seed=42)
+
+    presets: dict[str, Callable[[], optuna.samplers.BaseSampler]] = {
+        "tpe": _make_tpe,
+        "gp": _make_gp,
+        "botorch": _make_botorch,
+        "nsga2": _make_nsga2,
+        "nsga3": _make_nsga3,
+        "auto": _make_auto,
+        "random": _make_random,
+    }
+    if name not in presets:
+        raise ValueError(
+            f"Unknown sampler preset: {name!r}. "
+            f"Expected one of {sorted(presets)}."
+        )
+    return presets[name]()
+
+
+def _resolve_n_startup_trials(sampler: optuna.samplers.BaseSampler) -> int:
+    """Infer the number of startup trials from a sampler instance.
+
+    Checks ``n_startup_trials`` first (TPE, GP, BoTorch), then
+    ``population_size`` (NSGA-II, NSGA-III), falling back to 10.
+
+    Parameters
+    ----------
+    sampler
+        An Optuna sampler instance.
+
+    Returns
+    -------
+    int
+        The resolved startup trial count.
+    """
+    # Public attribute (future Optuna versions may expose it).
+    n = getattr(sampler, "n_startup_trials", None)
+    if n is not None:
+        return int(n)
+    # Private attribute (TPE, GP in Optuna 4.x store it as _n_startup_trials).
+    n = getattr(sampler, "_n_startup_trials", None)
+    if n is not None:
+        return int(n)
+    # NSGA-II/III expose population_size as a public property.
+    n = getattr(sampler, "population_size", None)
+    if n is not None:
+        return int(n)
+    return 10
+
+
 def create_study(
     study_name: str = "bayesflow_hpo",
     directions: list[str] | None = None,
     metric_names: list[str] | None = None,
     storage: str | None = DEFAULT_STORAGE,
     load_if_exists: bool = True,
-    sampler: Any | None = None,
+    sampler: str | optuna.samplers.BaseSampler | None = None,
     pruner: str | optuna.pruners.BasePruner | None = None,
     warm_start_from: optuna.Study | None = None,
     warm_start_top_k: int = 25,
@@ -136,8 +284,27 @@ def create_study(
     load_if_exists
         Resume a study with the same name if it already exists.
     sampler
-        Optuna sampler.  Default ``TPESampler(seed=42,
-        multivariate=True, n_startup_trials=25)``.
+        Optuna sampler.  Accepts a ``BaseSampler`` instance, a string
+        preset, or ``None`` (default ``"tpe"``).
+
+        ============= =================================================
+        Preset        Sampler
+        ============= =================================================
+        ``"tpe"``     ``TPESampler(multivariate=True,
+                      n_startup_trials=25)``
+        ``"gp"``      ``GPSampler(n_startup_trials=10)``
+        ``"botorch"`` ``BoTorchSampler(n_startup_trials=10)`` |br|
+                      Requires ``optuna-integration[botorch]``.
+        ``"nsga2"``   ``NSGAIISampler(population_size=50)``
+        ``"nsga3"``   ``NSGAIIISampler(population_size=50)``
+        ``"auto"``    ``AutoSampler()`` |br|
+                      Requires a newer Optuna version.
+        ``"random"``  ``RandomSampler()``
+        ============= =================================================
+
+        All presets use ``seed=42``.  Presets that support
+        ``constraints_func`` auto-wire budget constraints when
+        ``budget_aware=True``.
     pruner
         Optuna pruner for single-objective studies.  Accepts a
         ``BasePruner`` instance, a string preset, or ``None``
@@ -173,27 +340,15 @@ def create_study(
     if directions is None:
         directions = ["minimize", "minimize"]
 
-    if sampler is None:
-        sampler = optuna.samplers.TPESampler(
-            seed=42,
-            multivariate=True,
-            n_startup_trials=25,
-            warn_independent_sampling=False,
-            constraints_func=_budget_constraints_func if budget_aware else None,
-        )
+    if isinstance(sampler, str):
+        sampler = _resolve_sampler(sampler, budget_aware=budget_aware)
+    elif sampler is None:
+        sampler = _resolve_sampler("tpe", budget_aware=budget_aware)
 
     if isinstance(pruner, str):
         pruner = _resolve_pruner(pruner)
     elif pruner is None:
-        # Only used for single-objective studies (trial.should_prune()).
-        # For multi-objective, PeriodicValidationCallback handles pruning.
-        # The step counter is managed by the callback, so we set
-        # warmup/interval to 1 and let the callback decide timing.
-        pruner = optuna.pruners.MedianPruner(
-            n_startup_trials=5,
-            n_warmup_steps=1,
-            interval_steps=1,
-        )
+        pruner = _resolve_pruner("median")
 
     create_kwargs: dict[str, Any] = dict(
         study_name=study_name,
