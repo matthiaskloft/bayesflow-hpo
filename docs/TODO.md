@@ -3,7 +3,7 @@
 Tracked items for ongoing development. Updated by contributors and Claude Code sessions.
 
 Items are grouped into packages of related work that should be shipped together.
-Suggested execution order: A3 → B → G → E → H → I → J.
+Suggested execution order: B → G → E → H → I → J.
 Package I (literature audit) can be done at any time independently.
 
 ## Open
@@ -59,16 +59,7 @@ parameters:
 
 ---
 
-### Package A3: QMC Warm-up
-
-Independent feature — Sobol-sequence warm-up before the main sampler.
-Composes with any sampler preset from A2.
-
-#### Add QMC warm-up option to optimize()
-
-Add `qmc_startup_trials: int = 0` parameter. When > 0, first N trials use
-`QMCSampler` (Sobol sequences), then swap to the main sampler. Composes with
-any sampler preset.
+### Package A3: QMC Warm-up (remaining research)
 
 #### Research: QMC warm-up effectiveness
 
@@ -244,6 +235,13 @@ lexicographic-Pareto selection (once implemented).
 ---
 
 ## Done
+
+### Package A3: QMC Warm-up (2026-03-26, PR #57)
+Added `qmc_startup_trials` parameter to `create_study()` and `optimize()`.
+`QMCWarmupSampler` composite wrapper delegates to `QMCSampler` (Sobol) for
+the first N non-rejected trials, then transparently switches to the main
+sampler. Composes with all 7 sampler presets, warm-start, and budget-aware
+sampling. Power-of-2 warning for non-optimal Sobol counts. 34 new tests.
 
 ### Package A2: Sampler Presets (2026-03-22, PR #56)
 Added 7 named sampler presets (`"tpe"`, `"gp"`, `"botorch"`, `"nsga2"`,
