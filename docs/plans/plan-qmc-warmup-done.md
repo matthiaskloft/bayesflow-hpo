@@ -9,8 +9,8 @@
 |-------|--------|------|-------|
 | Spec | DONE | 2026-03-23 | All 9 review findings addressed |
 | Plan | DONE | 2026-03-23 | Reviewed in 1 iteration |
-| Phase 1: QMC wrapper + wiring + tests | IMPLEMENTED | 2026-03-26 | 30 new tests, 613 total passing |
-| Ship | TODO | | |
+| Phase 1: QMC wrapper + wiring + tests | MERGED | 2026-03-26 | 34 tests, 617 total passing |
+| Ship | MERGED | 2026-03-26 | PR #57 |
 
 ## Spec
 
