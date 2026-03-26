@@ -160,7 +160,10 @@ Cross-attention fusion summary (`FusionTransformer`).
 | `ft_num_layers` | int | [1, 4] | yes |
 | `ft_template_dim` | int | [32, 256], log | yes |
 | `ft_dropout` | float | [0.0, 0.3] | yes |
-| `ft_template_type` | cat | lstm, gru | no |
+| `ft_mlp_width` | int | — | no (128) |
+| `ft_mlp_depth` | int | — | no (2) |
+| `ft_bidirectional` | cat | True, False | no (True) |
+| `ft_template_type` | cat | lstm, gru | no (lstm) |
 
 ## Training Space
 

@@ -10,7 +10,6 @@ import bayesflow as bf
 from bayesflow_hpo.search_spaces.base import (
     BaseSearchSpace,
     CategoricalDimension,
-    Dimension,
     FloatDimension,
     IntDimension,
 )
@@ -22,6 +21,12 @@ class FusionTransformerSpace(BaseSearchSpace):
 
     Fixed dimensions (widen to tune)
     --------------------------------
+    ft_mlp_width : int
+        Feed-forward MLP width. Fixed at ``128``.
+    ft_mlp_depth : int
+        Feed-forward MLP depth. Fixed at ``2``.
+    ft_bidirectional : bool
+        Bidirectional template (LSTM/GRU). Fixed at ``True``.
     ft_template_type : str
         Template type. Fixed at ``"lstm"``.
     """
@@ -48,26 +53,22 @@ class FusionTransformerSpace(BaseSearchSpace):
     dropout: FloatDimension = field(
         default_factory=lambda: FloatDimension("ft_dropout", low=0.0, high=0.3)
     )
+    mlp_width: IntDimension = field(
+        default_factory=lambda: IntDimension("ft_mlp_width", constant=128)
+    )
+    mlp_depth: IntDimension = field(
+        default_factory=lambda: IntDimension("ft_mlp_depth", constant=2)
+    )
+    bidirectional: CategoricalDimension = field(
+        default_factory=lambda: CategoricalDimension(
+            "ft_bidirectional", constant=True
+        )
+    )
     template_type: CategoricalDimension = field(
         default_factory=lambda: CategoricalDimension(
             "ft_template_type", constant="lstm"
         )
     )
-
-    @property
-    def dimensions(self) -> list[Dimension]:
-        return [
-            self.summary_dim,
-            self.embed_dim,
-            self.num_heads,
-            self.num_layers,
-            self.template_dim,
-            self.dropout,
-            self.template_type,
-        ]
-
-    def sample(self, trial: Any) -> dict[str, Any]:
-        return BaseSearchSpace.sample(self, trial)
 
     def build(self, params: dict[str, Any]) -> bf.networks.FusionTransformer:
         self._validate(params)
@@ -75,12 +76,17 @@ class FusionTransformerSpace(BaseSearchSpace):
         num_layers = int(params["ft_num_layers"])
         embed_dim = int(params["ft_embed_dim"])
         num_heads = int(params["ft_num_heads"])
+        mlp_width = int(params["ft_mlp_width"])
+        mlp_depth = int(params["ft_mlp_depth"])
 
         return bf.networks.FusionTransformer(
             summary_dim=int(params["ft_summary_dim"]),
             embed_dims=tuple([embed_dim] * num_layers),
             num_heads=tuple([num_heads] * num_layers),
+            mlp_widths=tuple([mlp_width] * num_layers),
+            mlp_depths=tuple([mlp_depth] * num_layers),
             template_dim=int(params["ft_template_dim"]),
             dropout=float(params["ft_dropout"]),
             template_type=params["ft_template_type"],
+            bidirectional=bool(params["ft_bidirectional"]),
         )

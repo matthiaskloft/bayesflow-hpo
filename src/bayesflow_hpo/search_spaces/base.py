@@ -73,6 +73,12 @@ class IntDimension:
                 f"IntDimension({self.name!r}): must set either "
                 f"constant or low/high."
             )
+        if self.log and self.step is not None and self.step != 1:
+            raise ValueError(
+                f"IntDimension({self.name!r}): log=True is incompatible "
+                f"with step={self.step}. Optuna requires step=1 (or None) "
+                f"for log-scale integer sampling."
+            )
 
 
 @dataclass
