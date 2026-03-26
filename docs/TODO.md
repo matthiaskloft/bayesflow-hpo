@@ -3,7 +3,7 @@
 Tracked items for ongoing development. Updated by contributors and Claude Code sessions.
 
 Items are grouped into packages of related work that should be shipped together.
-Suggested execution order: B → G → E → H → I → J.
+Suggested execution order: B → E → H → I → J.
 Package I (literature audit) can be done at any time independently.
 
 ## Open
@@ -90,22 +90,6 @@ Validate `0 <= select_by < len(study.directions)` at entry of
 **File:** `results/extraction.py:229, 251`
 
 ---
-
-### Package G: Search Space Gaps
-
-#### Add `mlp_width` and `bidirectional` to `FusionTransformerSpace` (#29)
-
-`SetTransformerSpace` and `TimeSeriesTransformerSpace` expose `mlp_width`;
-`TimeSeriesNetworkSpace` exposes `bidirectional`. `FusionTransformerSpace`
-has neither — inconsistent across transformer-based summary spaces.
-**File:** `search_spaces/summary/fusion_transformer.py`
-
-#### Validate `IntDimension` rejects `log=True` + `step` (#28)
-
-Optuna's `trial.suggest_int()` raises `ValueError` when both `log=True`
-and `step` (other than 1) are set. Add validation in
-`BaseSearchSpace.sample()` or `IntDimension.__post_init__`.
-**File:** `search_spaces/base.py:49`
 
 ---
 
@@ -235,6 +219,15 @@ lexicographic-Pareto selection (once implemented).
 ---
 
 ## Done
+
+### Package G: Search Space Gaps (2026-03-26)
+Added `ft_mlp_width` (constant 128), `ft_mlp_depth` (constant 2), and
+`ft_bidirectional` (constant True) to `FusionTransformerSpace`, matching
+peer summary spaces (SetTransformer, TimeSeriesTransformer, TimeSeriesNetwork).
+Updated `build()` to pass `mlp_widths`, `mlp_depths`, and `bidirectional`
+through to `bf.networks.FusionTransformer`. Added early validation in
+`IntDimension.__post_init__` rejecting `log=True` + `step` (other than 1)
+— Optuna's `suggest_int()` rejects this combination at runtime. 9 new tests.
 
 ### Package A3: QMC Warm-up (2026-03-26, PR #57)
 Added `qmc_startup_trials` parameter to `create_study()` and `optimize()`.
