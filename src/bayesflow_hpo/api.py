@@ -136,6 +136,7 @@ def optimize(
     directions: list[str] | None = None,
     warm_start_from: Any | None = None,
     warm_start_top_k: int = 25,
+    qmc_startup_trials: int = 0,
     checkpoint_pool: CheckpointPool | None = None,
     show_progress_bar: bool = True,
 ) -> optuna.Study:
@@ -304,6 +305,12 @@ def optimize(
     warm_start_top_k
         Number of best trials to copy from the source study
         (default 25).
+    qmc_startup_trials
+        Number of initial trials to sample with a Sobol quasi-random
+        sequence before the main sampler takes over.  Provides better
+        space-filling coverage than random startup.  Only non-rejected
+        completions count.  Default 0 (disabled).  See
+        :func:`~bayesflow_hpo.create_study` for details.
     checkpoint_pool
         Optional :class:`CheckpointPool` for persisting the best
         trial weights.
@@ -419,6 +426,7 @@ def optimize(
         sampler=sampler,
         warm_start_from=warm_start_from,
         warm_start_top_k=warm_start_top_k,
+        qmc_startup_trials=qmc_startup_trials,
         n_trials=n_trials,
         max_total_trials=max_total_trials,
         show_progress_bar=show_progress_bar,
@@ -590,6 +598,7 @@ def _create_and_run_study(
     sampler: str | optuna.samplers.BaseSampler | None = None,
     warm_start_from: Any | None,
     warm_start_top_k: int,
+    qmc_startup_trials: int = 0,
     n_trials: int,
     max_total_trials: int | None,
     show_progress_bar: bool,
@@ -615,6 +624,7 @@ def _create_and_run_study(
         sampler=sampler,
         warm_start_from=warm_start_from,
         warm_start_top_k=warm_start_top_k,
+        qmc_startup_trials=qmc_startup_trials,
     )
 
     # Auto-detect n_startup_trials from sampler if not set explicitly.

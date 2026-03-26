@@ -215,8 +215,7 @@ Seed a new study with the best trials from a previous study:
 study = create_study(
     study_name="new_study",
     warm_start_from=old_study,
-    warm_start_top_k=20,          # Top 20 trials by metric
-    warm_start_metric_index=0,    # Sort by first objective
+    warm_start_top_k=20,          # Top 20 trials by mean objective
 )
 ```
 
@@ -224,6 +223,43 @@ Or manually:
 
 ```python
 n_added = warm_start_study(target_study, source_study, top_k=20)
+```
+
+### QMC Warm-up
+
+Replace the main sampler's random startup phase with a Sobol
+quasi-random sequence for better space-filling coverage:
+
+```python
+study = create_study(
+    sampler="tpe",
+    qmc_startup_trials=16,  # 16 Sobol trials, then TPE takes over
+)
+```
+
+Or via `optimize()`:
+
+```python
+study = hpo.optimize(
+    ...,
+    sampler="gp",
+    qmc_startup_trials=16,
+)
+```
+
+Sobol's low-discrepancy guarantee is optimal at n = 2^m (8, 16, 32);
+a warning is logged for non-power-of-2 values.  Only non-rejected
+completions count toward the QMC quota.
+
+QMC warm-up composes with warm-start and all sampler presets:
+
+```python
+study = create_study(
+    sampler="tpe",
+    warm_start_from=old_study,
+    warm_start_top_k=10,
+    qmc_startup_trials=16,  # QMC exploration + warm-start exploitation
+)
 ```
 
 ## Trial Cleanup

@@ -28,6 +28,7 @@ def optimize(
     study_name="bayesflow_hpo", storage=DEFAULT_STORAGE, resume=False,
     # Optional
     directions=None, warm_start_from=None, warm_start_top_k=25,
+    qmc_startup_trials=0,
     checkpoint_pool=None, show_progress_bar=True,
 ) -> optuna.Study
 ```
@@ -56,6 +57,7 @@ def optimize(
 | `n_trials` | Number of *trained* trials to collect (default 50). |
 | `max_total_trials` | Hard cap on non-rejected trials. Defaults to `3 * n_trials`. |
 | `resume` | If `True`, continue a previously persisted study. |
+| `qmc_startup_trials` | Sobol QMC trials before main sampler (default 0 = disabled). |
 | `checkpoint_pool` | Optional `CheckpointPool` for persisting best trial weights. |
 
 ### `check_pipeline(...)`
@@ -204,7 +206,8 @@ values = objective(trial: optuna.Trial)  # tuple of floats
 create_study(study_name, directions, storage, load_if_exists,
              sampler: str | BaseSampler | None = None,  # "tpe", "gp", "botorch", "nsga2", "nsga3", "auto", "random"
              pruner: str | BasePruner | None = None,    # "median", "hyperband", "none"
-             metric_names, warm_start_from, warm_start_top_k) -> optuna.Study
+             metric_names, warm_start_from, warm_start_top_k,
+             qmc_startup_trials=0) -> optuna.Study
 resume_study(study_name, storage) -> optuna.Study
 optimize_until(study, objective, n_trained, max_total_trials, show_progress_bar) -> None
 warm_start_study(target_study, source_study, top_k=25) -> int

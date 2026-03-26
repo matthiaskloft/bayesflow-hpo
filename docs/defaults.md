@@ -26,6 +26,7 @@ objects (e.g. `ObjectiveConfig`, `create_study`) directly.
 | `study_name` | **`"bayesflow_hpo"`** | Optuna study name. |
 | `directions` | **`None`** (auto-derived) | Auto-derives `["minimize"] * n_objectives` from `objective_mode`. In mean mode: 2 directions; in pareto mode with N metrics: N+1 directions. |
 | `warm_start_top_k` | **25** | Best trials to copy when warm-starting from another study. |
+| `qmc_startup_trials` | **0** (disabled) | Number of initial Sobol QMC trials before the main sampler takes over. |
 | `show_progress_bar` | **True** | Show Optuna's tqdm progress bar. |
 
 ---

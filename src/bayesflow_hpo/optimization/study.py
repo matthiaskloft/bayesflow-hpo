@@ -30,6 +30,11 @@ from bayesflow_hpo.results.extraction import _objective_column_names
 
 logger = logging.getLogger(__name__)
 
+
+def _is_power_of_two(n: int) -> bool:
+    """Return ``True`` if *n* is a positive power of two."""
+    return n > 0 and (n & (n - 1)) == 0
+
 # Default SQLite storage file used by :func:`create_study`.
 DEFAULT_STORAGE = "sqlite:///bayesflow_hpo.db"
 
@@ -253,6 +258,134 @@ def _resolve_n_startup_trials(sampler: optuna.samplers.BaseSampler) -> int:
     return 10
 
 
+class QMCWarmupSampler(optuna.samplers.BaseSampler):
+    """Composite sampler that uses QMC (Sobol) for the first N trials.
+
+    Wraps a main sampler and delegates to ``QMCSampler`` for the first
+    *qmc_startup_trials* non-rejected completions, then transparently
+    delegates all calls to the main sampler.
+
+    This is an internal class — the public API is the
+    ``qmc_startup_trials`` parameter on :func:`create_study` and
+    :func:`~bayesflow_hpo.optimize`.
+
+    Parameters
+    ----------
+    main_sampler
+        The sampler to use after the QMC warm-up phase.
+    qmc_startup_trials
+        Number of non-rejected QMC trials before switching.
+
+    Raises
+    ------
+    ValueError
+        If *qmc_startup_trials* is negative.
+
+    References
+    ----------
+    Optuna PR #2423: Sobol outperforms Halton in benchmarks.
+    Optuna Issue #1797: QMCSampler significantly better than
+    RandomSampler.
+    """
+
+    def __init__(
+        self,
+        main_sampler: optuna.samplers.BaseSampler,
+        qmc_startup_trials: int,
+    ) -> None:
+        if qmc_startup_trials < 0:
+            raise ValueError(
+                f"qmc_startup_trials must be >= 0, got {qmc_startup_trials}"
+            )
+        self._main_sampler = main_sampler
+        self._qmc_startup_trials = qmc_startup_trials
+        self._qmc_sampler = optuna.samplers.QMCSampler(
+            qmc_type="sobol",
+            scramble=False,
+        )
+        self._n_qmc_completed: int = 0
+        self._pending_qmc_trials: set[int] = set()
+
+    @property
+    def _is_qmc_phase(self) -> bool:
+        """Whether we are still in the QMC warm-up phase."""
+        return self._n_qmc_completed < self._qmc_startup_trials
+
+    @property
+    def _active_sampler(self) -> optuna.samplers.BaseSampler:
+        """The sampler that should handle the current trial."""
+        if self._is_qmc_phase:
+            return self._qmc_sampler
+        return self._main_sampler
+
+    @property
+    def n_startup_trials(self) -> int:
+        """Startup trials for pruning warmup alignment.
+
+        Returns the maximum of the QMC quota and the main sampler's
+        startup count, so pruning does not activate prematurely.
+        """
+        main_startup = _resolve_n_startup_trials(self._main_sampler)
+        return max(self._qmc_startup_trials, main_startup)
+
+    def infer_relative_search_space(
+        self,
+        study: optuna.Study,
+        trial: optuna.trial.FrozenTrial,
+    ) -> dict[str, optuna.distributions.BaseDistribution]:
+        return self._active_sampler.infer_relative_search_space(study, trial)
+
+    def sample_relative(
+        self,
+        study: optuna.Study,
+        trial: optuna.trial.FrozenTrial,
+        search_space: dict[str, optuna.distributions.BaseDistribution],
+    ) -> dict[str, Any]:
+        if self._is_qmc_phase:
+            self._pending_qmc_trials.add(trial.number)
+        return self._active_sampler.sample_relative(study, trial, search_space)
+
+    def sample_independent(
+        self,
+        study: optuna.Study,
+        trial: optuna.trial.FrozenTrial,
+        param_name: str,
+        param_distribution: optuna.distributions.BaseDistribution,
+    ) -> Any:
+        if self._is_qmc_phase:
+            self._pending_qmc_trials.add(trial.number)
+        return self._active_sampler.sample_independent(
+            study, trial, param_name, param_distribution,
+        )
+
+    def before_trial(
+        self,
+        study: optuna.Study,
+        trial: optuna.trial.FrozenTrial,
+    ) -> None:
+        self._active_sampler.before_trial(study, trial)
+
+    def after_trial(
+        self,
+        study: optuna.Study,
+        trial: optuna.trial.FrozenTrial,
+        state: optuna.trial.TrialState,
+        values: list[float] | None,
+    ) -> None:
+        was_qmc_trial = trial.number in self._pending_qmc_trials
+        if was_qmc_trial:
+            self._pending_qmc_trials.discard(trial.number)
+            if (
+                state == TrialState.COMPLETE
+                and "rejected_reason" not in trial.user_attrs
+            ):
+                self._n_qmc_completed += 1
+        # Delegate to the sampler that actually produced this trial,
+        # not _active_sampler (which may have flipped mid-increment).
+        delegate = self._qmc_sampler if was_qmc_trial else self._main_sampler
+        delegate.after_trial(study, trial, state, values)
+
+
 def create_study(
     study_name: str = "bayesflow_hpo",
     directions: list[str] | None = None,
@@ -264,6 +397,7 @@ def create_study(
     warm_start_from: optuna.Study | None = None,
     warm_start_top_k: int = 25,
     budget_aware: bool = True,
+    qmc_startup_trials: int = 0,
 ) -> optuna.Study:
     """Create or resume an Optuna study.
 
@@ -336,6 +470,22 @@ def create_study(
     budget_aware
         Whether to attach a constraints function that marks
         budget-rejected trials as infeasible for the sampler.
+    qmc_startup_trials
+        Number of initial trials to sample with a Sobol quasi-random
+        sequence before the main sampler takes over.  Sobol provides
+        better space-filling coverage than random startup, giving
+        the main sampler a more informative initial dataset.
+
+        Only non-rejected completions count toward this quota.
+        When 0 (default), no QMC wrapper is applied.
+
+        Sobol's low-discrepancy guarantee is optimal at
+        n = 2^m; a warning is logged for non-power-of-2 values.
+
+    Raises
+    ------
+    ValueError
+        If *qmc_startup_trials* is negative.
     """
     if directions is None:
         directions = ["minimize", "minimize"]
@@ -344,6 +494,20 @@ def create_study(
         sampler = _resolve_sampler(sampler, budget_aware=budget_aware)
     elif sampler is None:
         sampler = _resolve_sampler("tpe", budget_aware=budget_aware)
+
+    if qmc_startup_trials < 0:
+        raise ValueError(
+            f"qmc_startup_trials must be >= 0, got {qmc_startup_trials}"
+        )
+    if qmc_startup_trials > 0:
+        if not _is_power_of_two(qmc_startup_trials):
+            logger.warning(
+                "qmc_startup_trials=%d is not a power of 2. Sobol's "
+                "low-discrepancy guarantee is optimal at n = 2^m "
+                "(e.g. 8, 16, 32). Proceeding with the requested value.",
+                qmc_startup_trials,
+            )
+        sampler = QMCWarmupSampler(sampler, qmc_startup_trials)
 
     if isinstance(pruner, str):
         pruner = _resolve_pruner(pruner)
