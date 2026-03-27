@@ -2,13 +2,68 @@
 
 from __future__ import annotations
 
+import dataclasses
+import logging
 import math
 from typing import Any
 
+import numpy as np
 import optuna
 import pandas as pd
 
 from bayesflow_hpo._display import DisplayDataFrame
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Priority type alias and SelectionResult
+# ---------------------------------------------------------------------------
+
+PrioritySpec = tuple[str, float] | tuple[str, float, str]
+"""A satisficing priority: ``(metric, threshold)`` or
+``(metric, threshold, "below" | "above")``.
+
+For study objectives the direction is inferred from ``study.directions``
+when the 2-tuple form is used.  For user attributes that are not study
+objectives the 3-tuple form with an explicit ``"below"`` or ``"above"``
+direction is required.
+"""
+
+
+@dataclasses.dataclass(frozen=True)
+class SelectionResult:
+    """Diagnostic output from :func:`select_best_trial`.
+
+    Attributes
+    ----------
+    thresholds_met : dict[str, bool]
+        Maps each priority metric name to whether its threshold was
+        satisfied by at least one candidate.
+    pareto_front : list[optuna.trial.FrozenTrial]
+        The Pareto-optimal trials from Phase 2.
+    n_candidates_per_step : list[int]
+        Number of surviving candidates after each satisficing filter step.
+    """
+
+    thresholds_met: dict[str, bool]
+    pareto_front: list[optuna.trial.FrozenTrial]
+    n_candidates_per_step: list[int]
+
+
+# ---------------------------------------------------------------------------
+# Validation helpers
+# ---------------------------------------------------------------------------
+
+
+def _validate_select_by(study: optuna.Study, select_by: int) -> None:
+    """Raise ``ValueError`` if *select_by* is out of range."""
+    n = len(study.directions)
+    if not (0 <= select_by < n):
+        raise ValueError(
+            f"select_by={select_by} is out of range for a study with "
+            f"{n} objective(s) (must be 0 <= select_by < {n})"
+        )
+
 
 # Patterns used by _round_value() to decide how to format floats.
 _LR_PATTERNS = ("lr", "learning_rate", "initial_lr")
@@ -239,6 +294,7 @@ def trial_table(
         Ranked table with columns: ``rank``, ``trial``, objective columns,
         ``param_count``, hyperparameters, and any requested metrics.
     """
+    _validate_select_by(study, select_by)
     obj_cols = _objective_column_names(study)
     trials = _get_trained_trials(study, trained_only=trained_only)
 
@@ -296,6 +352,7 @@ def best_config(
     study: optuna.Study,
     trial_number: int | None = None,
     select_by: int = 0,
+    priorities: list[PrioritySpec] | None = None,
 ) -> dict[str, Any]:
     """Return the hyperparameter config of a trial, with rounded values.
 
@@ -308,7 +365,15 @@ def best_config(
         trained trial by *select_by* objective is used.
     select_by
         Index of the objective used to pick the best trial when
-        *trial_number* is ``None``.
+        *trial_number* is ``None`` and *priorities* is ``None``.
+    priorities
+        Optional list of satisficing priorities for lexicographic-Pareto
+        selection.  Each element is a 2-tuple ``(metric, threshold)``
+        (direction inferred from study) or 3-tuple
+        ``(metric, threshold, "below" | "above")``.  When provided,
+        :func:`select_best_trial` is used instead of simple
+        single-objective selection.  Mutually exclusive with a non-default
+        *select_by*.
 
     Returns
     -------
@@ -318,11 +383,22 @@ def best_config(
     Raises
     ------
     ValueError
-        If *trial_number* does not exist in the study, or if the study
-        has no trained trials.
+        If *trial_number* does not exist in the study, if the study
+        has no trained trials, or if both *priorities* and a non-default
+        *select_by* are provided.
     """
+    _validate_select_by(study, select_by)
+
+    if priorities is not None and select_by != 0:
+        raise ValueError(
+            "Cannot specify both 'priorities' and a non-default "
+            "'select_by'; they are mutually exclusive."
+        )
+
     if trial_number is not None:
         trial = _find_trial(study, trial_number)
+    elif priorities is not None:
+        trial, _ = select_best_trial(study, priorities)
     else:
         trained = _get_trained_trials(study)
         if not trained:
@@ -441,6 +517,7 @@ def summarize_study(
     str
         Formatted summary string (also printed to stdout).
     """
+    _validate_select_by(study, select_by)
     obj_cols = _objective_column_names(study)
     n_objectives = len(study.directions)
     trained = _get_trained_trials(study)
@@ -497,3 +574,297 @@ def summarize_study(
     summary = "\n".join(lines)
     print(summary)
     return summary
+
+
+# ---------------------------------------------------------------------------
+# Lexicographic-Pareto trial selection
+# ---------------------------------------------------------------------------
+
+
+def _resolve_priority(
+    priority: PrioritySpec,
+    obj_cols: list[str],
+    directions: list[optuna.study.StudyDirection],
+) -> tuple[str, float, bool]:
+    """Validate and resolve a priority tuple.
+
+    Returns ``(metric, threshold, is_below)`` where *is_below* is ``True``
+    when candidates must have value ≤ threshold.
+    """
+    if len(priority) == 2:
+        metric, threshold = priority
+        if metric not in obj_cols:
+            raise ValueError(
+                f"Priority metric {metric!r} is not a study objective "
+                f"({obj_cols}); specify an explicit direction as a 3-tuple "
+                f'e.g. ({metric!r}, {threshold}, "below")'
+            )
+        idx = obj_cols.index(metric)
+        is_below = directions[idx] == optuna.study.StudyDirection.MINIMIZE
+    elif len(priority) == 3:
+        metric, threshold, direction = priority
+        if direction not in ("below", "above"):
+            raise ValueError(
+                f"Direction must be 'below' or 'above', got {direction!r}"
+            )
+        is_below = direction == "below"
+    else:
+        raise ValueError(
+            f"Priority must be a 2- or 3-tuple, got length {len(priority)}"
+        )
+    return metric, float(threshold), is_below
+
+
+def _get_trial_metric(
+    trial: optuna.trial.FrozenTrial,
+    metric: str,
+    obj_cols: list[str],
+) -> float | None:
+    """Extract a metric value from a trial.
+
+    Looks up *metric* first in ``trial.values`` (if it matches a study
+    objective name), then in ``trial.user_attrs``.  Returns ``None`` if
+    the metric is not available on this trial.
+    """
+    if metric in obj_cols and trial.values is not None:
+        idx = obj_cols.index(metric)
+        if idx < len(trial.values):
+            return trial.values[idx]
+    if metric in trial.user_attrs:
+        val = trial.user_attrs[metric]
+        if isinstance(val, (int, float)):
+            return float(val)
+    return None
+
+
+def _pareto_front_indices(
+    values: np.ndarray,
+    minimize: list[bool],
+) -> list[int]:
+    """Return row indices of non-dominated solutions.
+
+    Uses the dominance relation from NSGA-II (Deb et al., 2002).
+    Objectives are flipped so that all are treated as minimize.
+
+    Parameters
+    ----------
+    values
+        ``(N, M)`` array of objective values.
+    minimize
+        Per-objective flag; ``True`` means minimize, ``False`` means
+        maximize.
+
+    Returns
+    -------
+    list[int]
+        Indices of Pareto-optimal rows.
+    """
+    transformed = values.copy()
+    for j, is_min in enumerate(minimize):
+        if not is_min:
+            transformed[:, j] = -transformed[:, j]
+
+    n = transformed.shape[0]
+    front: list[int] = []
+    for i in range(n):
+        dominated = False
+        for j in range(n):
+            if i == j:
+                continue
+            if np.all(transformed[j] <= transformed[i]) and np.any(
+                transformed[j] < transformed[i]
+            ):
+                dominated = True
+                break
+        if not dominated:
+            front.append(i)
+    return front
+
+
+def _available_metric_names(
+    trials: list[optuna.trial.FrozenTrial],
+    obj_cols: list[str],
+) -> list[str]:
+    """Collect all metric names available across trials."""
+    names = list(obj_cols)
+    seen = set(names)
+    for t in trials:
+        for k in sorted(t.user_attrs):
+            if k not in seen and isinstance(t.user_attrs[k], (int, float)):
+                names.append(k)
+                seen.add(k)
+    return names
+
+
+def select_best_trial(
+    study: optuna.Study,
+    priorities: list[PrioritySpec],
+) -> tuple[optuna.trial.FrozenTrial, SelectionResult]:
+    """Select the best trial using lexicographic-Pareto selection.
+
+    Two-phase algorithm designed for multi-objective HPO studies:
+
+    **Phase 1 — Satisficing:** Walk through priority metrics in order.
+    For each ``(metric, threshold)``, filter candidates to those meeting
+    the threshold.  If no candidate meets a threshold, warn and promote
+    that metric and all subsequent ones to Phase 2.
+
+    **Phase 2 — Pareto selection:** Among surviving candidates, compute
+    the Pareto front over remaining *study objectives* (objectives that
+    had no threshold or were promoted).  Return the trial with the
+    lowest mean rank across those objectives.
+
+    Direction inference: for metrics matching study objective names,
+    direction is inferred from ``study.directions``.  For user attributes
+    the 3-tuple form ``(metric, threshold, "below" | "above")`` is
+    required.
+
+    Parameters
+    ----------
+    study
+        Optuna study (single- or multi-objective).
+    priorities
+        Ordered list of satisficing criteria.  Each element is either a
+        2-tuple ``(metric, threshold)`` where direction is inferred from
+        the study, or a 3-tuple ``(metric, threshold, "below" | "above")``
+        for explicit direction.
+
+    Returns
+    -------
+    tuple[optuna.trial.FrozenTrial, SelectionResult]
+        The selected trial and diagnostic metadata.
+
+    Raises
+    ------
+    ValueError
+        If the study has no trained trials, a metric name is not found
+        in any trial, or a 2-tuple priority names a non-objective metric.
+
+    References
+    ----------
+    Pareto dominance follows the non-dominated sorting relation from
+    NSGA-II (Deb et al., 2002).
+    """
+    obj_cols = _objective_column_names(study)
+    directions = list(study.directions)
+    candidates = _get_trained_trials(study)
+
+    if not candidates:
+        raise ValueError("Study has no trained trials")
+
+    if not priorities:
+        raise ValueError("priorities must be a non-empty list")
+
+    # -- Validate all priorities upfront --
+    resolved: list[tuple[str, float, bool]] = []
+    for p in priorities:
+        metric, threshold, is_below = _resolve_priority(p, obj_cols, directions)
+        # Verify the metric exists on at least one trial.
+        found = any(
+            _get_trial_metric(t, metric, obj_cols) is not None for t in candidates
+        )
+        if not found:
+            available = _available_metric_names(candidates, obj_cols)
+            raise ValueError(
+                f"Priority metric {metric!r} not found in any trial. "
+                f"Available metrics: {available}"
+            )
+        resolved.append((metric, threshold, is_below))
+
+    # -- Phase 1: Satisficing filter --
+    thresholds_met: dict[str, bool] = {}
+    n_candidates_per_step: list[int] = [len(candidates)]
+    promoted_from: int | None = None  # index where promotion starts
+
+    for i, (metric, threshold, is_below) in enumerate(resolved):
+        filtered = []
+        for t in candidates:
+            val = _get_trial_metric(t, metric, obj_cols)
+            if val is None:
+                continue
+            if is_below and val <= threshold:
+                filtered.append(t)
+            elif not is_below and val >= threshold:
+                filtered.append(t)
+
+        if filtered:
+            thresholds_met[metric] = True
+            candidates = filtered
+        else:
+            thresholds_met[metric] = False
+            promoted_from = i
+            logger.warning(
+                "No trial meets threshold for %r (threshold=%.4g); "
+                "promoting to Pareto selection.",
+                metric,
+                threshold,
+            )
+            # Mark all subsequent as not met too.
+            for j in range(i + 1, len(resolved)):
+                thresholds_met[resolved[j][0]] = False
+            break
+
+        n_candidates_per_step.append(len(candidates))
+
+    # -- Phase 2: Pareto selection over remaining study objectives --
+    # "Remaining" = study objectives with no threshold OR promoted.
+    priority_metrics = {r[0] for r in resolved}
+    promoted_metrics = set()
+    if promoted_from is not None:
+        promoted_metrics = {resolved[j][0] for j in range(promoted_from, len(resolved))}
+
+    # Remaining study objectives for Pareto: those not in priorities,
+    # or those that were promoted.
+    remaining_obj_indices: list[int] = []
+    for idx, col in enumerate(obj_cols):
+        if col not in priority_metrics or col in promoted_metrics:
+            remaining_obj_indices.append(idx)
+
+    # If all thresholds met and no remaining objectives, use all study objectives.
+    if not remaining_obj_indices:
+        remaining_obj_indices = list(range(len(obj_cols)))
+
+    # Single candidate → done.
+    if len(candidates) == 1:
+        return candidates[0], SelectionResult(
+            thresholds_met=thresholds_met,
+            pareto_front=list(candidates),
+            n_candidates_per_step=n_candidates_per_step,
+        )
+
+    # Build objective matrix for remaining objectives.
+    obj_matrix = np.array(
+        [[t.values[idx] for idx in remaining_obj_indices] for t in candidates]
+    )
+    minimize_flags = [
+        directions[idx] == optuna.study.StudyDirection.MINIMIZE
+        for idx in remaining_obj_indices
+    ]
+
+    # Compute Pareto front.
+    front_indices = _pareto_front_indices(obj_matrix, minimize_flags)
+    pareto_trials = [candidates[i] for i in front_indices]
+
+    # Tiebreak: lowest mean rank across remaining objectives
+    # (rank computed among ALL Phase 1 survivors).
+    n_candidates = len(candidates)
+    ranks = np.zeros((n_candidates, len(remaining_obj_indices)))
+    for col_j in range(len(remaining_obj_indices)):
+        col_vals = obj_matrix[:, col_j]
+        ascending = minimize_flags[col_j]
+        order = np.argsort(col_vals) if ascending else np.argsort(-col_vals)
+        rank_arr = np.empty(n_candidates, dtype=float)
+        rank_arr[order] = np.arange(1, n_candidates + 1, dtype=float)
+        ranks[:, col_j] = rank_arr
+
+    mean_ranks = ranks.mean(axis=1)
+
+    # Pick the candidate with lowest mean rank.
+    best_idx = int(np.argmin(mean_ranks))
+    best_trial = candidates[best_idx]
+
+    return best_trial, SelectionResult(
+        thresholds_met=thresholds_met,
+        pareto_front=pareto_trials,
+        n_candidates_per_step=n_candidates_per_step,
+    )

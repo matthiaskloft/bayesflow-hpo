@@ -83,7 +83,7 @@ src/bayesflow_hpo/
 │   ├── dry_run.py      # validate_once()
 │   └── sbc_tests.py    # SBC uniformity tests (KS, chi-squared)
 └── results/            # Post-optimization analysis + export
-    ├── extraction.py   # trials_to_dataframe(), get_pareto_trials(), summarize_study()
+    ├── extraction.py   # trials_to_dataframe(), get_pareto_trials(), select_best_trial(), summarize_study()
     ├── export.py       # save/load_workflow_with_metadata(), get_workflow_metadata()
     └── visualization.py # Pareto front, param importance, metric panels, scatter
 ```

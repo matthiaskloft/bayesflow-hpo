@@ -68,6 +68,7 @@ from bayesflow_hpo.registration import (
     register_custom_summary_network,
 )
 from bayesflow_hpo.results import (
+    SelectionResult,
     best_config,
     compare_trials,
     get_pareto_trials,
@@ -83,6 +84,7 @@ from bayesflow_hpo.results import (
     plot_pareto_projections,
     plot_study,
     save_workflow_with_metadata,
+    select_best_trial,
     summarize_study,
     trial_table,
     trials_to_dataframe,
@@ -174,11 +176,13 @@ __all__ = [
     "register_custom_inference_network",
     "register_custom_summary_network",
     # Results
+    "SelectionResult",
     "best_config",
     "compare_trials",
     "get_pareto_trials",
     "get_workflow_metadata",
     "load_workflow_with_metadata",
+    "select_best_trial",
     "plot_metric_panels",
     "plot_metric_scatter",
     "plot_optimization_history",

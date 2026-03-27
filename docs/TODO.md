@@ -69,28 +69,6 @@ HPO benchmark paper.
 
 ---
 
-### Package B: Trial Selection & Results
-
-Lexicographic selection builds on Pareto extraction; `select_by` bounds
-check is in the same code path.
-
-#### Add lexicographic-Pareto trial selection
-
-Add `select_best_trial()` to `results/extraction.py` and integrate into
-`best_config()` via an optional `priorities` parameter. Two-phase algorithm:
-(1) satisficing — filter by priority thresholds in order, (2) Pareto selection
-over remaining metrics. Direction inferred from `study.directions` for
-objectives, explicit for user_attrs. See `HPO-BENCHMARK-PAPER_PLAN.md` in
-bayesflow_projects for full design.
-
-#### Add `select_by` bounds check (#22)
-
-Validate `0 <= select_by < len(study.directions)` at entry of
-`get_pareto_trials()` and `summarize_study()`.
-**File:** `results/extraction.py:229, 251`
-
----
-
 ---
 
 ### Package E: C2ST Metrics
@@ -219,6 +197,19 @@ lexicographic-Pareto selection (once implemented).
 ---
 
 ## Done
+
+### Package B: Trial Selection & Results (2026-03-27)
+Added lexicographic-Pareto trial selection (`select_best_trial()`) to
+`results/extraction.py`. Two-phase algorithm: (1) satisficing — filter
+candidates by priority thresholds in order, promoting unmet priorities to
+Phase 2; (2) Pareto selection over remaining study objectives with mean-rank
+tiebreak (Deb et al., 2002). Priorities are tuple-based: 2-tuple
+`(metric, threshold)` infers direction from `study.directions`, 3-tuple
+`(metric, threshold, "below"/"above")` for user attributes. Returns
+`(trial, SelectionResult)` with diagnostic metadata. Integrated into
+`best_config()` via optional `priorities` parameter. Also added
+`_validate_select_by()` bounds check to `trial_table()`, `best_config()`,
+and `summarize_study()`. 25 new tests.
 
 ### Package G: Search Space Gaps (2026-03-26)
 Added `ft_mlp_width` (constant 128), `ft_mlp_depth` (constant 2), and

@@ -6,9 +6,11 @@ from bayesflow_hpo.results.export import (
     save_workflow_with_metadata,
 )
 from bayesflow_hpo.results.extraction import (
+    SelectionResult,
     best_config,
     compare_trials,
     get_pareto_trials,
+    select_best_trial,
     summarize_study,
     trial_table,
     trials_to_dataframe,
@@ -26,9 +28,11 @@ from bayesflow_hpo.results.visualization import (
 )
 
 __all__ = [
+    "SelectionResult",
     "best_config",
     "compare_trials",
     "get_pareto_trials",
+    "select_best_trial",
     "get_workflow_metadata",
     "load_workflow_with_metadata",
     "plot_metric_panels",
