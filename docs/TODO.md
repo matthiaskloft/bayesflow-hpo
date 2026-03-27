@@ -192,7 +192,7 @@ verified literature reference in `docs/references.md`. For each:
 
 Scope: all 13 built-in metrics in `validation/registry.py`, the
 budget-aware sampling design, the pruning strategy, and the
-lexicographic-Pareto selection (once implemented).
+lexicographic-Pareto selection.
 
 ---
 

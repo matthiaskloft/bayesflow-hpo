@@ -301,8 +301,10 @@ def trial_table(
     if not trials:
         return pd.DataFrame()
 
-    # Sort by the chosen objective.
-    trials.sort(key=lambda t: t.values[select_by])
+    # Sort by the chosen objective (ascending for minimize, descending
+    # for maximize so that rank 1 = best).
+    ascending = study.directions[select_by] == optuna.study.StudyDirection.MINIMIZE
+    trials.sort(key=lambda t: t.values[select_by], reverse=not ascending)
 
     if top_k is not None:
         trials = trials[:top_k]
@@ -387,8 +389,6 @@ def best_config(
         has no trained trials, or if both *priorities* and a non-default
         *select_by* are provided.
     """
-    _validate_select_by(study, select_by)
-
     if priorities is not None and select_by != 0:
         raise ValueError(
             "Cannot specify both 'priorities' and a non-default "
@@ -400,10 +400,15 @@ def best_config(
     elif priorities is not None:
         trial, _ = select_best_trial(study, priorities)
     else:
+        _validate_select_by(study, select_by)
         trained = _get_trained_trials(study)
         if not trained:
             raise ValueError("Study has no trained trials")
-        trial = min(trained, key=lambda t: t.values[select_by])
+        direction = study.directions[select_by]
+        use_min = direction == optuna.study.StudyDirection.MINIMIZE
+        trial = (min if use_min else max)(
+            trained, key=lambda t: t.values[select_by]
+        )
 
     config = {k: _round_value(k, v) for k, v in sorted(trial.params.items())}
 
@@ -544,7 +549,11 @@ def summarize_study(
     ]
 
     if n_trained > 0:
-        best = min(trained, key=lambda t: t.values[select_by])
+        direction = study.directions[select_by]
+        use_min = direction == optuna.study.StudyDirection.MINIMIZE
+        best = (min if use_min else max)(
+            trained, key=lambda t: t.values[select_by]
+        )
 
         # Pareto info (multi-objective only).
         if n_objectives > 1:
@@ -659,12 +668,22 @@ def _pareto_front_indices(
     list[int]
         Indices of Pareto-optimal rows.
     """
+    n, m = values.shape
+    if n == 0:
+        return []
+    if n == 1:
+        return [0]
+    # Single objective: just return the index of the best value.
+    if m == 1:
+        col = values[:, 0]
+        best = int(np.argmin(col)) if minimize[0] else int(np.argmax(col))
+        return [best]
+
     transformed = values.copy()
     for j, is_min in enumerate(minimize):
         if not is_min:
             transformed[:, j] = -transformed[:, j]
 
-    n = transformed.shape[0]
     front: list[int] = []
     for i in range(n):
         dominated = False
@@ -848,19 +867,26 @@ def select_best_trial(
     # Tiebreak: lowest mean rank across remaining objectives
     # (rank computed among ALL Phase 1 survivors).
     n_candidates = len(candidates)
+    trial_numbers = np.array([t.number for t in candidates])
     ranks = np.zeros((n_candidates, len(remaining_obj_indices)))
     for col_j in range(len(remaining_obj_indices)):
         col_vals = obj_matrix[:, col_j]
-        ascending = minimize_flags[col_j]
-        order = np.argsort(col_vals) if ascending else np.argsort(-col_vals)
+        # Use lexsort for stable ranking: secondary key = trial number,
+        # primary key = objective value.  This ensures tied objective
+        # values receive consistent rank ordering across platforms.
+        primary = col_vals if minimize_flags[col_j] else -col_vals
+        order = np.lexsort((trial_numbers, primary))
         rank_arr = np.empty(n_candidates, dtype=float)
         rank_arr[order] = np.arange(1, n_candidates + 1, dtype=float)
         ranks[:, col_j] = rank_arr
 
     mean_ranks = ranks.mean(axis=1)
 
-    # Pick the candidate with lowest mean rank.
-    best_idx = int(np.argmin(mean_ranks))
+    # Pick the candidate with lowest mean rank, breaking ties by
+    # trial number for determinism.
+    min_rank = mean_ranks.min()
+    tied_indices = np.where(mean_ranks == min_rank)[0]
+    best_idx = int(min(tied_indices, key=lambda i: candidates[i].number))
     best_trial = candidates[best_idx]
 
     return best_trial, SelectionResult(
