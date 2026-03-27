@@ -13,6 +13,55 @@ for trial in pareto:
     print(f"Trial {trial.number}: cal={cal_error:.4f}, params={param_score:.3f}")
 ```
 
+## Trial Selection
+
+### Lexicographic-Pareto Selection
+
+Select the best trial using a two-phase algorithm: first filter by satisficing
+thresholds (in priority order), then apply Pareto selection over remaining
+study objectives.
+
+```python
+from bayesflow_hpo import select_best_trial
+
+trial, result = select_best_trial(
+    study,
+    priorities=[
+        ("calibration_error", 0.01),   # infer direction from study
+        ("nrmse", 0.05),               # infer direction from study
+    ],
+    # inference_time (3rd objective) has no threshold → Pareto selection
+)
+
+print(f"Selected trial #{trial.number}")
+print(f"Thresholds met: {result.thresholds_met}")
+print(f"Pareto front size: {len(result.pareto_front)}")
+```
+
+For user attributes (non-objective metrics), specify direction explicitly:
+
+```python
+trial, result = select_best_trial(
+    study,
+    priorities=[
+        ("calibration_error", 0.01),
+        ("coverage_90", 0.85, "above"),  # user_attr, explicit direction
+    ],
+)
+```
+
+Integrated into `best_config()`:
+
+```python
+from bayesflow_hpo import best_config
+
+config = best_config(
+    study,
+    priorities=[("calibration_error", 0.01), ("nrmse", 0.05)],
+)
+# Falls back to select_by=0 when priorities is None.
+```
+
 ## Trials DataFrame
 
 Convert all trials to a pandas DataFrame for analysis:

@@ -7,13 +7,16 @@ import optuna
 import pytest
 
 from bayesflow_hpo.results.extraction import (
+    SelectionResult,
     _display_col_name,
     _fmt_param_count,
     _objective_column_names,
     _round_value,
+    _validate_select_by,
     best_config,
     compare_trials,
     get_pareto_trials,
+    select_best_trial,
     summarize_study,
     trial_table,
     trials_to_dataframe,
@@ -500,3 +503,338 @@ class TestCompareTrials:
         df.to_csv(csv_path)
         reloaded = __import__("pandas").read_csv(csv_path, index_col=0)
         assert list(reloaded.columns) == list(df.columns)
+
+
+# ---------------------------------------------------------------------------
+# _validate_select_by
+# ---------------------------------------------------------------------------
+
+class TestValidateSelectBy:
+    def test_valid_index(self):
+        study = _make_study(n_objectives=2)
+        _validate_select_by(study, 0)
+        _validate_select_by(study, 1)
+
+    def test_out_of_range(self):
+        study = _make_study(n_objectives=2)
+        with pytest.raises(ValueError, match="select_by=5"):
+            _validate_select_by(study, 5)
+
+    def test_negative(self):
+        study = _make_study(n_objectives=2)
+        with pytest.raises(ValueError, match="select_by=-1"):
+            _validate_select_by(study, -1)
+
+    def test_trial_table_rejects(self):
+        study = _make_study(n_objectives=2, metric_names=["cal", "cost"])
+        with pytest.raises(ValueError, match="select_by=5"):
+            trial_table(study, select_by=5)
+
+    def test_best_config_rejects(self):
+        study = _make_study(n_objectives=2, metric_names=["cal", "cost"])
+        with pytest.raises(ValueError, match="select_by=2"):
+            best_config(study, select_by=2)
+
+    def test_summarize_study_rejects(self):
+        study = _make_study(n_objectives=2, metric_names=["cal", "cost"])
+        with pytest.raises(ValueError, match="select_by=-1"):
+            summarize_study(study, select_by=-1)
+
+
+# ---------------------------------------------------------------------------
+# Helpers for select_best_trial tests
+# ---------------------------------------------------------------------------
+
+def _make_pareto_study():
+    """Create a 3-objective study with a clear Pareto structure.
+
+    5 trials with metric names ["cal_error", "nrmse", "inference_time"]:
+    - Trial 0: (0.005, 0.04, 5.0) — good cal, good nrmse, slow
+    - Trial 1: (0.008, 0.03, 3.0) — okay cal, best nrmse, medium
+    - Trial 2: (0.020, 0.06, 1.0) — bad cal, bad nrmse, fastest
+    - Trial 3: (0.009, 0.05, 2.0) — okay cal, okay nrmse, fast
+    - Trial 4: (0.003, 0.08, 8.0) — best cal, worst nrmse, slowest
+    """
+    study = optuna.create_study(
+        directions=["minimize", "minimize", "minimize"],
+        study_name="pareto_test",
+    )
+    study.set_metric_names(["cal_error", "nrmse", "inference_time"])
+
+    configs = [
+        (0.005, 0.04, 5.0),
+        (0.008, 0.03, 3.0),
+        (0.020, 0.06, 1.0),
+        (0.009, 0.05, 2.0),
+        (0.003, 0.08, 8.0),
+    ]
+    for i, (cal, nrmse, time_s) in enumerate(configs):
+        trial = optuna.trial.create_trial(
+            params={"lr": 0.001 * (i + 1)},
+            distributions={
+                "lr": optuna.distributions.FloatDistribution(0.0001, 0.01),
+            },
+            values=[cal, nrmse, time_s],
+            state=optuna.trial.TrialState.COMPLETE,
+        )
+        trial.set_user_attr("coverage_90", 0.85 + 0.02 * i)
+        study.add_trial(trial)
+
+    return study
+
+
+# ---------------------------------------------------------------------------
+# select_best_trial
+# ---------------------------------------------------------------------------
+
+class TestSelectBestTrial:
+    """Tests for the two-phase lexicographic-Pareto selection."""
+
+    # -- Phase 1: satisficing filter --
+
+    def test_single_priority_filters(self):
+        """Trials not meeting the threshold are filtered out."""
+        study = _make_pareto_study()
+        # cal_error <= 0.01 keeps trials 0, 1, 3, 4
+        trial, result = select_best_trial(
+            study, priorities=[("cal_error", 0.01)]
+        )
+        assert result.thresholds_met["cal_error"] is True
+        # Trial 2 (cal=0.020) should be excluded.
+        assert trial.number != 2
+
+    def test_cascading_filter(self):
+        """Multiple priorities narrow candidates in order."""
+        study = _make_pareto_study()
+        # cal_error <= 0.01 → trials 0, 1, 3, 4
+        # nrmse <= 0.05 → trials 0, 1, 3  (trial 4 has nrmse=0.08)
+        trial, result = select_best_trial(
+            study,
+            priorities=[("cal_error", 0.01), ("nrmse", 0.05)],
+        )
+        assert result.thresholds_met["cal_error"] is True
+        assert result.thresholds_met["nrmse"] is True
+        assert result.n_candidates_per_step[0] == 5  # initial
+        assert result.n_candidates_per_step[1] == 4  # after cal_error
+        assert result.n_candidates_per_step[2] == 3  # after nrmse
+
+    def test_threshold_unmet_promotes_to_phase2(self):
+        """When no trial meets a threshold, warn and promote."""
+        study = _make_pareto_study()
+        # cal_error <= 0.001 → no trial meets this
+        trial, result = select_best_trial(
+            study,
+            priorities=[("cal_error", 0.001), ("nrmse", 0.05)],
+        )
+        assert result.thresholds_met["cal_error"] is False
+        # nrmse also marked as not met (promoted).
+        assert result.thresholds_met["nrmse"] is False
+        # All 5 trials remain as candidates.
+        assert result.n_candidates_per_step == [5]
+
+    def test_second_threshold_unmet(self):
+        """When a later threshold fails, earlier ones are still met."""
+        study = _make_pareto_study()
+        # cal_error <= 0.01 → 4 trials pass
+        # nrmse <= 0.001 → none pass → promote
+        trial, result = select_best_trial(
+            study,
+            priorities=[("cal_error", 0.01), ("nrmse", 0.001)],
+        )
+        assert result.thresholds_met["cal_error"] is True
+        assert result.thresholds_met["nrmse"] is False
+        # 4 survivors from first filter stay.
+        assert result.n_candidates_per_step == [5, 4]
+
+    # -- Phase 2: Pareto selection --
+
+    def test_pareto_tiebreak_by_mean_rank(self):
+        """With remaining objectives, Pareto front + mean rank selects."""
+        study = _make_pareto_study()
+        # Filter cal_error and nrmse; inference_time has no threshold
+        # → Phase 2 runs Pareto over inference_time only among survivors.
+        trial, result = select_best_trial(
+            study,
+            priorities=[("cal_error", 0.01), ("nrmse", 0.05)],
+        )
+        # Survivors: 0 (5.0), 1 (3.0), 3 (2.0)
+        # Only remaining objective: inference_time → best is trial 3.
+        assert trial.number == 3
+
+    def test_all_thresholds_met_no_remaining(self):
+        """When all objectives have thresholds met, use all objectives."""
+        study = _make_pareto_study()
+        # All 3 objectives have thresholds (generous).
+        trial, result = select_best_trial(
+            study,
+            priorities=[
+                ("cal_error", 0.1),
+                ("nrmse", 0.1),
+                ("inference_time", 10.0),
+            ],
+        )
+        # All thresholds met.
+        assert all(result.thresholds_met.values())
+        # Should return a trial (mean rank across all 3 objectives).
+        assert trial is not None
+
+    def test_single_remaining_objective(self):
+        """Single remaining objective degrades to simple sort."""
+        study = _make_pareto_study()
+        # Only filter cal_error; nrmse and inference_time remain.
+        trial, result = select_best_trial(
+            study,
+            priorities=[("cal_error", 0.01)],
+        )
+        # Survivors: 0, 1, 3, 4
+        # Remaining: nrmse, inference_time → Pareto + mean rank.
+        assert trial.number in {0, 1, 3, 4}
+
+    # -- Direction handling --
+
+    def test_infer_direction_from_study(self):
+        """2-tuple priorities infer direction from study.directions."""
+        study = _make_pareto_study()
+        trial, result = select_best_trial(
+            study, priorities=[("cal_error", 0.01)]
+        )
+        assert result.thresholds_met["cal_error"] is True
+
+    def test_explicit_above_direction(self):
+        """3-tuple with 'above' filters user attrs correctly."""
+        study = _make_pareto_study()
+        # coverage_90: trial 0=0.85, 1=0.87, 2=0.89, 3=0.91, 4=0.93
+        # coverage_90 >= 0.90 → trials 3, 4
+        trial, result = select_best_trial(
+            study,
+            priorities=[("coverage_90", 0.90, "above")],
+        )
+        assert result.thresholds_met["coverage_90"] is True
+        assert trial.number in {3, 4}
+
+    def test_2tuple_non_objective_raises(self):
+        """2-tuple on a non-objective metric raises ValueError."""
+        study = _make_pareto_study()
+        with pytest.raises(ValueError, match="not a study objective"):
+            select_best_trial(study, priorities=[("coverage_90", 0.9)])
+
+    def test_invalid_direction_raises(self):
+        """Invalid direction string raises ValueError."""
+        study = _make_pareto_study()
+        with pytest.raises(ValueError, match="'below' or 'above'"):
+            select_best_trial(
+                study, priorities=[("coverage_90", 0.9, "minimize")]
+            )
+
+    # -- Edge cases --
+
+    def test_empty_study_raises(self):
+        study = optuna.create_study(
+            directions=["minimize"], study_name="empty"
+        )
+        with pytest.raises(ValueError, match="no trained trials"):
+            select_best_trial(study, priorities=[("objective", 0.5)])
+
+    def test_single_trial_returns_it(self):
+        study = _make_study(n_trials=1, metric_names=["cal", "cost"])
+        trial, result = select_best_trial(
+            study, priorities=[("cal", 0.0001)]
+        )
+        # Single trial returned even though threshold not met.
+        assert trial.number == 0
+
+    def test_metric_not_found_raises(self):
+        study = _make_pareto_study()
+        with pytest.raises(ValueError, match="not found in any trial"):
+            select_best_trial(
+                study, priorities=[("nonexistent_metric", 0.5, "below")]
+            )
+
+    def test_empty_priorities_raises(self):
+        study = _make_pareto_study()
+        with pytest.raises(ValueError, match="non-empty"):
+            select_best_trial(study, priorities=[])
+
+    def test_returns_selection_result(self):
+        study = _make_pareto_study()
+        trial, result = select_best_trial(
+            study, priorities=[("cal_error", 0.01)]
+        )
+        assert isinstance(result, SelectionResult)
+        assert isinstance(result.thresholds_met, dict)
+        assert isinstance(result.pareto_front, list)
+        assert isinstance(result.n_candidates_per_step, list)
+        assert len(result.pareto_front) >= 1
+
+    def test_pareto_front_contains_non_dominated(self):
+        """Pareto front trials should be non-dominated."""
+        study = _make_pareto_study()
+        trial, result = select_best_trial(
+            study,
+            priorities=[("cal_error", 0.1)],
+        )
+        # All 5 pass threshold; Pareto over nrmse + inference_time.
+        # Pareto front should have at least 2 members.
+        assert len(result.pareto_front) >= 2
+
+    def test_deterministic_tiebreak(self):
+        """Tied mean-rank trials are broken by trial number."""
+        # Create 2 trials with identical objective values.
+        study = optuna.create_study(
+            directions=["minimize", "minimize"],
+            study_name="tie_test",
+        )
+        study.set_metric_names(["m1", "m2"])
+        for i in range(2):
+            trial = optuna.trial.create_trial(
+                params={"x": float(i)},
+                distributions={
+                    "x": optuna.distributions.FloatDistribution(0, 1),
+                },
+                values=[0.5, 0.5],
+                state=optuna.trial.TrialState.COMPLETE,
+            )
+            study.add_trial(trial)
+
+        t, _ = select_best_trial(study, priorities=[("m1", 1.0)])
+        # Both identical → lowest trial number wins.
+        assert t.number == 0
+
+
+# ---------------------------------------------------------------------------
+# best_config with priorities
+# ---------------------------------------------------------------------------
+
+class TestBestConfigPriorities:
+    def test_priorities_selects_via_select_best_trial(self):
+        study = _make_pareto_study()
+        config = best_config(
+            study,
+            priorities=[("cal_error", 0.01), ("nrmse", 0.05)],
+        )
+        assert isinstance(config, dict)
+        assert "lr" in config
+
+    def test_priorities_none_uses_select_by(self):
+        study = _make_study(n_trials=3, metric_names=["cal", "cost"])
+        config = best_config(study, priorities=None)
+        assert isinstance(config, dict)
+
+    def test_priorities_and_select_by_raises(self):
+        study = _make_pareto_study()
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            best_config(
+                study,
+                select_by=1,
+                priorities=[("cal_error", 0.01)],
+            )
+
+    def test_trial_number_takes_precedence(self):
+        study = _make_pareto_study()
+        config = best_config(
+            study,
+            trial_number=2,
+            priorities=[("cal_error", 0.01)],
+        )
+        # trial_number=2 should be used regardless of priorities.
+        assert isinstance(config, dict)
