@@ -533,6 +533,18 @@ class GenericObjective:
             return dict(zip(metrics, penalties))
         return {m: penalties[0] for m in metrics}
 
+    def _reject_compile(
+        self, trial: optuna.Trial, exc: Exception,
+    ) -> tuple[float, ...]:
+        """Log a compile failure, mark the trial rejected, and return penalty."""
+        logger.warning(
+            "Trial #%d: compile failed: %s", trial.number, exc,
+        )
+        trial.set_user_attr("rejected_reason", "compile_failed")
+        trial.set_user_attr("compile_error", str(exc))
+        cleanup_trial()
+        return self._penalty()
+
     def __call__(self, trial: optuna.Trial) -> tuple[float, ...]:
         """Execute one HPO trial: sample → build → compile → train → validate.
 
@@ -598,25 +610,13 @@ class GenericObjective:
                 initial_lr, decay_steps,
             )
         except Exception as exc:
-            logger.warning(
-                "Trial #%d: compile failed: %s", trial.number, exc,
-            )
-            trial.set_user_attr("rejected_reason", "compile_failed")
-            trial.set_user_attr("compile_error", str(exc))
-            cleanup_trial()
-            return self._penalty()
+            return self._reject_compile(trial, exc)
         try:
             _compile_for_compat(approximator, optimizer)
         except TypeError:
             pass  # _compile_for_compat raises TypeError on signature mismatch
         except Exception as exc:
-            logger.warning(
-                "Trial #%d: compile failed: %s", trial.number, exc,
-            )
-            trial.set_user_attr("rejected_reason", "compile_failed")
-            trial.set_user_attr("compile_error", str(exc))
-            cleanup_trial()
-            return self._penalty()
+            return self._reject_compile(trial, exc)
 
         # --- Step 6: Exact param count check ---
         try:

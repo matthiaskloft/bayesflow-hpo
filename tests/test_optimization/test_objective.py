@@ -910,6 +910,27 @@ def test_validate_metric_keys_none_penalty_values_uses_default():
     assert result["nrmse"] == FAILED_TRIAL_CAL_ERROR
 
 
+def test_validate_metric_keys_empty_penalty_dict_uses_default():
+    """Empty penalty_values dict falls back to FAILED_TRIAL_CAL_ERROR."""
+    raw = {}
+    result = _validate_metric_keys(
+        raw, ["calibration_error", "nrmse"], penalty_values={},
+    )
+    assert result["calibration_error"] == FAILED_TRIAL_CAL_ERROR
+    assert result["nrmse"] == FAILED_TRIAL_CAL_ERROR
+
+
+def test_validate_metric_keys_replaces_inf_with_custom_penalty():
+    """Inf values are replaced with per-metric penalty, not default."""
+    raw = {"calibration_error": float("inf"), "nrmse": float("inf")}
+    penalties = {"calibration_error": 0.5, "nrmse": 99.0}
+    result = _validate_metric_keys(
+        raw, ["calibration_error", "nrmse"], penalty_values=penalties,
+    )
+    assert result["calibration_error"] == 0.5
+    assert result["nrmse"] == 99.0
+
+
 # --- Compile TypeError narrowing ---
 
 
