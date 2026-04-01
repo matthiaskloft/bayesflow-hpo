@@ -875,6 +875,99 @@ def test_training_loss_fallback_clamps_above_one():
     assert values[0] == pytest.approx(1.0)
 
 
+# --- _validate_metric_keys with penalty_values ---
+
+
+def test_validate_metric_keys_uses_per_metric_penalty():
+    """Per-metric penalty values override the default constant."""
+    raw = {"calibration_error": float("nan")}
+    penalties = {"calibration_error": 1.0, "nrmse": 99.0}
+    result = _validate_metric_keys(
+        raw, ["calibration_error", "nrmse"], penalty_values=penalties,
+    )
+    assert result["calibration_error"] == 1.0
+    assert result["nrmse"] == 99.0
+
+
+def test_validate_metric_keys_penalty_fallback_for_unknown_key():
+    """Keys missing from penalty_values fall back to FAILED_TRIAL_CAL_ERROR."""
+    raw = {}
+    penalties = {"calibration_error": 0.5}
+    result = _validate_metric_keys(
+        raw, ["calibration_error", "nrmse"], penalty_values=penalties,
+    )
+    assert result["calibration_error"] == 0.5
+    assert result["nrmse"] == FAILED_TRIAL_CAL_ERROR
+
+
+def test_validate_metric_keys_none_penalty_values_uses_default():
+    """penalty_values=None preserves original behavior."""
+    raw = {"calibration_error": float("inf")}
+    result = _validate_metric_keys(
+        raw, ["calibration_error", "nrmse"], penalty_values=None,
+    )
+    assert result["calibration_error"] == FAILED_TRIAL_CAL_ERROR
+    assert result["nrmse"] == FAILED_TRIAL_CAL_ERROR
+
+
+# --- Compile TypeError narrowing ---
+
+
+def test_optimizer_creation_typeerror_not_swallowed(monkeypatch):
+    """TypeError from _make_cosine_decay_optimizer propagates as compile failure."""
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.estimate_peak_memory_mb",
+        lambda params: 1.0,
+    )
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.cleanup_trial",
+        lambda: None,
+    )
+
+    fake_approx = _FakeApproximator(param_count=50_000)
+
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.build_continuous_approximator",
+        lambda params, adapter, search_space: fake_approx,
+    )
+
+    def _raise_type_error(initial_lr, decay_steps):
+        raise TypeError("bad arg type")
+
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective._make_cosine_decay_optimizer",
+        _raise_type_error,
+    )
+
+    class _FakeSimulator:
+        def sample(self, shape):
+            return {}
+
+    class _FakeAdapter:
+        def __call__(self, data):
+            return data
+
+    objective = GenericObjective(
+        ObjectiveConfig(
+            simulator=_FakeSimulator(),
+            adapter=_FakeAdapter(),
+            search_space=_FakeSearchSpace(),
+            epochs=1,
+            num_batches=1,
+            validation_data=_DUMMY_VALIDATION_DATA,
+        )
+    )
+
+    trial = _FakeTrial()
+    values = objective(trial)
+
+    # TypeError should be caught by the outer except Exception handler,
+    # resulting in a rejected trial with compile_failed reason.
+    assert trial.user_attrs["rejected_reason"] == "compile_failed"
+    assert "bad arg type" in trial.user_attrs["compile_error"]
+    assert values[-1] == FAILED_TRIAL_COST
+
+
 def test_training_loss_fallback_none_returns_penalty():
     """When training loss is None, falls back to full penalty."""
     penalty = (1.0, 1.0, 1e6)

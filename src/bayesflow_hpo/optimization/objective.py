@@ -129,26 +129,43 @@ def default_validate_fn(
 def _validate_metric_keys(
     raw: dict[str, float],
     objective_metrics: list[str],
+    penalty_values: dict[str, float] | None = None,
 ) -> dict[str, float]:
     """Validate and sanitize metric dict from a custom validate_fn.
 
     - Missing keys → replaced with penalty value + warning.
     - NaN/Inf values → replaced with penalty value + warning.
 
+    Parameters
+    ----------
+    raw
+        Raw metric dict from the validation function.
+    objective_metrics
+        Metric keys expected in *raw*.
+    penalty_values
+        Per-metric penalty values.  When provided, the penalty for a
+        given key is looked up here; keys not present fall back to
+        ``FAILED_TRIAL_CAL_ERROR``.
+
     Returns a cleaned copy of the dict.
     """
     cleaned = dict(raw)
     for key in objective_metrics:
+        penalty = (
+            penalty_values.get(key, FAILED_TRIAL_CAL_ERROR)
+            if penalty_values is not None
+            else FAILED_TRIAL_CAL_ERROR
+        )
         if key not in cleaned:
             logger.warning(
                 "validate_fn output missing metric %r — using penalty value", key
             )
-            cleaned[key] = FAILED_TRIAL_CAL_ERROR
+            cleaned[key] = penalty
         elif not math.isfinite(cleaned[key]):
             logger.warning(
                 "validate_fn returned non-finite value for %r — using penalty", key
             )
-            cleaned[key] = FAILED_TRIAL_CAL_ERROR
+            cleaned[key] = penalty
     return cleaned
 
 
@@ -506,6 +523,16 @@ class GenericObjective:
             return (FAILED_TRIAL_CAL_ERROR, FAILED_TRIAL_COST)
         return tuple([FAILED_TRIAL_CAL_ERROR] * (n - 1)) + (FAILED_TRIAL_COST,)
 
+    def _metric_penalty_map(self) -> dict[str, float]:
+        """Per-metric penalty values for :func:`_validate_metric_keys`."""
+        penalties = self._penalty()
+        metrics = self.config.objective_metrics
+        # In pareto mode penalties[:-1] map 1:1 to objective_metrics;
+        # in mean mode there is only one metric penalty slot.
+        if self.config.objective_mode == "pareto":
+            return dict(zip(metrics, penalties))
+        return {m: penalties[0] for m in metrics}
+
     def __call__(self, trial: optuna.Trial) -> tuple[float, ...]:
         """Execute one HPO trial: sample → build → compile → train → validate.
 
@@ -570,9 +597,18 @@ class GenericObjective:
             optimizer = _make_cosine_decay_optimizer(
                 initial_lr, decay_steps,
             )
+        except Exception as exc:
+            logger.warning(
+                "Trial #%d: compile failed: %s", trial.number, exc,
+            )
+            trial.set_user_attr("rejected_reason", "compile_failed")
+            trial.set_user_attr("compile_error", str(exc))
+            cleanup_trial()
+            return self._penalty()
+        try:
             _compile_for_compat(approximator, optimizer)
         except TypeError:
-            pass  # _compile_for_compat handles TypeError internally
+            pass  # _compile_for_compat raises TypeError on signature mismatch
         except Exception as exc:
             logger.warning(
                 "Trial #%d: compile failed: %s", trial.number, exc,
@@ -691,6 +727,7 @@ class GenericObjective:
                 inference_time = time.perf_counter() - t_val_start
                 metrics_summary = _validate_metric_keys(
                     raw, config.objective_metrics,
+                    penalty_values=self._metric_penalty_map(),
                 )
             else:
                 # Default path — call pipeline directly to get pure
@@ -707,6 +744,7 @@ class GenericObjective:
                 inference_time = result.timing.get("inference", 0.0)
                 metrics_summary = _validate_metric_keys(
                     dict(result.summary), config.objective_metrics,
+                    penalty_values=self._metric_penalty_map(),
                 )
 
             inference_time_s = compute_inference_time_per_dataset(
