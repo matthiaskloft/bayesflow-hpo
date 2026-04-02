@@ -10,36 +10,6 @@ Package I (literature audit) can be done at any time independently.
 
 ---
 
-### Deferred: Pre-existing Code Quality
-
-Small issues found during the validation contract cleanup review
-(PR #50) that were out of scope.
-
-#### Narrow `except TypeError: pass` in objective compile step
-
-The `except TypeError: pass` around `_make_cosine_decay_optimizer` +
-`_compile_for_compat` swallows TypeErrors from *both* calls. Only
-`_compile_for_compat` is expected to raise TypeError. A TypeError
-from `_make_cosine_decay_optimizer` (e.g. wrong type to CosineDecay)
-would be silently eaten, and the trial proceeds without an optimizer.
-**File:** `optimization/objective.py` (Step 5: COMPILE)
-
-#### `_validate_metric_keys` uses same penalty constant for all metrics
-
-Missing or non-finite values are replaced with `FAILED_TRIAL_CAL_ERROR`
-regardless of which metric they correspond to. The constant name
-suggests calibration-error scale, which may not be meaningful for
-other metrics (e.g. NRMSE). Could distort Optuna's search landscape.
-**File:** `optimization/objective.py:129-152`
-
-#### Tighten `PeriodicValidationCallback.validation_data` type
-
-Currently typed `Any`. Could be tightened to `ValidationDataset` for
-consistency with the `ObjectiveConfig` contract cleanup.
-**File:** `optimization/validation_callback.py`
-
----
-
 ### Package A2: Research — Detailed Sampler Preset Defaults
 
 The sampler presets are implemented (PR #56). This research task remains
@@ -197,6 +167,19 @@ lexicographic-Pareto selection.
 ---
 
 ## Done
+
+### Deferred Code Quality Fixes (2026-04-01)
+Three small issues found during PR #50 review, now resolved:
+- **Narrowed `except TypeError`** in objective compile step: split the
+  try block so `_make_cosine_decay_optimizer` errors propagate as
+  compile failures instead of being silently swallowed. Only
+  `_compile_for_compat` TypeError (signature mismatch) is caught.
+- **Per-metric penalty values** in `_validate_metric_keys`: added
+  `penalty_values` dict parameter so cost metrics use `FAILED_TRIAL_COST`
+  (1e6) instead of `FAILED_TRIAL_CAL_ERROR` (1.0). Wired via new
+  `_metric_penalty_map()` helper on `GenericObjective`.
+- **Tightened `validation_data` type** on `PeriodicValidationCallback`
+  from `Any` to `ValidationDataset`. 4 new tests.
 
 ### Package B: Trial Selection & Results (2026-03-27)
 Added lexicographic-Pareto trial selection (`select_best_trial()`) to
