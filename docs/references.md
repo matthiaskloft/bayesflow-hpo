@@ -226,6 +226,6 @@ search. Evaluated on NAS-201, Adult fairness, Wikitext2.
 - **NSGA-II**: Deb et al. (2002)
 
 ### Validation Metrics
-- **Global C2ST** (requires reference posterior): López-Paz & Oquab (2017)
-- **L-C2ST** (reference-free, uses joint samples): Linhart et al. (2023)
+- **Global C2ST** (requires reference posterior): López-Paz & Oquab (2017) — Implementation: `bayesflow_hpo.validation.c2st.global_c2st()`
+- **L-C2ST** (reference-free, uses joint samples): Linhart et al. (2023) — Implementation: `bayesflow_hpo.validation.c2st.lc2st()`
 - **SBI Benchmarking (sbibm)**: Lueckmann et al. (2021)
