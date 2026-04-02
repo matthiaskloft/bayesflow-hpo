@@ -79,6 +79,7 @@ src/bayesflow_hpo/
 │   ├── pipeline.py     # run_validation_pipeline()
 │   ├── metrics.py      # compute_condition_metrics(), aggregate_condition_rows()
 │   ├── inference.py    # make_bayesflow_infer_fn()
+│   ├── c2st.py         # C2ST metrics (L-C2ST, global C2ST, ValidateFn factory)
 │   ├── result.py       # ValidationResult dataclass
 │   ├── dry_run.py      # validate_once()
 │   └── sbc_tests.py    # SBC uniformity tests (KS, chi-squared)

@@ -116,6 +116,8 @@ from bayesflow_hpo.types import BuildApproximatorFn, TrainFn, ValidateFn
 from bayesflow_hpo.utils import loguniform_float, loguniform_int
 from bayesflow_hpo.validation import (
     DEFAULT_METRICS,
+    GlobalC2STResult,
+    LC2STResult,
     ValidationDataset,
     ValidationResult,
     describe_metrics,
@@ -226,6 +228,8 @@ __all__ = [
     "loguniform_int",
     # Validation
     "DEFAULT_METRICS",
+    "GlobalC2STResult",
+    "LC2STResult",
     "ValidationDataset",
     "ValidationResult",
     "describe_metrics",

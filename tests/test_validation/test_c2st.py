@@ -161,11 +161,19 @@ class TestGlobalC2ST:
     def test_global_c2st_different_distribution(self) -> None:
         """Different distributions should give high accuracy."""
         rng = np.random.default_rng(SEED)
-        p = rng.standard_normal((100, 3))
-        q = rng.standard_normal((100, 3)) + 3.0
-        result = global_c2st(p, q, seed=SEED)
-        assert result.accuracy > 0.6
-        assert result.p_value < 0.05
+        p = rng.standard_normal((200, 3))
+        q = rng.standard_normal((200, 3)) + 3.0
+        result = global_c2st(
+            p, q,
+            clf_kwargs={
+                "hidden_layer_sizes": (20,),
+                "max_iter": 500,
+                "solver": "adam",
+            },
+            seed=SEED,
+        )
+        assert result.accuracy > 0.8
+        assert result.p_value < 0.01
 
     def test_global_c2st_result_fields(self) -> None:
         """Result dataclass has expected fields."""

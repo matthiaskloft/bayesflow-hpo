@@ -3,7 +3,7 @@
 Tracked items for ongoing development. Updated by contributors and Claude Code sessions.
 
 Items are grouped into packages of related work that should be shipped together.
-Suggested execution order: B → E → H → I → J.
+Suggested execution order: H → I.
 Package I (literature audit) can be done at any time independently.
 
 ## Open
