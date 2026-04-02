@@ -29,6 +29,7 @@ López-Paz, D., & Oquab, M. (2017). Revisiting classifier two-sample
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -487,7 +488,7 @@ def make_lc2st_validate_fn(
     n_null_trials: int = 0,
     clf_kwargs: dict[str, Any] | None = None,
     seed: int = 42,
-) -> Any:
+) -> Callable[[Any, ValidationDataset, int], dict[str, float]]:
     """Create a ``ValidateFn`` that computes standard metrics + L-C2ST.
 
     The returned function is compatible with
@@ -608,7 +609,7 @@ def make_lc2st_validate_fn(
                 n_folds=n_folds,
                 n_null_trials=n_null_trials,
                 clf_kwargs=clf_kwargs,
-                seed=seed,
+                seed=seed + cond_id,
             )
             lc2st_stats.append(result.statistic)
 

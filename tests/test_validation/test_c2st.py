@@ -7,6 +7,9 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
+# Skip entire module if sklearn is not installed (optional dependency)
+pytest.importorskip("sklearn", reason="C2ST tests require scikit-learn")
+
 from bayesflow_hpo.validation.c2st import (
     GlobalC2STResult,
     LC2STResult,
@@ -297,12 +300,16 @@ class TestImportGuard:
 
     def test_require_sklearn_error_message(self) -> None:
         """Helpful error when sklearn is missing."""
+        import importlib
+
+        import bayesflow_hpo.validation.c2st as c2st_module
+
         mocked = {
             "sklearn": None,
             "sklearn.neural_network": None,
             "sklearn.model_selection": None,
         }
         with patch.dict("sys.modules", mocked):
+            importlib.reload(c2st_module)
             with pytest.raises(ImportError, match="bayesflow-hpo\\[sklearn\\]"):
-                from bayesflow_hpo.validation.c2st import _require_sklearn
-                _require_sklearn()
+                c2st_module._require_sklearn()
