@@ -3,7 +3,7 @@
 Tracked items for ongoing development. Updated by contributors and Claude Code sessions.
 
 Items are grouped into packages of related work that should be shipped together.
-Suggested execution order: B → E → H → I → J.
+Suggested execution order: H → I.
 Package I (literature audit) can be done at any time independently.
 
 ## Open
@@ -38,74 +38,6 @@ startup, especially for GP and TPE. May become a secondary finding in the
 HPO benchmark paper.
 
 ---
-
----
-
-### Package E: C2ST Metrics
-
-New classifier two-sample test metrics for multivariate posterior
-validation. Research-heavy; requires `sklearn` as optional dependency.
-
-#### Background: C2ST variants for SBI
-
-The `sbc_c2st` metric was removed because applying C2ST to 1D SBC rank
-integers is theoretically redundant with KS and chi-squared tests — a
-random forest on a single integer feature is just a noisy histogram
-comparison.
-
-Two C2ST variants are relevant for proper multivariate posterior
-validation:
-
-**Global C2ST** (López-Paz & Oquab, 2017) — the original classifier
-two-sample test. A binary classifier is trained to discriminate samples
-from two distributions P and Q; if classification accuracy significantly
-exceeds chance, the distributions differ. In the SBI context, this
-means comparing samples from the approximate posterior q_φ(θ|x_o) vs
-the true posterior p(θ|x_o) for a fixed observation x_o. This requires
-access to true posterior samples (e.g., from MCMC), which limits it to
-settings where a reference posterior is available.
-
-**L-C2ST** (Linhart et al., 2023) — a local variant that eliminates
-the need for true posterior samples. Instead of comparing q(θ|x_o) vs
-p(θ|x_o) at a fixed observation, L-C2ST works with joint samples: it
-classifies (θ, x) pairs drawn from q(θ|x)p(x) [class 0] vs (θ, x)
-pairs drawn from p(θ, x) [class 1]. The key insight (Linhart et al.,
-2023, eq. 11) is that the optimal joint classifier d*(θ, x) equals the
-optimal local classifier d*_x(θ), so the joint-sample approach recovers
-local posterior diagnostics without needing true posterior samples.
-Only requires samples from p(θ, x) — exactly what BayesFlow simulators
-provide.
-
-#### Implement L-C2ST (primary)
-
-Implement L-C2ST for reference-free posterior validation.
-
-Design considerations:
-- Metric signature: needs `(draws: [n_sims, n_samples, n_params],
-  true_values: [n_sims, n_params])` — different from the current
-  per-parameter `MetricFn` convention
-- Classifier: MLP (Linhart et al. recommend MLP for L-C2ST); returns
-  probability-based statistic (not binarized accuracy)
-- Training data: joint samples (θ, x) from the simulator — no
-  reference posterior needed
-- Keep as optional metric with `requires="sklearn"` extra
-- Reference implementation available at
-  https://github.com/JuliaLinhart/lc2st and integrated in the
-  `sbi` Python package
-
-#### Implement global C2ST (optional, requires reference posterior)
-
-Implement standard C2ST (López-Paz & Oquab, 2017) for settings where
-MCMC or other reference posterior samples are available. Useful for
-post-hoc validation in the benchmark study where reference posteriors
-can be computed for specific models (SDT, 2HTM, GVAR via Stan/brms).
-
-Design considerations:
-- Separate metric or mode flag on a shared C2ST implementation
-- Inputs: approximate posterior samples + reference posterior samples
-- Classifier: MLP or RF; binarized accuracy as test statistic
-- Not usable as an HPO objective (requires MCMC per trial) — purely
-  a post-hoc diagnostic
 
 ---
 
@@ -167,6 +99,18 @@ lexicographic-Pareto selection.
 ---
 
 ## Done
+
+### Package E: C2ST Metrics (2026-04-02)
+Added classifier two-sample test metrics for multivariate posterior
+validation. New module `validation/c2st.py` with three components:
+`lc2st()` (Linhart et al., 2023) for reference-free local posterior
+diagnostics using joint samples, `global_c2st()` (López-Paz & Oquab,
+2017) for standard C2ST when reference posterior samples are available,
+and `make_lc2st_validate_fn()` factory returning a `ValidateFn`
+compatible with `optimize(validate_fn=...)` that computes standard
+per-parameter metrics and L-C2ST from a single inference pass. Added
+`scikit-learn>=1.3` as optional dependency (`pip install
+bayesflow-hpo[sklearn]`). 14 new tests.
 
 ### Deferred Code Quality Fixes (2026-04-01)
 Three small issues found during PR #50 review, now resolved:

@@ -36,6 +36,7 @@ dev = [
     "mypy>=1.0",
 ]
 dashboard = ["optuna-dashboard>=0.14"]
+sklearn = ["scikit-learn>=1.3"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

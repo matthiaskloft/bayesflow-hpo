@@ -1,5 +1,12 @@
 """Validation pipeline and data utilities."""
 
+from bayesflow_hpo.validation.c2st import (
+    GlobalC2STResult,
+    LC2STResult,
+    global_c2st,
+    lc2st,
+    make_lc2st_validate_fn,
+)
 from bayesflow_hpo.validation.data import (
     ValidationDataset,
     generate_validation_dataset,
@@ -30,6 +37,8 @@ from bayesflow_hpo.validation.sbc_tests import compute_sbc_uniformity_tests
 
 __all__ = [
     "DEFAULT_METRICS",
+    "GlobalC2STResult",
+    "LC2STResult",
     "MetricFn",
     "ValidationDataset",
     "ValidationResult",
@@ -39,11 +48,14 @@ __all__ = [
     "compute_sbc_uniformity_tests",
     "generate_validation_dataset",
     "get_metric",
+    "global_c2st",
+    "lc2st",
     "list_metrics",
     "load_validation_dataset",
     "make_bayesflow_infer_fn",
     "make_condition_grid",
     "make_coverage_metric",
+    "make_lc2st_validate_fn",
     "make_validation_dataset",
     "register_metric",
     "resolve_metrics",

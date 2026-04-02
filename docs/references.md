@@ -159,6 +159,10 @@ normalizing-flow-based posteriors, achieves better statistical power and
 computational efficiency than standard C2ST. Matches global C2ST
 performance and outperforms HPD coverage tests on SBI benchmarks.
 
+**Implementation**: `bayesflow_hpo.validation.c2st.lc2st()` — Algorithms
+1-2 (K-fold CV with single-class MSE_0 statistic and permutation null
+distribution). SBIBM-style MLP classifier config.
+
 ### Li et al. (2018) — Hyperband
 *Source: full text (all 52 pages)*
 
@@ -180,6 +184,9 @@ interpretable test statistics, has a simple null distribution, and reveals
 where distributions differ via predictive uncertainty. Applied to GAN
 evaluation and causal discovery. In SBI context, requires samples from both
 the approximate and true posterior.
+
+**Implementation**: `bayesflow_hpo.validation.c2st.global_c2st()` — MLP
+classifier with normal-approximation p-value (Theorem 1).
 
 ### Lueckmann et al. (2021) — sbibm
 *Source: abstract (arXiv 2101.04653)*
@@ -226,6 +233,6 @@ search. Evaluated on NAS-201, Adult fairness, Wikitext2.
 - **NSGA-II**: Deb et al. (2002)
 
 ### Validation Metrics
-- **Global C2ST** (requires reference posterior): López-Paz & Oquab (2017)
-- **L-C2ST** (reference-free, uses joint samples): Linhart et al. (2023)
+- **Global C2ST** (requires reference posterior): López-Paz & Oquab (2017) — Implementation: `bayesflow_hpo.validation.c2st.global_c2st()`
+- **L-C2ST** (reference-free, uses joint samples): Linhart et al. (2023) — Implementation: `bayesflow_hpo.validation.c2st.lc2st()`
 - **SBI Benchmarking (sbibm)**: Lueckmann et al. (2021)
