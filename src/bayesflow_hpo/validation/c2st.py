@@ -89,6 +89,11 @@ def _default_clf_kwargs(ndim: int) -> dict[str, Any]:
     ndim
         Dimensionality of the input features (determines hidden layer
         width as ``10 * ndim``).
+
+    Returns
+    -------
+    dict[str, Any]
+        Keyword arguments for ``sklearn.neural_network.MLPClassifier``.
     """
     return {
         "hidden_layer_sizes": (10 * ndim, 10 * ndim),
@@ -145,7 +150,12 @@ def _run_lc2st_cv(
     clf_kwargs: dict[str, Any],
     rng: np.random.Generator,
 ) -> np.ndarray:
-    """Run K-fold CV and return per-observation predicted probs.
+    """Run K-fold CV and return class-1 probabilities for class-0 samples.
+
+    For each fold, trains a binary classifier on joint (class-1) and
+    approximate (class-0) features, then predicts class-1 probability
+    on the held-out class-0 validation samples. Under the null (well-
+    calibrated posterior), these probabilities should be near 0.5.
 
     Parameters
     ----------
@@ -165,8 +175,9 @@ def _run_lc2st_cv(
     Returns
     -------
     np.ndarray
-        Predicted probabilities for class-0 samples on their
-        respective validation folds, shape ``(n_sims,)``.
+        Class-1 predicted probabilities for class-0 (approximate
+        posterior) samples on their held-out validation folds,
+        shape ``(n_sims,)``.
     """
     mlp_cls, kfold_cls = _require_sklearn()
 
@@ -298,12 +309,16 @@ def lc2st(
             f"expected {n_sims}"
         )
 
+    if n_folds < 2:
+        raise ValueError(
+            f"n_folds must be >= 2 for cross-validation, got {n_folds}"
+        )
     if n_sims < n_folds:
         raise ValueError(
             f"n_sims ({n_sims}) must be >= n_folds ({n_folds})"
         )
 
-    # --- Build training data (paper eq. 299) ---
+    # --- Build training data (Algorithm 1, Step 3) ---
     # Class 1 (joint): concat(true_params, observations)
     feats_joint = np.concatenate(
         [true_params, observations], axis=1
@@ -325,7 +340,7 @@ def lc2st(
         n_folds, clf_kwargs, rng,
     )
 
-    # --- Single-class MSE_0 (Theorem 3.1, eq. 310) ---
+    # --- Single-class MSE_0 (Theorem 3.1) ---
     per_obs = (probs_class0 - 0.5) ** 2
     statistic = float(np.mean(per_obs))
 
@@ -399,9 +414,11 @@ def global_c2st(
     Parameters
     ----------
     samples_p
-        Samples from distribution P, shape ``(n, d)``.
+        Samples from distribution P, shape ``(n, d)``. Must have the
+        same number of samples as ``samples_q``.
     samples_q
-        Samples from distribution Q, shape ``(n, d)``.
+        Samples from distribution Q, shape ``(n, d)``. Must have the
+        same number of samples as ``samples_p``.
     clf_kwargs
         Override keyword arguments for ``MLPClassifier``. If ``None``,
         uses a simple MLP with ``hidden_layer_sizes=(20,)``.
@@ -435,6 +452,13 @@ def global_c2st(
             f"Feature dimension mismatch: samples_p has "
             f"{samples_p.shape[1]}, samples_q has "
             f"{samples_q.shape[1]}"
+        )
+    if len(samples_p) != len(samples_q):
+        raise ValueError(
+            f"Samples must have equal size for the normal-"
+            f"approximation p-value (Theorem 1). Got "
+            f"len(samples_p)={len(samples_p)}, "
+            f"len(samples_q)={len(samples_q)}."
         )
 
     # Pool and shuffle
@@ -566,6 +590,9 @@ def make_lc2st_validate_fn(
                 )
                 condition_rows.append(row)
             else:
+                # Standard metrics are computed per-parameter, then
+                # aggregated across parameters and conditions by
+                # aggregate_condition_rows() below.
                 for p_idx, p_key in enumerate(
                     validation_data.param_keys
                 ):

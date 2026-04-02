@@ -142,6 +142,14 @@ class TestLC2ST:
         assert result.p_value is None
         assert len(result.null_statistics) == 0
 
+    def test_lc2st_n_folds_too_small(self) -> None:
+        """n_folds < 2 should raise ValueError."""
+        posterior, true_params, obs = _make_well_calibrated(
+            n_sims=40, seed=SEED,
+        )
+        with pytest.raises(ValueError, match="n_folds must be >= 2"):
+            lc2st(posterior, true_params, obs, n_folds=1, seed=SEED)
+
 
 # ---------------------------------------------------------------------------
 # Global C2ST tests
@@ -199,6 +207,14 @@ class TestGlobalC2ST:
         r2 = global_c2st(p, q, seed=99)
         assert r1.accuracy == r2.accuracy
         assert r1.p_value == r2.p_value
+
+    def test_global_c2st_unequal_sizes_rejected(self) -> None:
+        """Unequal sample sizes should raise ValueError."""
+        rng = np.random.default_rng(SEED)
+        p = rng.standard_normal((50, 2))
+        q = rng.standard_normal((30, 2))
+        with pytest.raises(ValueError, match="equal size"):
+            global_c2st(p, q, seed=SEED)
 
 
 # ---------------------------------------------------------------------------
