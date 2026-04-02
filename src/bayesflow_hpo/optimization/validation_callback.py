@@ -36,6 +36,7 @@ from bayesflow_hpo.optimization.pruning_strategies import (
     should_prune_primary,
 )
 from bayesflow_hpo.types import ValidateFn
+from bayesflow_hpo.validation.data import ValidationDataset
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +94,7 @@ class PeriodicValidationCallback(Callback):
         self,
         trial: optuna.Trial,
         approximator: Any,
-        validation_data: Any,
+        validation_data: ValidationDataset,
         interval: int = 10,
         warmup: int = 10,
         n_posterior_samples: int = 250,
