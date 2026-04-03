@@ -12,7 +12,10 @@ import numpy as np
 import optuna
 
 from bayesflow_hpo.results import _colors as c
-from bayesflow_hpo.results.extraction import _objective_column_names
+from bayesflow_hpo.results.extraction import (
+    _objective_column_names,
+    _validate_select_by,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -823,6 +826,8 @@ def plot_parallel_coordinates(
     metric_order : list of str, optional
         Custom axis order. Defaults to ``_objective_column_names(study)``.
     """
+    _validate_select_by(study, select_by)
+
     if ax is None:
         _, ax = plt.subplots(figsize=(8, 6))
 

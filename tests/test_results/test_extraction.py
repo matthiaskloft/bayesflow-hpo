@@ -7,13 +7,16 @@ import optuna
 import pytest
 
 from bayesflow_hpo.results.extraction import (
+    SelectionResult,
     _display_col_name,
     _fmt_param_count,
     _objective_column_names,
     _round_value,
+    _validate_select_by,
     best_config,
     compare_trials,
     get_pareto_trials,
+    select_best_trial,
     summarize_study,
     trial_table,
     trials_to_dataframe,
@@ -500,3 +503,305 @@ class TestCompareTrials:
         df.to_csv(csv_path)
         reloaded = __import__("pandas").read_csv(csv_path, index_col=0)
         assert list(reloaded.columns) == list(df.columns)
+
+
+# ---------------------------------------------------------------------------
+# _validate_select_by
+# ---------------------------------------------------------------------------
+
+class TestValidateSelectBy:
+    def test_valid_index_zero(self):
+        study = _make_study(n_objectives=2)
+        _validate_select_by(study, 0)  # should not raise
+
+    def test_valid_index_one(self):
+        study = _make_study(n_objectives=2)
+        _validate_select_by(study, 1)  # should not raise
+
+    def test_negative_index_raises(self):
+        study = _make_study(n_objectives=2)
+        with pytest.raises(ValueError, match="select_by=-1"):
+            _validate_select_by(study, -1)
+
+    def test_too_large_index_raises(self):
+        study = _make_study(n_objectives=2)
+        with pytest.raises(ValueError, match="select_by=2"):
+            _validate_select_by(study, 2)
+
+    def test_single_objective_only_zero_valid(self):
+        study = _make_study(n_objectives=1)
+        _validate_select_by(study, 0)
+        with pytest.raises(ValueError, match="select_by=1"):
+            _validate_select_by(study, 1)
+
+    def test_trial_table_rejects_invalid(self):
+        study = _make_study(n_objectives=2)
+        with pytest.raises(ValueError, match="select_by=5"):
+            trial_table(study, select_by=5)
+
+    def test_best_config_rejects_invalid(self):
+        study = _make_study(n_objectives=2)
+        with pytest.raises(ValueError, match="select_by=3"):
+            best_config(study, select_by=3)
+
+    def test_summarize_study_rejects_invalid(self):
+        study = _make_study(n_objectives=2)
+        with pytest.raises(ValueError, match="select_by=-1"):
+            summarize_study(study, select_by=-1)
+
+
+# ---------------------------------------------------------------------------
+# select_best_trial
+# ---------------------------------------------------------------------------
+
+def _make_selection_study():
+    """Create a 3-objective study with 5 diverse trials for selection tests.
+
+    Objectives: calibration_error (min), nrmse (min), inference_time (min).
+    Trial values and user_attrs are set to exercise satisficing + Pareto logic.
+    """
+    study = optuna.create_study(
+        directions=["minimize", "minimize", "minimize"],
+        study_name="selection_test",
+    )
+    study.set_metric_names(["calibration_error", "nrmse", "inference_time"])
+
+    specs = [
+        # trial 0: good cal, good nrmse, slow
+        {"values": [0.005, 0.03, 5.0], "coverage_90": 0.92},
+        # trial 1: good cal, bad nrmse, fast
+        {"values": [0.008, 0.10, 1.0], "coverage_90": 0.88},
+        # trial 2: bad cal, good nrmse, fast
+        {"values": [0.05, 0.02, 1.5], "coverage_90": 0.95},
+        # trial 3: ok cal, ok nrmse, medium
+        {"values": [0.009, 0.04, 3.0], "coverage_90": 0.90},
+        # trial 4: good cal, good nrmse, medium
+        {"values": [0.007, 0.04, 2.5], "coverage_90": 0.91},
+    ]
+    for i, spec in enumerate(specs):
+        trial = optuna.trial.create_trial(
+            params={"lr": 0.001 * (i + 1)},
+            distributions={
+                "lr": optuna.distributions.FloatDistribution(0.0001, 0.01),
+            },
+            values=spec["values"],
+            state=optuna.trial.TrialState.COMPLETE,
+        )
+        trial.set_user_attr("coverage_90", spec["coverage_90"])
+        study.add_trial(trial)
+
+    return study
+
+
+class TestSelectBestTrial:
+    def test_basic_satisficing_and_pareto(self):
+        """Priorities on cal and nrmse, Pareto over inference_time."""
+        study = _make_selection_study()
+        trial, result = select_best_trial(
+            study,
+            priorities=[
+                ("calibration_error", 0.01),
+                ("nrmse", 0.05),
+            ],
+        )
+        # Trials meeting cal <= 0.01: 0, 1, 3, 4
+        # Of those, nrmse <= 0.05: 0, 3, 4
+        # Pareto over inference_time among {0, 3, 4}: trial 4 (2.5s) dominates
+        # trial 3 (3.0s) and trial 0 (5.0s) on the single remaining objective
+        assert trial.number == 4
+        assert result.thresholds_met == {
+            "calibration_error": True,
+            "nrmse": True,
+        }
+        assert len(result.n_candidates_per_step) == 3  # initial + 2 steps
+
+    def test_direction_inference_minimize(self):
+        """Direction inferred from study.directions (minimize → below)."""
+        study = _make_selection_study()
+        trial, result = select_best_trial(
+            study,
+            priorities=[("calibration_error", 0.01)],
+        )
+        # cal <= 0.01: trials 0, 1, 3, 4
+        # Pareto over nrmse + inference_time: trial 0 is good on nrmse, trial 1 fast
+        assert result.thresholds_met["calibration_error"] is True
+        assert trial.number in {0, 1, 3, 4}  # must be from filtered set
+
+    def test_direction_inference_maximize(self):
+        """Direction inferred from study.directions (maximize → above)."""
+        study = optuna.create_study(
+            directions=["maximize"],
+            study_name="max_test",
+        )
+        study.set_metric_names(["accuracy"])
+        for val in [0.85, 0.90, 0.95]:
+            t = optuna.trial.create_trial(
+                params={"lr": 0.001},
+                distributions={
+                    "lr": optuna.distributions.FloatDistribution(0.0001, 0.01),
+                },
+                values=[val],
+                state=optuna.trial.TrialState.COMPLETE,
+            )
+            study.add_trial(t)
+
+        trial, result = select_best_trial(
+            study,
+            priorities=[("accuracy", 0.88)],
+        )
+        # accuracy >= 0.88: trials with 0.90 and 0.95
+        # Phase 2 over remaining (none) → mean rank across all → best is 0.95
+        assert result.thresholds_met["accuracy"] is True
+        assert trial.values[0] == 0.95
+
+    def test_explicit_direction_for_user_attr(self):
+        """User_attr requires explicit direction."""
+        study = _make_selection_study()
+        trial, result = select_best_trial(
+            study,
+            priorities=[
+                ("calibration_error", 0.01),
+                ("coverage_90", 0.90, "above"),
+            ],
+        )
+        # cal <= 0.01: trials 0, 1, 3, 4
+        # coverage_90 >= 0.90: trials 0 (0.92), 3 (0.90), 4 (0.91)
+        assert result.thresholds_met["coverage_90"] is True
+
+    def test_user_attr_without_direction_raises(self):
+        study = _make_selection_study()
+        with pytest.raises(ValueError, match="not a study objective"):
+            select_best_trial(
+                study,
+                priorities=[("coverage_90", 0.90)],
+            )
+
+    def test_metric_not_found_raises(self):
+        study = _make_selection_study()
+        with pytest.raises(ValueError, match="not found"):
+            select_best_trial(
+                study,
+                priorities=[("nonexistent_metric", 0.5)],
+            )
+
+    def test_empty_priorities_raises(self):
+        """Empty priorities list should raise (caller should use select_by)."""
+        study = _make_selection_study()
+        # Empty list means no satisficing steps and no direction to infer.
+        # The function should still work: skip Phase 1, go to Phase 2.
+        trial, result = select_best_trial(study, priorities=[])
+        # All 5 trials survive, Pareto over all 3 objectives
+        assert result.n_candidates_per_step == [5]
+        assert trial is not None
+
+    def test_all_thresholds_met_no_remaining_objectives(self):
+        """All study objectives have thresholds and are met."""
+        study = _make_selection_study()
+        trial, result = select_best_trial(
+            study,
+            priorities=[
+                ("calibration_error", 0.01),
+                ("nrmse", 0.05),
+                ("inference_time", 10.0),
+            ],
+        )
+        # All thresholds met, no remaining objectives → mean rank across all
+        assert all(result.thresholds_met.values())
+        assert trial is not None
+
+    def test_no_trial_meets_first_threshold(self):
+        """Threshold too strict — all promoted to Phase 2."""
+        study = _make_selection_study()
+        trial, result = select_best_trial(
+            study,
+            priorities=[
+                ("calibration_error", 0.001),  # too strict
+                ("nrmse", 0.05),
+            ],
+        )
+        assert result.thresholds_met["calibration_error"] is False
+        assert result.thresholds_met["nrmse"] is False
+        # All 5 trials go to Phase 2
+        assert result.n_candidates_per_step == [5]
+
+    def test_single_trial_study(self):
+        study = optuna.create_study(
+            directions=["minimize"],
+            study_name="single",
+        )
+        study.set_metric_names(["cal"])
+        t = optuna.trial.create_trial(
+            params={"lr": 0.001},
+            distributions={
+                "lr": optuna.distributions.FloatDistribution(0.0001, 0.01),
+            },
+            values=[0.05],
+            state=optuna.trial.TrialState.COMPLETE,
+        )
+        study.add_trial(t)
+
+        trial, result = select_best_trial(
+            study,
+            priorities=[("cal", 0.01)],
+        )
+        assert trial.number == 0
+        assert result.thresholds_met["cal"] is False
+
+    def test_single_remaining_objective(self):
+        """Only one objective remains after satisficing → simple sort."""
+        study = _make_selection_study()
+        trial, result = select_best_trial(
+            study,
+            priorities=[
+                ("calibration_error", 0.01),
+                ("nrmse", 0.05),
+            ],
+        )
+        # Remaining: inference_time only → trial 4 (2.5s) is best
+        assert trial.number == 4
+
+    def test_selection_result_fields(self):
+        study = _make_selection_study()
+        trial, result = select_best_trial(
+            study,
+            priorities=[("calibration_error", 0.01)],
+        )
+        assert isinstance(result, SelectionResult)
+        assert isinstance(result.thresholds_met, dict)
+        assert isinstance(result.pareto_front, list)
+        assert isinstance(result.n_candidates_per_step, list)
+        assert all(isinstance(t, optuna.trial.FrozenTrial) for t in result.pareto_front)
+
+    def test_best_config_with_priorities(self):
+        study = _make_selection_study()
+        config = best_config(
+            study,
+            priorities=[
+                ("calibration_error", 0.01),
+                ("nrmse", 0.05),
+            ],
+        )
+        assert isinstance(config, dict)
+        assert "lr" in config
+
+    def test_best_config_mutual_exclusivity(self):
+        study = _make_selection_study()
+        with pytest.raises(ValueError, match="Cannot specify both"):
+            best_config(
+                study,
+                select_by=1,
+                priorities=[("calibration_error", 0.01)],
+            )
+
+    def test_invalid_direction_raises(self):
+        study = _make_selection_study()
+        with pytest.raises(ValueError, match="direction must be"):
+            select_best_trial(
+                study,
+                priorities=[("calibration_error", 0.01, "sideways")],
+            )
+
+    def test_no_trained_trials_raises(self):
+        study = optuna.create_study(directions=["minimize"], study_name="empty")
+        with pytest.raises(ValueError, match="no trained trials"):
+            select_best_trial(study, priorities=[("obj", 0.5)])
