@@ -19,6 +19,7 @@ class ObjectiveConfig:
     early_stopping_window: int = 7
     max_param_count: int = 1_000_000
     max_memory_mb: float | None = None
+    metric_constraints_hard: list[MetricConstraintSpec] | None = None
     n_posterior_samples: int = 500
     n_intermediate_posterior_samples: int = 250
     intermediate_validation_interval: int = 10
@@ -126,6 +127,31 @@ memory ≈ (4 × param_count × dtype_bytes)     # weights + grads + Adam states
 ```
 
 Trials exceeding `max_memory_mb` are rejected before training.
+
+`optimize(max_memory_mb="auto")` enables GPU-memory auto-detection:
+
+- Uses `torch.cuda.mem_get_info()` and takes **free** VRAM (not total).
+- Applies `memory_safety_margin` (default 0.2).
+- Resolved formula:
+  `free_bytes * (1 - safety_margin) / (1024.0 ** 2)`.
+- If CUDA is unavailable, a warning is logged and memory budget is disabled.
+
+### Metric Constraints
+
+Metric constraints use tuple specs:
+
+```python
+(metric_name, threshold, "above" | "below")
+```
+
+- `"above"` means violation when `metric_value > threshold`
+- `"below"` means violation when `metric_value < threshold`
+
+Two layers are supported:
+
+- `metric_constraints_hard`: post-validation hard rejection in the objective
+- `metric_constraints_soft`: Optuna `constraints_func` feasibility guidance
+  for sampler presets that support constraints
 
 ### Penalty Values
 

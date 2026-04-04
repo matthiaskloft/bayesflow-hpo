@@ -23,6 +23,8 @@ def optimize(
     pruning_strategy="dominance",
     # Budget
     max_param_count=1_000_000, max_memory_mb=None,
+    metric_constraints_hard=None, metric_constraints_soft=None,
+    memory_safety_margin=0.2,
     # Study
     n_trials=50, max_total_trials=None,
     study_name="bayesflow_hpo", storage=DEFAULT_STORAGE, resume=False,
@@ -54,7 +56,10 @@ def optimize(
 | `early_stopping_window` | Moving-average window size (default 7). |
 | `pruning_strategy` | Multi-objective pruning: `"dominance"` (default), `"mo-sha"`, `("primary", "metric")`, or `"none"`. |
 | `max_param_count` | Reject trials exceeding this param count pre-training (default 1 000 000). |
-| `max_memory_mb` | Optional peak-memory budget in MB. Disabled by default. |
+| `max_memory_mb` | Optional peak-memory budget in MB, or `"auto"` for CUDA free-memory auto-detection. |
+| `metric_constraints_hard` | Optional hard metric constraints `[(metric, threshold, "above" \| "below"), ...]` (reject after validation). |
+| `metric_constraints_soft` | Optional soft metric constraints `[(metric, threshold, "above" \| "below"), ...]` (feasibility-guided sampling for sampler presets). |
+| `memory_safety_margin` | Safety margin for `max_memory_mb="auto"` (default `0.2`). |
 | `n_trials` | Number of *trained* trials to collect (default 50). |
 | `max_total_trials` | Hard cap on non-rejected trials. Defaults to `3 * n_trials`. |
 | `sampler` | Sampler preset string (`"tpe"`, `"gp"`, `"botorch"`, `"nsga2"`, `"nsga3"`, `"auto"`, `"random"`) or `BaseSampler` instance. Default `None` = TPE. |
@@ -188,6 +193,7 @@ Public default implementations used by `optimize()` when no custom hooks are pro
 | `early_stopping_window` | `7` | Moving-average window |
 | `max_param_count` | `1_000_000` | Pre-training param budget |
 | `max_memory_mb` | `None` | Peak-memory budget (disabled) |
+| `metric_constraints_hard` | `None` | Hard metric constraints (post-validation rejection) |
 | `n_posterior_samples` | `500` | Posterior draws for final validation |
 | `pruning_strategy` | `"dominance"` | Multi-objective pruning strategy (`"dominance"`, `"mo-sha"`, `("primary", metric)`, `"none"`) |
 | `pruning_n_startup_trials` | `None` | Min completed trials before pruning (`None` = auto-detect from sampler) |
@@ -212,6 +218,7 @@ values = objective(trial: optuna.Trial)  # tuple of floats
 create_study(study_name, directions, storage, load_if_exists,
              sampler: str | BaseSampler | None = None,  # "tpe", "gp", "botorch", "nsga2", "nsga3", "auto", "random"
              pruner: str | BasePruner | None = None,    # "median", "hyperband", "none"
+             metric_constraints_soft=None,
              metric_names, warm_start_from, warm_start_top_k,
              qmc_startup_trials=0) -> optuna.Study
 resume_study(study_name, storage) -> optuna.Study

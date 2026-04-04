@@ -1150,3 +1150,180 @@ def test_training_loss_fallback_single_metric_pareto():
     assert len(values) == 2
     assert values[0] == pytest.approx(0.25)
     assert 0.0 < values[1] < 1e6  # normalized param count
+
+
+def test_hard_metric_constraints_pass_through_when_satisfied(monkeypatch):
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.estimate_peak_memory_mb",
+        lambda params: 1.0,
+    )
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.cleanup_trial",
+        lambda: None,
+    )
+
+    class _FakeSimulator:
+        def sample(self, shape):
+            return {}
+
+    class _FakeAdapter:
+        def __call__(self, data):
+            return data
+
+    objective = GenericObjective(
+        ObjectiveConfig(
+            simulator=_FakeSimulator(),
+            adapter=_FakeAdapter(),
+            search_space=_FakeSearchSpace(),
+            validation_data=_DUMMY_VALIDATION_DATA_1COND,
+            epochs=1,
+            num_batches=1,
+            build_approximator_fn=lambda hp: _FakeApproximator(10_000),
+            train_fn=lambda approx, sim, hp, cb: None,
+            validate_fn=lambda approx, vd, n: {
+                "calibration_error": 0.05,
+                "nrmse": 0.10,
+            },
+            metric_constraints_hard=[("calibration_error", 0.2, "above")],
+        )
+    )
+
+    trial = _FakeTrial()
+    values = objective(trial)
+    assert trial.user_attrs.get("rejected_reason") is None
+    assert values[0] == pytest.approx(0.05)
+
+
+def test_hard_metric_constraints_violation_rejects_and_cleans_up(monkeypatch):
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.estimate_peak_memory_mb",
+        lambda params: 1.0,
+    )
+    cleanup_calls: list[int] = []
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.cleanup_trial",
+        lambda: cleanup_calls.append(1),
+    )
+
+    class _FakeSimulator:
+        def sample(self, shape):
+            return {}
+
+    class _FakeAdapter:
+        def __call__(self, data):
+            return data
+
+    objective = GenericObjective(
+        ObjectiveConfig(
+            simulator=_FakeSimulator(),
+            adapter=_FakeAdapter(),
+            search_space=_FakeSearchSpace(),
+            validation_data=_DUMMY_VALIDATION_DATA_1COND,
+            epochs=1,
+            num_batches=1,
+            build_approximator_fn=lambda hp: _FakeApproximator(10_000),
+            train_fn=lambda approx, sim, hp, cb: None,
+            validate_fn=lambda approx, vd, n: {
+                "calibration_error": 0.35,
+                "nrmse": 0.10,
+            },
+            metric_constraints_hard=[("calibration_error", 0.2, "above")],
+        )
+    )
+
+    trial = _FakeTrial()
+    values = objective(trial)
+    assert trial.user_attrs["rejected_reason"] == "metric_constraint"
+    assert values[-1] == FAILED_TRIAL_COST
+    assert len(cleanup_calls) == 1
+
+
+def test_hard_metric_constraints_missing_metric_warns_and_skips(
+    monkeypatch, caplog
+):
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.estimate_peak_memory_mb",
+        lambda params: 1.0,
+    )
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.cleanup_trial",
+        lambda: None,
+    )
+
+    class _FakeSimulator:
+        def sample(self, shape):
+            return {}
+
+    class _FakeAdapter:
+        def __call__(self, data):
+            return data
+
+    objective = GenericObjective(
+        ObjectiveConfig(
+            simulator=_FakeSimulator(),
+            adapter=_FakeAdapter(),
+            search_space=_FakeSearchSpace(),
+            validation_data=_DUMMY_VALIDATION_DATA_1COND,
+            epochs=1,
+            num_batches=1,
+            build_approximator_fn=lambda hp: _FakeApproximator(10_000),
+            train_fn=lambda approx, sim, hp, cb: None,
+            validate_fn=lambda approx, vd, n: {
+                "calibration_error": 0.05,
+                "nrmse": 0.10,
+            },
+            metric_constraints_hard=[("sbc_ks", 0.1, "above")],
+        )
+    )
+
+    with caplog.at_level("WARNING"):
+        trial = _FakeTrial()
+        values = objective(trial)
+    assert trial.user_attrs.get("rejected_reason") is None
+    assert values[0] == pytest.approx(0.05)
+    assert "missing metric" in caplog.text
+
+
+def test_hard_metric_constraints_multiple_partial_violation(monkeypatch):
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.estimate_peak_memory_mb",
+        lambda params: 1.0,
+    )
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.cleanup_trial",
+        lambda: None,
+    )
+
+    class _FakeSimulator:
+        def sample(self, shape):
+            return {}
+
+    class _FakeAdapter:
+        def __call__(self, data):
+            return data
+
+    objective = GenericObjective(
+        ObjectiveConfig(
+            simulator=_FakeSimulator(),
+            adapter=_FakeAdapter(),
+            search_space=_FakeSearchSpace(),
+            validation_data=_DUMMY_VALIDATION_DATA_1COND,
+            epochs=1,
+            num_batches=1,
+            build_approximator_fn=lambda hp: _FakeApproximator(10_000),
+            train_fn=lambda approx, sim, hp, cb: None,
+            validate_fn=lambda approx, vd, n: {
+                "calibration_error": 0.05,  # passes "above 0.2"
+                "nrmse": 0.04,  # violates "below 0.05"
+            },
+            metric_constraints_hard=[
+                ("calibration_error", 0.2, "above"),
+                ("nrmse", 0.05, "below"),
+            ],
+        )
+    )
+
+    trial = _FakeTrial()
+    values = objective(trial)
+    assert trial.user_attrs["rejected_reason"] == "metric_constraint"
+    assert values[-1] == FAILED_TRIAL_COST

@@ -3,7 +3,7 @@
 import optuna
 
 from bayesflow_hpo.optimization.study import (
-    _budget_constraints_func,
+    _make_constraints_func,
     count_trained_trials,
     optimize_until,
 )
@@ -38,12 +38,14 @@ def test_count_trained_trials_empty_study():
 
 def test_budget_constraints_func_feasible():
     trial = _make_trial(rejected=False)
-    assert _budget_constraints_func(trial) == [0.0]
+    fn = _make_constraints_func(budget_aware=True, soft_thresholds=None)
+    assert fn(trial) == [0.0]
 
 
 def test_budget_constraints_func_infeasible():
     trial = _make_trial(rejected=True)
-    assert _budget_constraints_func(trial) == [1.0]
+    fn = _make_constraints_func(budget_aware=True, soft_thresholds=None)
+    assert fn(trial) == [1.0]
 
 
 def test_optimize_until_counts_only_trained():
@@ -97,11 +99,12 @@ def test_optimize_until_respects_max_total_trials():
 
 def test_budget_aware_sampler_uses_constraints():
     """Verify the TPE sampler is created with constraints_func."""
+    constraints = _make_constraints_func(budget_aware=True, soft_thresholds=None)
     study = optuna.create_study(
         directions=["minimize", "minimize"],
         sampler=optuna.samplers.TPESampler(
             seed=0,
-            constraints_func=_budget_constraints_func,
+            constraints_func=constraints,
         ),
     )
     assert study.sampler._constraints_func is not None
