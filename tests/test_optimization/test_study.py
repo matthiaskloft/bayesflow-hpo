@@ -231,7 +231,9 @@ def test_make_constraints_func_budget_only():
     fn = _make_constraints_func(budget_aware=True, soft_thresholds=None)
     assert fn(_mk_frozen_trial()) == [0.0]
     assert fn(_mk_frozen_trial(user_attrs={"rejected_reason": "param_budget"})) == [1.0]
-    assert fn(_mk_frozen_trial(user_attrs={"rejected_reason": "metric_constraint"})) == [0.0]
+    assert fn(
+        _mk_frozen_trial(user_attrs={"rejected_reason": "metric_constraint"})
+    ) == [0.0]
 
 
 def test_make_constraints_func_soft_violation_above():
