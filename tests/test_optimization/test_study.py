@@ -8,7 +8,8 @@ import optuna
 import pytest
 
 from bayesflow_hpo.optimization.study import (
-    _budget_constraints_func,
+    _count_non_rejected,
+    _make_constraints_func,
     _resolve_n_startup_trials,
     _resolve_pruner,
     _resolve_sampler,
@@ -48,7 +49,7 @@ class TestResolveSampler:
         assert sampler._multivariate is True
         assert sampler._n_startup_trials == 25
         assert sampler._warn_independent_sampling is False
-        assert sampler._constraints_func is _budget_constraints_func
+        assert sampler._constraints_func(_mk_frozen_trial()) == [0.0]
 
     def test_gp_creates_gp_sampler(self):
         sampler = _resolve_sampler("gp")
@@ -85,7 +86,7 @@ class TestResolveSampler:
 
     def test_budget_aware_true_wires_constraints(self):
         sampler = _resolve_sampler("tpe", budget_aware=True)
-        assert sampler._constraints_func is _budget_constraints_func
+        assert sampler._constraints_func(_mk_frozen_trial()) == [0.0]
 
     def test_budget_aware_false_no_constraints(self):
         sampler = _resolve_sampler("tpe", budget_aware=False)
@@ -93,7 +94,7 @@ class TestResolveSampler:
 
     def test_nsga2_budget_aware_true_wires_constraints(self):
         sampler = _resolve_sampler("nsga2", budget_aware=True)
-        assert sampler._constraints_func is _budget_constraints_func
+        assert sampler._constraints_func(_mk_frozen_trial()) == [0.0]
 
     def test_nsga2_budget_aware_false_no_constraints(self):
         sampler = _resolve_sampler("nsga2", budget_aware=False)
@@ -212,3 +213,90 @@ class TestResolveNStartupTrials:
         """GPSampler(n_startup_trials=10) stores it as _n_startup_trials."""
         sampler = optuna.samplers.GPSampler(seed=42, n_startup_trials=10)
         assert _resolve_n_startup_trials(sampler) == 10
+
+
+def _mk_frozen_trial(
+    *,
+    user_attrs: dict | None = None,
+) -> optuna.trial.FrozenTrial:
+    return optuna.trial.create_trial(
+        params={"x": 0.5},
+        distributions={"x": optuna.distributions.FloatDistribution(0.0, 1.0)},
+        values=(0.5, 0.5),
+        user_attrs=user_attrs or {},
+    )
+
+
+def test_make_constraints_func_budget_only():
+    fn = _make_constraints_func(budget_aware=True, soft_thresholds=None)
+    assert fn(_mk_frozen_trial()) == [0.0]
+    assert fn(_mk_frozen_trial(user_attrs={"rejected_reason": "param_budget"})) == [1.0]
+
+
+def test_make_constraints_func_soft_violation_above():
+    fn = _make_constraints_func(
+        budget_aware=False,
+        soft_thresholds=[("calibration_error", 0.2, "above")],
+    )
+    vals = fn(_mk_frozen_trial(user_attrs={"calibration_error": 0.3}))
+    assert vals[0] == pytest.approx(0.1)
+
+
+def test_make_constraints_func_soft_violation_below():
+    fn = _make_constraints_func(
+        budget_aware=False,
+        soft_thresholds=[("coverage", 0.8, "below")],
+    )
+    vals = fn(_mk_frozen_trial(user_attrs={"coverage": 0.7}))
+    assert vals[0] == pytest.approx(0.1)
+
+
+def test_make_constraints_func_missing_metric_is_feasible():
+    fn = _make_constraints_func(
+        budget_aware=False,
+        soft_thresholds=[("sbc_ks", 0.1, "above")],
+    )
+    assert fn(_mk_frozen_trial()) == [0.0]
+
+
+def test_make_constraints_func_combined_budget_and_soft():
+    fn = _make_constraints_func(
+        budget_aware=True,
+        soft_thresholds=[("calibration_error", 0.2, "above")],
+    )
+    vals = fn(
+        _mk_frozen_trial(
+            user_attrs={
+                "rejected_reason": "memory_budget",
+                "calibration_error": 0.3,
+            }
+        )
+    )
+    assert vals[0] == pytest.approx(1.0)
+    assert vals[1] == pytest.approx(0.1)
+
+
+def test_resolve_sampler_budget_false_without_soft_has_no_constraints():
+    sampler = _resolve_sampler("tpe", budget_aware=False, soft_thresholds=None)
+    assert sampler._constraints_func is None
+
+
+def test_resolve_sampler_budget_false_with_soft_has_constraints():
+    sampler = _resolve_sampler(
+        "tpe",
+        budget_aware=False,
+        soft_thresholds=[("calibration_error", 0.2, "above")],
+    )
+    fn = sampler._constraints_func
+    vals = fn(_mk_frozen_trial(user_attrs={"calibration_error": 0.3}))
+    assert vals[0] == pytest.approx(0.1)
+
+
+def test_count_non_rejected_includes_metric_rejected_trials():
+    study = optuna.create_study(directions=["minimize", "minimize"])
+    study.add_trial(_mk_frozen_trial(user_attrs={"rejected_reason": "param_budget"}))
+    study.add_trial(
+        _mk_frozen_trial(user_attrs={"rejected_reason": "metric_constraint"})
+    )
+    study.add_trial(_mk_frozen_trial())
+    assert _count_non_rejected(study) == 2

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import optuna
 import pytest
 from conftest import FakeRename, canonical_adapter, make_adapter
 
@@ -12,6 +13,7 @@ from bayesflow_hpo.api import (
     _create_and_run_study,
     _derive_directions,
     _infer_and_validate_keys,
+    _resolve_memory_budget,
     _setup_validation_data,
     optimize,
 )
@@ -390,6 +392,7 @@ class TestBuildObjective:
                 early_stopping_window=7,
                 max_param_count=1_000_000,
                 max_memory_mb=None,
+                metric_constraints_hard=None,
                 n_posterior_samples=500,
                 objective_metrics=["calibration_error"],
                 objective_mode="pareto",
@@ -758,3 +761,75 @@ class TestStartupAutoDetect:
 
         _, kwargs = mock_create.call_args
         assert kwargs["sampler"] == "gp"
+
+
+class TestResolveMemoryBudget:
+    """Tests for _resolve_memory_budget()."""
+
+    def test_none_passthrough(self):
+        assert _resolve_memory_budget(max_memory_mb=None, safety_margin=0.2) is None
+
+    def test_float_passthrough(self):
+        assert _resolve_memory_budget(max_memory_mb=512.0, safety_margin=0.2) == 512.0
+
+    def test_invalid_string_raises(self):
+        with pytest.raises(
+            ValueError,
+            match="max_memory_mb must be float, None, or 'auto'",
+        ):
+            _resolve_memory_budget(max_memory_mb="invalid", safety_margin=0.2)
+
+    def test_invalid_margin_raises(self):
+        with pytest.raises(ValueError, match="memory_safety_margin"):
+            _resolve_memory_budget(max_memory_mb="auto", safety_margin=1.0)
+
+    def test_auto_detect_returns_value(self):
+        with patch("bayesflow_hpo.api._detect_gpu_memory_mb", return_value=1024.0):
+            assert (
+                _resolve_memory_budget(max_memory_mb="auto", safety_margin=0.2)
+                == 1024.0
+            )
+
+    def test_auto_detect_unavailable_returns_none(self):
+        with patch("bayesflow_hpo.api._detect_gpu_memory_mb", return_value=None):
+            assert (
+                _resolve_memory_budget(max_memory_mb="auto", safety_margin=0.2)
+                is None
+            )
+
+
+def test_optimize_warns_soft_constraints_with_custom_sampler(caplog):
+    adapter = canonical_adapter()
+    with (
+        patch(
+            "bayesflow_hpo.api._infer_and_validate_keys",
+            return_value=(["p"], ["x"]),
+        ),
+        patch(
+            "bayesflow_hpo.api._setup_validation_data",
+            return_value=_DUMMY_VALIDATION_DATA,
+        ),
+        patch("bayesflow_hpo.api.check_pipeline"),
+        patch(
+            "bayesflow_hpo.api._build_objective",
+            return_value=MagicMock(n_objectives=3),
+        ),
+        patch(
+            "bayesflow_hpo.api._derive_directions",
+            return_value=(["minimize"] * 3, ["a", "b", "c"]),
+        ),
+        patch("bayesflow_hpo.api._create_and_run_study"),
+    ):
+        with caplog.at_level("WARNING"):
+            optimize(
+                simulator=MagicMock(),
+                adapter=adapter,
+                search_space=MagicMock(),
+                sampler=optuna.samplers.RandomSampler(seed=123),
+                metric_constraints_soft=[("calibration_error", 0.2, "above")],
+                storage=None,
+            )
+    assert (
+        "metric_constraints_soft was provided with a user-supplied sampler "
+        "instance" in caplog.text
+    )

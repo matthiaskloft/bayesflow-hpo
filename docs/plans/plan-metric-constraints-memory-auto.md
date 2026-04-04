@@ -9,9 +9,9 @@
 |-------|--------|------|-------|
 | Spec | DONE | 2026-04-04 | |
 | Plan | DONE | 2026-04-04 | Reviewed in 2 iterations |
-| Phase 1: Metric constraints dataclass + hard rejection | TODO | | |
-| Phase 2: Soft constraints (feasibility-guided sampling) | TODO | | |
-| Phase 3: GPU memory auto-detection | TODO | | |
+| Phase 1: Metric constraints dataclass + hard rejection | IMPLEMENTED | 2026-04-04 | code + tests + docs |
+| Phase 2: Soft constraints (feasibility-guided sampling) | IMPLEMENTED | 2026-04-04 | code + tests + docs |
+| Phase 3: GPU memory auto-detection | IMPLEMENTED | 2026-04-04 | code + tests + docs |
 | Ship | TODO | | |
 
 ## Spec
@@ -411,6 +411,32 @@ Wire `max_memory_mb="auto"` through `optimize()` using
 ## Notes
 
 _Living section — updated during implementation._
+
+### 2026-04-04 — Implementation Notes
+
+- Added `MetricConstraintSpec` and `_detect_gpu_memory_mb()` in
+  `optimization/constraints.py`.
+- Added hard metric constraint support to `ObjectiveConfig` and
+  `GenericObjective` with post-validation rejection path:
+  `rejected_reason="metric_constraint"`.
+- Updated `_count_non_rejected()` to count metric-rejected trials and
+  keep excluding only pre-training rejections via
+  `_PRE_TRAINING_REJECTIONS`.
+- Replaced budget-only sampler constraint function with composed
+  `_make_constraints_func(...)` supporting soft metric constraints.
+- Threaded `metric_constraints_soft` through
+  `optimize()` → `_create_and_run_study()` → `create_study()`.
+- Added warning for soft constraints with user-supplied sampler
+  instances (cannot auto-inject constraints func).
+- Added `_resolve_memory_budget()` and wired
+  `max_memory_mb="auto"` + `memory_safety_margin`.
+- Updated tests:
+  `test_constraints.py`, `test_objective.py`, `test_study.py`,
+  `test_optimize_until.py`, `test_api.py`.
+- Updated docs: `docs/optimization.md`, `docs/api_reference.md`.
+- Verification:
+  - `ruff check` on all touched modules: pass
+  - `pytest` targeted suite (5 files): 171 passed
 
 ## Review Feedback
 

@@ -26,6 +26,7 @@ import numpy as np
 import optuna
 from optuna.trial import TrialState
 
+from bayesflow_hpo.optimization.constraints import MetricConstraintSpec
 from bayesflow_hpo.results.extraction import _objective_column_names
 
 logger = logging.getLogger(__name__)
@@ -39,15 +40,50 @@ def _is_power_of_two(n: int) -> bool:
 DEFAULT_STORAGE = "sqlite:///bayesflow_hpo.db"
 
 
-def _budget_constraints_func(trial: optuna.trial.FrozenTrial) -> list[float]:
-    """Optuna constraints_func: returns >0 when a trial violated a budget.
+_PRE_TRAINING_REJECTIONS = {
+    "memory_budget",
+    "param_budget",
+    "build_failed",
+    "compile_failed",
+    "param_probe_failed",
+}
 
-    This teaches the TPE sampler to avoid infeasible regions of the search
-    space, even during startup trials.
+
+def _make_constraints_func(
+    budget_aware: bool = True,
+    soft_thresholds: list[MetricConstraintSpec] | None = None,
+) -> Callable[[optuna.trial.FrozenTrial], list[float]]:
+    """Build a composed Optuna constraints function.
+
+    The returned function emits:
+
+    - index 0: budget rejection flag (when ``budget_aware`` is True)
+    - subsequent indices: soft metric-threshold violations
     """
-    if "rejected_reason" in trial.user_attrs:
-        return [1.0]
-    return [0.0]
+    thresholds = list(soft_thresholds or [])
+
+    def _constraints(trial: optuna.trial.FrozenTrial) -> list[float]:
+        values: list[float] = []
+
+        if budget_aware:
+            rejected_reason = trial.user_attrs.get("rejected_reason")
+            values.append(1.0 if rejected_reason is not None else 0.0)
+
+        for metric, threshold, direction in thresholds:
+            raw = trial.user_attrs.get(metric)
+            if raw is None:
+                values.append(0.0)
+                continue
+            metric_value = float(raw)
+            if direction == "above":
+                values.append(max(0.0, metric_value - float(threshold)))
+            elif direction == "below":
+                values.append(max(0.0, float(threshold) - metric_value))
+            else:
+                values.append(0.0)
+        return values
+
+    return _constraints
 
 
 def _mean_ranking_key(trial: optuna.trial.FrozenTrial) -> float:
@@ -113,6 +149,7 @@ def _resolve_pruner(name: str) -> optuna.pruners.BasePruner:
 def _resolve_sampler(
     name: str,
     budget_aware: bool = True,
+    soft_thresholds: list[MetricConstraintSpec] | None = None,
 ) -> optuna.samplers.BaseSampler:
     """Resolve a string preset to a configured Optuna sampler.
 
@@ -126,8 +163,8 @@ def _resolve_sampler(
         One of ``"tpe"``, ``"gp"``, ``"botorch"``, ``"nsga2"``,
         ``"nsga3"``, ``"auto"``, or ``"random"``.
     budget_aware
-        Whether to attach :func:`_budget_constraints_func` to samplers
-        that support it.
+        Whether to include budget rejection in the composed
+        constraints function for samplers that support it.
 
     Returns
     -------
@@ -150,7 +187,14 @@ def _resolve_sampler(
     Deb, K., et al. (2002). NSGA-II. *IEEE TEVC*, *6*(2), 182--197.
     Deb, K., & Jain, H. (2014). NSGA-III. *IEEE TEVC*, *18*(4), 577--601.
     """
-    constraints = _budget_constraints_func if budget_aware else None
+    constraints = (
+        _make_constraints_func(
+            budget_aware=budget_aware,
+            soft_thresholds=soft_thresholds,
+        )
+        if budget_aware or soft_thresholds
+        else None
+    )
 
     def _make_tpe() -> optuna.samplers.TPESampler:
         return optuna.samplers.TPESampler(
@@ -397,6 +441,7 @@ def create_study(
     warm_start_from: optuna.Study | None = None,
     warm_start_top_k: int = 25,
     budget_aware: bool = True,
+    metric_constraints_soft: list[MetricConstraintSpec] | None = None,
     qmc_startup_trials: int = 0,
 ) -> optuna.Study:
     """Create or resume an Optuna study.
@@ -491,9 +536,17 @@ def create_study(
         directions = ["minimize", "minimize"]
 
     if isinstance(sampler, str):
-        sampler = _resolve_sampler(sampler, budget_aware=budget_aware)
+        sampler = _resolve_sampler(
+            sampler,
+            budget_aware=budget_aware,
+            soft_thresholds=metric_constraints_soft,
+        )
     elif sampler is None:
-        sampler = _resolve_sampler("tpe", budget_aware=budget_aware)
+        sampler = _resolve_sampler(
+            "tpe",
+            budget_aware=budget_aware,
+            soft_thresholds=metric_constraints_soft,
+        )
 
     if qmc_startup_trials < 0:
         raise ValueError(
@@ -621,7 +674,10 @@ def _count_budget_rejected(study: optuna.Study, since_trial: int = 0) -> int:
     return sum(
         1
         for t in study.trials
-        if t.number >= since_trial and "rejected_reason" in t.user_attrs
+        if (
+            t.number >= since_trial
+            and t.user_attrs.get("rejected_reason") in _PRE_TRAINING_REJECTIONS
+        )
     )
 
 
@@ -708,7 +764,7 @@ def _count_non_rejected(study: optuna.Study) -> int:
     return sum(
         1
         for t in study.trials
-        if "rejected_reason" not in t.user_attrs
+        if t.user_attrs.get("rejected_reason") not in _PRE_TRAINING_REJECTIONS
     )
 
 

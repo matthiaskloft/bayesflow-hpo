@@ -12,7 +12,15 @@ than a false negative (OOM crash mid-training).
 
 from __future__ import annotations
 
-from typing import Any
+import logging
+from typing import Any, Literal, TypeAlias
+
+logger = logging.getLogger(__name__)
+
+# (metric_name, threshold, "above"/"below")
+# "above" => reject when metric value exceeds threshold
+# "below" => reject when metric value falls below threshold
+MetricConstraintSpec: TypeAlias = tuple[str, float, Literal["above", "below"]]
 
 
 def _safe_int(value: Any, default: int) -> int:
@@ -277,3 +285,27 @@ def exceeds_memory_budget(
     """Return True when the estimated peak memory exceeds a budget."""
     estimated_mb = estimate_peak_memory_mb(params=params, batch_size=batch_size)
     return estimated_mb > float(max_memory_mb)
+
+
+def _detect_gpu_memory_mb(safety_margin: float = 0.2) -> float | None:
+    """Detect free GPU memory in MB with a safety margin applied.
+
+    Uses ``torch.cuda.mem_get_info()`` and returns:
+
+    ``free_bytes * (1 - safety_margin) / (1024.0 ** 2)``
+
+    Returns ``None`` when CUDA is unavailable or cannot be queried.
+    """
+    try:
+        import torch
+    except ImportError:
+        return None
+
+    try:
+        if not torch.cuda.is_available():
+            return None
+        free_bytes, _ = torch.cuda.mem_get_info()
+    except RuntimeError:
+        return None
+
+    return float(free_bytes) * (1.0 - float(safety_margin)) / (1024.0 ** 2)

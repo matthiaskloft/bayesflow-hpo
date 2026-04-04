@@ -9,6 +9,10 @@ import bayesflow as bf
 import optuna
 
 from bayesflow_hpo.optimization.checkpoint_pool import CheckpointPool
+from bayesflow_hpo.optimization.constraints import (
+    MetricConstraintSpec,
+    _detect_gpu_memory_mb,
+)
 from bayesflow_hpo.optimization.objective import GenericObjective, ObjectiveConfig
 from bayesflow_hpo.optimization.study import (
     DEFAULT_STORAGE,
@@ -124,7 +128,10 @@ def optimize(
     report_frequency: int = 10,
     # Budget
     max_param_count: int = 1_000_000,
-    max_memory_mb: float | None = None,
+    max_memory_mb: float | None | str = None,
+    metric_constraints_hard: list[MetricConstraintSpec] | None = None,
+    metric_constraints_soft: list[MetricConstraintSpec] | None = None,
+    memory_safety_margin: float = 0.2,
     # Study
     n_trials: int = 50,
     max_total_trials: int | None = None,
@@ -279,7 +286,19 @@ def optimize(
         Trials with actual parameter count above this value are
         rejected before training (default 1 000 000).
     max_memory_mb
-        Optional peak-memory budget in MB.  Disabled by default.
+        Optional peak-memory budget in MB. Pass ``"auto"`` to detect
+        free CUDA memory and apply ``memory_safety_margin``.
+    metric_constraints_hard
+        Optional hard metric thresholds as
+        ``[(metric, threshold, "above"|"below"), ...]``.
+        Violating trials are rejected after final validation.
+    metric_constraints_soft
+        Optional soft metric thresholds as
+        ``[(metric, threshold, "above"|"below"), ...]``.
+        Passed to Optuna's ``constraints_func`` for feasibility-guided
+        sampling (when using sampler presets).
+    memory_safety_margin
+        Safety margin for ``max_memory_mb="auto"``. Default 0.2 (20%).
     n_trials
         Number of *trained* trials to collect (default 50).
     max_total_trials
@@ -382,6 +401,21 @@ def optimize(
         validation_conditions=validation_conditions,
     )
 
+    # Resolve memory budget before building objective.
+    resolved_max_memory_mb = _resolve_memory_budget(
+        max_memory_mb=max_memory_mb,
+        safety_margin=memory_safety_margin,
+    )
+
+    if metric_constraints_soft is not None and isinstance(
+        sampler, optuna.samplers.BaseSampler
+    ):
+        logger.warning(
+            "metric_constraints_soft was provided with a user-supplied sampler "
+            "instance. Soft constraints are only auto-wired for sampler presets; "
+            "skipping soft constraints."
+        )
+
     # Step 4: Build objective
     objective = _build_objective(
         simulator=simulator,
@@ -393,7 +427,8 @@ def optimize(
         early_stopping_patience=early_stopping_patience,
         early_stopping_window=early_stopping_window,
         max_param_count=max_param_count,
-        max_memory_mb=max_memory_mb,
+        max_memory_mb=resolved_max_memory_mb,
+        metric_constraints_hard=metric_constraints_hard,
         n_posterior_samples=n_posterior_samples,
         objective_metrics=objective_metrics,
         objective_mode=objective_mode,
@@ -424,6 +459,7 @@ def optimize(
         storage=storage,
         resume=resume,
         sampler=sampler,
+        metric_constraints_soft=metric_constraints_soft,
         warm_start_from=warm_start_from,
         warm_start_top_k=warm_start_top_k,
         qmc_startup_trials=qmc_startup_trials,
@@ -513,6 +549,7 @@ def _build_objective(
     early_stopping_window: int,
     max_param_count: int,
     max_memory_mb: float | None,
+    metric_constraints_hard: list[MetricConstraintSpec] | None,
     n_posterior_samples: int,
     objective_metrics: list[str],
     objective_mode: str,
@@ -537,6 +574,7 @@ def _build_objective(
             early_stopping_window=early_stopping_window,
             max_param_count=max_param_count,
             max_memory_mb=max_memory_mb,
+            metric_constraints_hard=metric_constraints_hard,
             n_posterior_samples=n_posterior_samples,
             objective_metrics=objective_metrics,
             objective_mode=objective_mode,
@@ -596,6 +634,7 @@ def _create_and_run_study(
     storage: str | None,
     resume: bool,
     sampler: str | optuna.samplers.BaseSampler | None = None,
+    metric_constraints_soft: list[MetricConstraintSpec] | None = None,
     warm_start_from: Any | None,
     warm_start_top_k: int,
     qmc_startup_trials: int = 0,
@@ -622,6 +661,7 @@ def _create_and_run_study(
         storage=storage,
         load_if_exists=resume or storage is None,
         sampler=sampler,
+        metric_constraints_soft=metric_constraints_soft,
         warm_start_from=warm_start_from,
         warm_start_top_k=warm_start_top_k,
         qmc_startup_trials=qmc_startup_trials,
@@ -646,3 +686,45 @@ def _create_and_run_study(
         show_progress_bar=show_progress_bar,
     )
     return study
+
+
+def _resolve_memory_budget(
+    *,
+    max_memory_mb: float | None | str,
+    safety_margin: float,
+) -> float | None:
+    """Resolve ``max_memory_mb`` with optional auto-detection."""
+    if not (0.0 <= float(safety_margin) < 1.0):
+        raise ValueError(
+            f"memory_safety_margin must be in [0, 1), got {safety_margin}."
+        )
+
+    if max_memory_mb is None:
+        return None
+
+    if isinstance(max_memory_mb, (float, int)):
+        return float(max_memory_mb)
+
+    if isinstance(max_memory_mb, str):
+        if max_memory_mb != "auto":
+            raise ValueError(
+                f"max_memory_mb must be float, None, or 'auto', got {max_memory_mb!r}."
+            )
+        resolved = _detect_gpu_memory_mb(float(safety_margin))
+        if resolved is None:
+            logger.warning(
+                "max_memory_mb='auto' requested but CUDA memory could not be detected; "
+                "disabling memory budget."
+            )
+            return None
+        logger.info(
+            "Resolved max_memory_mb='auto' to %.1f MB (safety_margin=%.2f).",
+            resolved,
+            safety_margin,
+        )
+        return float(resolved)
+
+    raise ValueError(
+        "max_memory_mb must be float, None, or 'auto', got "
+        f"{type(max_memory_mb).__name__}."
+    )

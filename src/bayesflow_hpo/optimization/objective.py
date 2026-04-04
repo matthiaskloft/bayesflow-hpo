@@ -51,7 +51,10 @@ from bayesflow_hpo.optimization.callbacks import (
 )
 from bayesflow_hpo.optimization.checkpoint_pool import CheckpointPool
 from bayesflow_hpo.optimization.cleanup import cleanup_trial
-from bayesflow_hpo.optimization.constraints import estimate_peak_memory_mb
+from bayesflow_hpo.optimization.constraints import (
+    MetricConstraintSpec,
+    estimate_peak_memory_mb,
+)
 from bayesflow_hpo.search_spaces.composite import CompositeSearchSpace
 from bayesflow_hpo.types import BuildApproximatorFn, TrainFn, ValidateFn
 from bayesflow_hpo.validation.data import ValidationDataset
@@ -270,6 +273,7 @@ class ObjectiveConfig:
     early_stopping_window: int = 7
     max_param_count: int = MAX_PARAM_COUNT
     max_memory_mb: float | None = None
+    metric_constraints_hard: list[MetricConstraintSpec] | None = None
     n_posterior_samples: int = 500
     n_intermediate_posterior_samples: int = 250
     intermediate_validation_interval: int = 10
@@ -545,6 +549,53 @@ class GenericObjective:
         cleanup_trial()
         return self._penalty()
 
+    def _check_hard_constraints(
+        self,
+        metrics_summary: dict[str, float],
+        trial: optuna.Trial,
+    ) -> tuple[float, ...] | None:
+        """Check hard metric constraints and return penalty on first violation."""
+        constraints = self.config.metric_constraints_hard
+        if constraints is None:
+            return None
+
+        for metric, threshold, direction in constraints:
+            value = metrics_summary.get(metric)
+            if value is None:
+                logger.warning(
+                    "Trial #%d: hard metric constraint skipped; missing metric %r",
+                    trial.number,
+                    metric,
+                )
+                continue
+
+            violated = False
+            if direction == "above":
+                violated = value > threshold
+            elif direction == "below":
+                violated = value < threshold
+            else:
+                logger.warning(
+                    "Trial #%d: hard metric constraint skipped; invalid direction %r",
+                    trial.number,
+                    direction,
+                )
+                continue
+
+            if violated:
+                trial.set_user_attr("rejected_reason", "metric_constraint")
+                logger.info(
+                    "Trial #%d rejected by hard metric constraint: %s=%.6f (%s %.6f)",
+                    trial.number,
+                    metric,
+                    value,
+                    direction,
+                    threshold,
+                )
+                return self._penalty()
+
+        return None
+
     def __call__(self, trial: optuna.Trial) -> tuple[float, ...]:
         """Execute one HPO trial: sample → build → compile → train → validate.
 
@@ -755,6 +806,13 @@ class GenericObjective:
             )
             for key, val in metrics_summary.items():
                 trial.set_user_attr(key, round(float(val), 6))
+
+            # --- Step 8b: Hard metric constraints ---
+            if config.metric_constraints_hard is not None:
+                penalty = self._check_hard_constraints(metrics_summary, trial)
+                if penalty is not None:
+                    cleanup_trial()
+                    return penalty
 
             # Wrap for extract_multi_objective_values compatibility.
             metrics = {"summary": metrics_summary}
