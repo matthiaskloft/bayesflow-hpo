@@ -271,27 +271,26 @@ After each trial, `cleanup_trial()` runs:
 
 This prevents memory leaks between trials in long HPO runs.
 
-## Workflow Construction
+## Approximator Construction
 
-`build_workflow` delegates to `bf.BasicWorkflow`:
+`build_continuous_approximator()` constructs an uncompiled `ContinuousApproximator`:
 
 ```python
-workflow = build_workflow(
-    simulator=simulator,
+from bayesflow_hpo import build_continuous_approximator
+
+approximator = build_continuous_approximator(
+    hparams=trial_params,
     adapter=adapter,
-    inference_network=inference_net,
-    summary_network=summary_net,
-    params=params,
-    config=WorkflowBuildConfig(
-        num_batches=50,
-        optimizer=None,  # or a custom keras optimizer
-    ),
+    search_space=search_space,
+    checkpoint_dir=None,  # optional: load weights from checkpoint
 )
 ```
 
-When `config.optimizer` is `None`, an `ExponentialDecay + Adam` schedule is created:
-- `decay_steps = max(1, config.num_batches)` — decays once per epoch
-- `decay_rate` from `params.get("decay_rate", 0.95)`
-- `staircase=True`
+The function:
+1. Delegates to `search_space.build(hparams)` to construct inference and summary networks
+2. Wraps them in a `bf.ContinuousApproximator`
+3. Optionally loads weights from a checkpoint directory
 
-When a custom optimizer is provided, it is passed directly to `bf.BasicWorkflow`.
+The returned approximator is **uncompiled**. The trial lifecycle in `GenericObjective.__call__()` compiles it separately with an `Adam + CosineDecay` schedule:
+- `CosineDecay(initial_learning_rate=initial_lr, decay_steps=max(1, total_steps))`
+- `total_steps = epochs * num_batches`

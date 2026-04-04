@@ -293,11 +293,76 @@ def validate_irt(approximator, validation_data, n_posterior_samples):
 
 This `validate_fn` is also used for intermediate validation during training (via `PeriodicValidationCallback`), enabling mid-training pruning for structured approximators.
 
+## C2ST Metrics
+
+Classifier two-sample tests for posterior validation. Requires `scikit-learn>=1.3` (`pip install bayesflow-hpo[sklearn]`).
+
+### Local C2ST (L-C2ST)
+
+Reference-free local posterior diagnostic using joint `(theta, x)` samples (Linhart et al., 2023). No reference posterior needed — uses the amortized approximator's own samples.
+
+```python
+from bayesflow_hpo import lc2st
+
+result = lc2st(
+    posterior_samples,   # (n_sims, n_samples, n_params)
+    true_params,         # (n_sims, n_params)
+    observations,        # (n_sims, ...) observation data
+    n_folds=5,           # cross-validation folds
+    n_null_trials=0,     # permutation null trials (0 = skip)
+    seed=42,
+)
+# result.accuracy: float  (0.5 = perfect, 1.0 = distinguishable)
+# result.per_fold: list[float]
+```
+
+### Global C2ST
+
+Standard classifier two-sample test (Lopez-Paz & Oquab, 2017). Requires reference posterior samples.
+
+```python
+from bayesflow_hpo import global_c2st
+
+result = global_c2st(
+    samples_p,  # (n, d) reference posterior samples
+    samples_q,  # (n, d) approximate posterior samples
+    seed=42,
+)
+# result.accuracy: float
+# result.per_fold: list[float]
+```
+
+### ValidateFn Factory
+
+`make_lc2st_validate_fn()` returns a `ValidateFn` compatible with `optimize(validate_fn=...)` that computes standard per-parameter metrics and L-C2ST from a single inference pass:
+
+```python
+from bayesflow_hpo import make_lc2st_validate_fn
+
+validate_fn = make_lc2st_validate_fn(
+    base_metrics=["calibration_error", "nrmse"],
+    n_folds=5,
+)
+
+study = hpo.optimize(
+    ...,
+    validate_fn=validate_fn,
+    objective_metrics=["calibration_error", "nrmse"],
+)
+```
+
 ## SBC Tests
 
 ### Rank Uniformity
 
 If the posterior is well-calibrated, SBC ranks should be uniform over `[0, n_posterior_samples]`.
+
+```python
+from bayesflow_hpo import compute_sbc_uniformity_tests
+
+results = compute_sbc_uniformity_tests(ranks, n_posterior_samples, n_bins=20)
+# {"ks_statistic": ..., "ks_pvalue": ..., "chi2_statistic": ..., "chi2_pvalue": ...}
+```
 
 - **KS test** — Kolmogorov-Smirnov test against `Uniform(0, n_posterior_samples)`
 - **Chi-squared test** — Binned chi-squared test of rank histogram

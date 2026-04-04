@@ -2,15 +2,14 @@
 
 ## Pareto Front Extraction
 
-After optimization, extract the Pareto-optimal trials (non-dominated in both objectives):
+After optimization, extract the Pareto-optimal trials (non-dominated in all objectives):
 
 ```python
 from bayesflow_hpo import get_pareto_trials
 
 pareto = get_pareto_trials(study)
 for trial in pareto:
-    cal_error, param_score = trial.values
-    print(f"Trial {trial.number}: cal={cal_error:.4f}, params={param_score:.3f}")
+    print(f"Trial {trial.number}: values={trial.values}")
 ```
 
 ## Trial Selection
@@ -50,16 +49,22 @@ trial, result = select_best_trial(
 )
 ```
 
-Integrated into `best_config()`:
+### Convenience Functions
 
 ```python
-from bayesflow_hpo import best_config
+from bayesflow_hpo import best_config, trial_table, compare_trials
 
+# Best trial's hyperparameters (with optional priority-based selection)
 config = best_config(
     study,
     priorities=[("calibration_error", 0.01), ("nrmse", 0.05)],
 )
-# Falls back to select_by=0 when priorities is None.
+
+# Formatted trial table (top-k by select_by objective)
+table = trial_table(study, top_k=10, select_by=0, metrics=["calibration_error", "nrmse"])
+
+# Side-by-side comparison of specific trials
+comparison = compare_trials(study, trial_numbers=[3, 7, 12])
 ```
 
 ## Trials DataFrame
@@ -69,32 +74,68 @@ Convert all trials to a pandas DataFrame for analysis:
 ```python
 from bayesflow_hpo import trials_to_dataframe
 
-df = trials_to_dataframe(study, include_pruned=False)
-# Columns: trial_number, state, value_0, value_1, param_*, user_attr_*
+df = trials_to_dataframe(study, include_pruned=False, include_ranks=True)
+# Columns: trial_number, state, value_0, value_1, param_*, user_attr_*, rank_*
+```
+
+## Study Summary
+
+```python
+from bayesflow_hpo import summarize_study
+
+print(summarize_study(study, select_by=0))
 ```
 
 ## Visualization
 
-### Pareto Front Plot
+### Study Dashboard
+
+`plot_study()` creates a 3-row GridSpec figure with Pareto front, optimization history, and parameter importance. Supports 2--3 objectives.
 
 ```python
-from bayesflow_hpo import plot_pareto_front
+from bayesflow_hpo import plot_study
 
-fig, ax = plot_pareto_front(study)
-# Scatter: calibration error (x) vs. parameter score (y)
-# Pareto-optimal points highlighted in red
+fig = plot_study(study, third_dim="color")
 ```
 
-### Parameter Importance
+### Individual Plots
 
 ```python
-from bayesflow_hpo import plot_param_importance
+from bayesflow_hpo import (
+    plot_pareto_front,
+    plot_optimization_history,
+    plot_param_importance,
+    plot_metric_scatter,
+    plot_metric_panels,
+    plot_pareto_3d,
+    plot_pareto_projections,
+    plot_parallel_coordinates,
+)
 
-fig, ax = plot_param_importance(study, top_k=10)
-# Horizontal bar chart of top-k hyperparameter importances
+# Pairwise 2D Pareto projections with third-dim encoding
+plot_pareto_front(study, third_dim="color", max_cols=3)
+
+# Per-objective direction-aware step lines
+plot_optimization_history(study, max_cols=3)
+
+# Per-objective parameter importance bar charts
+plot_param_importance(study, top_k=10, max_cols=3)
+
+# Scatter of any two metrics
+plot_metric_scatter(study, "calibration_error", "nrmse", show_iso_lines=True)
+
+# Per-trial metric distribution panels
+plot_metric_panels(study, metrics=["calibration_error", "nrmse"], max_cols=3)
+
+# 3D Pareto front (3-objective studies)
+plot_pareto_3d(study, cost_display="color")
+
+# Pairwise 2D projections (3-objective studies)
+plot_pareto_projections(study, cost_display="color", max_cols=3)
+
+# Parallel coordinates for top-k trials
+plot_parallel_coordinates(study, top_k=20, select_by=0)
 ```
-
-Uses Optuna's built-in `get_param_importances()` with fANOVA.
 
 ## Model Export
 

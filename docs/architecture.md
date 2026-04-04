@@ -9,6 +9,9 @@ src/bayesflow_hpo/
 ├── objectives.py            # Parameter counting, normalization, objective extraction
 ├── registration.py          # Custom network registration facade
 ├── utils.py                 # loguniform sampling helpers
+├── types.py                 # BuildApproximatorFn, TrainFn, ValidateFn type aliases
+├── pipeline.py              # check_pipeline() pre-flight validation
+├── _display.py              # DisplayDataFrame for hiding row index in display
 │
 ├── search_spaces/           # Declarative hyperparameter dimensions
 │   ├── base.py              # Dimension types, SearchSpace protocol, BaseSearchSpace
@@ -29,19 +32,20 @@ src/bayesflow_hpo/
 │       └── fusion_transformer.py
 │
 ├── builders/                # Construct BayesFlow objects from param dicts
-│   ├── adapter.py           # (deprecated — contents removed)
+│   ├── adapter.py           # (deprecated since v0.2.0)
 │   ├── registry.py          # Builder function lookup tables
-│   ├── inference.py         # build_inference_network (delegates to space.build)
-│   ├── summary.py           # build_summary_network (delegates to space.build)
-│   └── workflow.py          # build_workflow (delegates to bf.BasicWorkflow)
+│   └── workflow.py          # build_continuous_approximator, CosineDecay optimizer
 │
 ├── optimization/            # Optuna integration layer
-│   ├── objective.py         # ObjectiveConfig, GenericObjective
+│   ├── objective.py         # ObjectiveConfig, GenericObjective, default_train/validate_fn
 │   ├── callbacks.py         # OptunaReportCallback, MovingAverageEarlyStopping
 │   ├── constraints.py       # estimate_param_count, estimate_peak_memory_mb
 │   ├── cleanup.py           # GPU/memory cleanup after each trial
 │   ├── sampling.py          # sample_hyperparameters (thin wrapper)
-│   └── study.py             # create_study, resume_study, warm_start_study
+│   ├── study.py             # create_study, resume_study, warm_start_study
+│   ├── checkpoint_pool.py   # CheckpointPool for trial weight persistence
+│   ├── pruning_strategies.py # Multi-objective pruning (dominance, mo-sha, primary)
+│   └── validation_callback.py # PeriodicValidationCallback (pluggable pruning)
 │
 ├── validation/              # Post-training evaluation
 │   ├── data.py              # ValidationDataset, generate/save/load, grid helpers
@@ -51,12 +55,14 @@ src/bayesflow_hpo/
 │   ├── pipeline.py          # run_validation_pipeline (orchestrator → ValidationResult)
 │   ├── registry.py          # Metric registry (MetricFn, register/resolve/list)
 │   ├── result.py            # ValidationResult dataclass with table methods
-│   └── sbc_tests.py         # SBC uniformity tests (KS, chi-squared, C2ST)
+│   ├── c2st.py              # C2ST metrics (L-C2ST, global C2ST, ValidateFn factory)
+│   └── sbc_tests.py         # SBC uniformity tests (KS, chi-squared)
 │
 └── results/                 # Post-optimization analysis
-    ├── extraction.py        # get_pareto_trials, trials_to_dataframe
+    ├── extraction.py        # get_pareto_trials, select_best_trial, trial_table, best_config
     ├── export.py            # save/load_workflow_with_metadata
-    └── visualization.py     # plot_pareto_front, plot_param_importance
+    ├── visualization.py     # plot_study, plot_pareto_front, plot_param_importance, etc.
+    └── _colors.py           # BayesFlow-aligned color palette
 ```
 
 ## Data Flow
@@ -92,9 +98,10 @@ A single HPO run follows this pipeline:
            └───────────────────┼────────────────────────┘
                                │
                     ┌──────────▼───────────────────┐
-                    │   4. build_workflow()         │
-                    │   (delegates to               │
-                    │    bf.BasicWorkflow)          │
+                    │   4. build_continuous_        │
+                    │      approximator()           │
+                    │   (ContinuousApproximator     │
+                    │    + Adam/CosineDecay)        │
                     └──────────┬───────────────────┘
                                │
                     ┌──────────▼───────────────────┐
@@ -134,9 +141,9 @@ class SearchSpace(Protocol):
 
 This allows users to register custom network types without modifying the package.
 
-### Default vs. Optional Dimensions
+### Default vs. Constant Dimensions
 
-Each search space marks dimensions as `default=True` (always tuned) or `default=False` (only tuned when `include_optional=True`). This lets users start with a focused search and expand later.
+Each dimension can be fixed at a specific value via `constant=<value>`. When set, the parameter is not tuned by Optuna but instead uses the constant value. When `constant` is not set (the `_UNSET` sentinel), the dimension is tunable. This lets users lock individual dimensions while tuning others.
 
 ### Fixed Validation for Fair Comparison
 
@@ -152,15 +159,15 @@ The validation pipeline uses a metric registry to resolve metric names to callab
 ### Thin BayesFlow Wrappers
 
 The package delegates to BayesFlow for all core functionality:
-- **Workflow construction** delegates to `bf.BasicWorkflow`
+- **Approximator construction** delegates to `bf.ContinuousApproximator`
 - **Adapter construction** is left to the user (no wrapper)
 - **Diagnostics** are wrapped as thin metric functions that reshape arrays for the BF API
-- **Training** defaults to `fit_online` but can be overridden via `train_fn`
+- **Training** defaults to `approximator.fit(simulator=...)` but can be overridden via `train_fn`
 
 ### Multi-Objective Pareto Optimization
 
-Two objectives are minimized simultaneously:
-1. **Configurable quality metric** (default: calibration error)
-2. **Normalized parameter score** — `log10(param_count) / 6.0`, mapping models into ~[0, 1]
+Multiple objectives are minimized simultaneously:
+1. **Configurable quality metrics** (default: `["calibration_error", "nrmse"]`) — each gets its own Pareto direction in `"pareto"` mode, or they are averaged in `"mean"` mode
+2. **Cost metric** — inference time (default) or normalized parameter count
 
-The Pareto front contains all non-dominated solutions, letting users choose their preferred trade-off point.
+Supports 2–3 objectives. The Pareto front contains all non-dominated solutions, letting users choose their preferred trade-off point. `select_best_trial()` provides lexicographic-Pareto selection with satisficing thresholds.

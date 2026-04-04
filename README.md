@@ -62,6 +62,7 @@ See the [examples/](examples/) directory for complete walkthroughs:
 | [`getting_started.ipynb`](examples/getting_started.ipynb) | End-to-end HPO: search, train, validate, select & retrain the best model |
 | [`two_moons_optimization.ipynb`](examples/two_moons_optimization.ipynb) | Network selection (CouplingFlow vs FlowMatching) on the Two Moons benchmark |
 | [`custom_summary_network.ipynb`](examples/custom_summary_network.ipynb) | Custom summary network registration + HPO |
+| [`qmc_warmup_benchmark.ipynb`](examples/qmc_warmup_benchmark.ipynb) | QMC warm-up effectiveness benchmark (TPE vs GP, convergence analysis) |
 | [`optuna_dashboard.md`](examples/optuna_dashboard.md) | Optuna dashboard integration guide |
 
 ## Contributing

@@ -17,9 +17,12 @@ objects (e.g. `ObjectiveConfig`, `create_study`) directly.
 | `num_batches` | **50** | Online simulation batches per epoch. |
 | `max_param_count` | **1 000 000** | Trials exceeding this estimated param count are rejected. |
 | `max_memory_mb` | **None** (disabled) | Peak-memory budget in MB (disabled by default). |
-| `objective_metric` | **`"calibration_error"`** | Key in the validation summary used as the first HPO objective. Ignored when `objective_metrics` is set. |
-| `objective_metrics` | **`None`** | List of metric keys for multi-metric optimization (overrides `objective_metric`). |
-| `objective_mode` | **`"mean"`** | `"mean"` averages metrics into one scalar; `"pareto"` gives each metric its own direction. |
+| `objective_metrics` | **`["calibration_error", "nrmse"]`** | List of metric keys to optimize. |
+| `objective_mode` | **`"pareto"`** | `"pareto"` gives each metric its own Pareto direction; `"mean"` averages metrics into one scalar. |
+| `cost_metric` | **`"inference_time"`** | Cost objective (`"inference_time"` or `"param_count"`). |
+| `pruning_strategy` | **`"dominance"`** | Multi-objective pruning strategy (`"dominance"`, `"mo-sha"`, `("primary", metric)`, `"none"`). |
+| `sampler` | **`None`** (= `"tpe"`) | Sampler preset or instance. |
+| `pruner` | **`None`** | Pruner preset or instance. |
 | `resume` | **`False`** | Continue a previously persisted study instead of starting fresh. |
 | `sims_per_condition` | **200** | Simulations per condition grid point in validation data. |
 | `storage` | **`"sqlite:///bayesflow_hpo.db"`** | Optuna storage for persistence & crash recovery. |
@@ -54,68 +57,67 @@ samples the corresponding network-specific dimensions.
 
 ### CouplingFlowSpace
 
-| Dimension | Range | Sampled? | Fallback |
-|-----------|-------|----------|----------|
-| `cf_depth` | 2--8 | Always | -- |
-| `cf_subnet_width` | 32--256, step 32 | Always | -- |
-| `cf_subnet_depth` | 1--3 | Always | -- |
-| `cf_dropout` | 0.0--0.3 | Always | -- |
-| `cf_activation` | silu, relu, mish | Optional | `"mish"` |
-| `cf_transform` | affine, spline | Optional | `"affine"` |
-| `cf_permutation` | random, orthogonal | Optional | `"random"` |
-| `cf_actnorm` | True, False | Optional | `True` |
+| Dimension | Range | Tuned | Constant |
+|-----------|-------|-------|----------|
+| `cf_depth` | 2--8 | yes | — |
+| `cf_subnet_width` | 32--256, step 32 | yes | — |
+| `cf_subnet_depth` | 1--3 | yes | — |
+| `cf_dropout` | 0.0--0.3 | yes | — |
+| `cf_activation` | silu, relu, mish | yes | — |
+| `cf_transform` | affine, spline | no | `"affine"` |
+| `cf_permutation` | random, orthogonal | no | `"random"` |
+| `cf_use_actnorm` | True, False | no | `True` |
 
 ### FlowMatchingSpace
 
-| Dimension | Range | Sampled? | Fallback |
-|-----------|-------|----------|----------|
-| `fm_subnet_width` | 32--256, step 32 | Always | -- |
-| `fm_subnet_depth` | 1--6 | Always | -- |
-| `fm_dropout` | 0.0--0.2 | Always | -- |
-| `fm_activation` | mish, silu | Optional | `"mish"` |
-| `fm_use_ot` | True, False | Optional | `False` |
-| `fm_time_alpha` | 0.0--2.0 | Optional | `0.0` |
+| Dimension | Range | Tuned | Constant |
+|-----------|-------|-------|----------|
+| `fm_subnet_width` | 32--256, step 32 | yes | — |
+| `fm_subnet_depth` | 1--6 | yes | — |
+| `fm_dropout` | 0.0--0.2 | yes | — |
+| `fm_activation` | mish, silu | yes | — |
+| `fm_use_ot` | True, False | no | `False` |
+| `fm_time_alpha` | 0.0--2.0 | no | `0.0` |
 
 ### DeepSetSpace
 
-| Dimension | Range | Sampled? | Fallback |
-|-----------|-------|----------|----------|
-| `ds_summary_dim` | 4--64, step 4 | Always | -- |
-| `ds_depth` | 1--4 | Always | -- |
-| `ds_width` | 32--256, step 32 | Always | -- |
-| `ds_dropout` | 0.0--0.3 | Always | -- |
-| `ds_activation` | silu, mish | Optional | `"silu"` |
-| `ds_spectral_norm` | True, False | Optional | `False` |
-| `ds_inner_pooling` | mean, max | Optional | `"mean"` |
-| `ds_output_pooling` | mean, max | Optional | `"mean"` |
+| Dimension | Range | Tuned | Constant |
+|-----------|-------|-------|----------|
+| `ds_summary_dim` | 4--64, step 4 | yes | — |
+| `ds_depth` | 1--4 | yes | — |
+| `ds_width` | 32--256, step 32 | yes | — |
+| `ds_dropout` | 0.0--0.3 | yes | — |
+| `ds_activation` | silu, mish | no | `"silu"` |
+| `ds_spectral_norm` | True, False | no | `False` |
 
 Architecture: the `invariant_outer` MLP uses `(width, summary_dim)`
 as a bottleneck, matching BayesFlow's default architecture.  All other
-MLPs use `(width, width)`.
+MLPs use `(width, width)`.  `inner_pooling="mean"` and `output_pooling="mean"`
+are hardcoded in `build()`.
 
 ### SetTransformerSpace
 
-| Dimension | Range | Sampled? | Fallback |
-|-----------|-------|----------|----------|
-| `st_summary_dim` | 8--64, step 8 | Always | -- |
-| `st_embed_dim` | 32--256, step 32 | Always | -- |
-| `st_num_heads` | 1, 2, 4, 8 | Always | -- |
-| `st_num_layers` | 1--4 | Always | -- |
-| `st_dropout` | 0.0--0.3 | Always | -- |
-| `st_mlp_width` | 64--512, step 64 | Optional | `2 * embed_dim` |
-| `st_mlp_depth` | 1--4 | Optional | `2` |
-| `st_num_inducing` | 8--64, step 8 | Optional | `None` |
+| Dimension | Range | Tuned | Constant |
+|-----------|-------|-------|----------|
+| `st_summary_dim` | 8--64, step 8 | yes | — |
+| `st_embed_dim` | 32--256, step 32 | yes | — |
+| `st_num_heads` | 1, 2, 4, 8 | yes | — |
+| `st_num_layers` | 1--4 | yes | — |
+| `st_dropout` | 0.0--0.3 | yes | — |
+| `st_mlp_width` | 64--512, step 64 | no | `2 * embed_dim` |
+| `st_mlp_depth` | 1--4 | no | `2` |
+| `st_num_inducing` | 8--64, step 8 | no | `None` |
 
 ### TrainingSpace
 
-| Dimension | Range | Sampled? | Fallback |
-|-----------|-------|----------|----------|
-| `initial_lr` | 1e-4 -- 5e-3 (log) | Always | -- |
-| `batch_size` | 32--1024, step 32 | Optional | `256` |
-| `decay_rate` | 0.8--0.99 | Optional | `0.95` (only used with ExponentialDecay) |
+| Dimension | Range | Tuned | Constant |
+|-----------|-------|-------|----------|
+| `initial_lr` | 1e-4 -- 5e-3 (log) | yes | — |
+| `batch_size` | 32--1024, step 32 | no | `256` |
+| `decay_rate` | 0.8--0.99 | no | `0.95` |
 
-Optional dimensions are enabled via `include_optional=True` on each
-search space or by passing a custom search space.
+Constant dimensions can be made tunable by setting `constant=_UNSET`
+on individual dimensions or creating the space with overridden fields.
 
 ---
 
@@ -141,7 +143,7 @@ search space or by passing a custom search space.
 | Sampler | `TPESampler(seed=42, multivariate=True, n_startup_trials=25)` | `create_study()` |
 | Budget-aware constraints | Enabled | `_budget_constraints_func` |
 | Pruner | `MedianPruner(n_startup=5, n_warmup=1, interval=1)` | `create_study()` |
-| Pruning metric | `sqrt(nrmse * calibration_error)` (geometric mean) | `PeriodicValidationCallback` |
+| Pruning strategy | `"dominance"` (per-objective normalized median) | `PeriodicValidationCallback` |
 | Pruning schedule | Every 10 epochs after 10-epoch warmup | `PeriodicValidationCallback` |
 | Intermediate posterior samples | **250** | `ObjectiveConfig` |
 | Batch loop size | `max(1, n_trials // 4)` | `optimize_until()` |
@@ -171,6 +173,7 @@ search space or by passing a custom search space.
 | `max_param_count` | **1 000 000** | `optimize()` |
 | `max_memory_mb` | **None** (disabled) | `optimize()` |
 | Failed-trial calibration error | **1.0** | `FAILED_TRIAL_CAL_ERROR` |
+| Failed-trial cost penalty | **1e6** | `FAILED_TRIAL_COST` |
 | Failed-trial param score | **1.01** | `FAILED_TRIAL_PARAM_SCORE` |
 | Param normalization | `log10(count/1K) / log10(1M/1K)` (0--1) | `normalize_param_count()` |
 | Min param reference | **1 000** | `MIN_PARAM_COUNT` |

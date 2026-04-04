@@ -26,6 +26,7 @@ def optimize(
     # Study
     n_trials=50, max_total_trials=None,
     study_name="bayesflow_hpo", storage=DEFAULT_STORAGE, resume=False,
+    sampler=None, pruner=None,
     # Optional
     directions=None, warm_start_from=None, warm_start_top_k=25,
     qmc_startup_trials=0,
@@ -56,6 +57,8 @@ def optimize(
 | `max_memory_mb` | Optional peak-memory budget in MB. Disabled by default. |
 | `n_trials` | Number of *trained* trials to collect (default 50). |
 | `max_total_trials` | Hard cap on non-rejected trials. Defaults to `3 * n_trials`. |
+| `sampler` | Sampler preset string (`"tpe"`, `"gp"`, `"botorch"`, `"nsga2"`, `"nsga3"`, `"auto"`, `"random"`) or `BaseSampler` instance. Default `None` = TPE. |
+| `pruner` | Pruner preset string (`"median"`, `"hyperband"`, `"none"`) or `BasePruner` instance. |
 | `resume` | If `True`, continue a previously persisted study. |
 | `qmc_startup_trials` | Sobol QMC trials before main sampler (default 0 = disabled). |
 | `checkpoint_pool` | Optional `CheckpointPool` for persisting best trial weights. |
@@ -86,7 +89,7 @@ Walks the adapter's transform list to infer `param_keys`, `data_keys`, and `infe
 
 ```python
 BuildApproximatorFn = Callable[[dict[str, Any]], Any]
-TrainFn = Callable[[Any, bf.simulators.Simulator, dict[str, Any], list], None]
+TrainFn = Callable[[Any, bf.simulators.Simulator, dict[str, Any], list[Any]], None]
 ValidateFn = Callable[[Any, ValidationDataset, int], dict[str, float]]
 ```
 
@@ -98,35 +101,37 @@ ValidateFn = Callable[[Any, ValidationDataset, int], dict[str, float]]
 
 | Class | Purpose |
 |-------|---------|
-| `IntDimension(name, low, high, step, log, enabled)` | Integer hyperparameter |
-| `FloatDimension(name, low, high, log, enabled)` | Float hyperparameter |
-| `CategoricalDimension(name, choices, enabled)` | Categorical hyperparameter |
+| `IntDimension(name, low, high, step, log, constant)` | Integer hyperparameter. Set `constant=<value>` to fix. |
+| `FloatDimension(name, low, high, log, constant)` | Float hyperparameter. Set `constant=<value>` to fix. |
+| `CategoricalDimension(name, choices, constant)` | Categorical hyperparameter. Set `constant=<value>` to fix. |
+
+When `constant` is set, the dimension is not tuned by Optuna — it uses the constant value instead. When unset (default `_UNSET` sentinel), the dimension is tunable.
 
 ### Inference Spaces
 
 | Class | BayesFlow Network |
 |-------|-------------------|
-| `CouplingFlowSpace(include_optional=False)` | `bf.networks.CouplingFlow` |
-| `FlowMatchingSpace(include_optional=False)` | `bf.networks.FlowMatching` |
-| `DiffusionModelSpace(include_optional=False)` | `bf.networks.DiffusionModel` |
-| `ConsistencyModelSpace(epochs, num_batches, include_optional=False)` | `bf.networks.ConsistencyModel` |
-| `StableConsistencyModelSpace(include_optional=False)` | `bf.networks.StableConsistencyModel` |
+| `CouplingFlowSpace()` | `bf.networks.CouplingFlow` |
+| `FlowMatchingSpace()` | `bf.networks.FlowMatching` |
+| `DiffusionModelSpace()` | `bf.networks.DiffusionModel` |
+| `ConsistencyModelSpace(epochs, num_batches)` | `bf.networks.ConsistencyModel` |
+| `StableConsistencyModelSpace()` | `bf.networks.StableConsistencyModel` |
 
 ### Summary Spaces
 
 | Class | BayesFlow Network |
 |-------|-------------------|
-| `DeepSetSpace(include_optional=False)` | `bf.networks.DeepSet` |
-| `SetTransformerSpace(include_optional=False)` | `bf.networks.SetTransformer` |
-| `TimeSeriesNetworkSpace(include_optional=False)` | `bf.networks.TimeSeriesNetwork` |
-| `TimeSeriesTransformerSpace(include_optional=False)` | `bf.networks.TimeSeriesTransformer` |
-| `FusionTransformerSpace(include_optional=False)` | `bf.networks.FusionTransformer` |
+| `DeepSetSpace()` | `bf.networks.DeepSet` |
+| `SetTransformerSpace()` | `bf.networks.SetTransformer` |
+| `TimeSeriesNetworkSpace()` | `bf.networks.TimeSeriesNetwork` |
+| `TimeSeriesTransformerSpace()` | `bf.networks.TimeSeriesTransformer` |
+| `FusionTransformerSpace()` | `bf.networks.FusionTransformer` |
 
 ### Training Space
 
 | Class | Controls |
 |-------|----------|
-| `TrainingSpace(include_optional=False)` | `initial_lr`, `batch_size`, `decay_rate` |
+| `TrainingSpace()` | `initial_lr`, `batch_size`, `decay_rate` |
 
 ### Composite Spaces
 
@@ -150,10 +155,11 @@ list_summary_spaces() -> list[str]
 ## Builders
 
 ```python
-build_continuous_approximator(hparams, adapter, search_space) -> ContinuousApproximator
+build_continuous_approximator(hparams, adapter, search_space,
+                               checkpoint_dir=None) -> ContinuousApproximator
 ```
 
-Builds an **uncompiled** `ContinuousApproximator` from sampled hyperparameters. Handles inference + optional summary network construction.
+Builds an **uncompiled** `ContinuousApproximator` from sampled hyperparameters. Handles inference + optional summary network construction. Compiles with Adam + CosineDecay schedule.
 
 ### Default Hook Wrappers
 
@@ -213,6 +219,12 @@ optimize_until(study, objective, n_trained, max_total_trials, show_progress_bar)
 warm_start_study(target_study, source_study, top_k=25) -> int
 ```
 
+### Sampling
+
+```python
+sample_hyperparameters(trial, space: CompositeSearchSpace) -> dict[str, Any]
+```
+
 ### Callbacks
 
 ```python
@@ -224,8 +236,22 @@ PeriodicValidationCallback(trial, approximator, validation_data, ...)
 ### Constraints
 
 ```python
+estimate_param_count(params) -> int
 estimate_peak_memory_mb(params, batch_size=None, dtype_bytes=4) -> float
 exceeds_memory_budget(params, max_memory_mb, batch_size=None) -> bool
+```
+
+### Checkpoint Pool
+
+```python
+class CheckpointPool:
+    def __init__(self, pool_dir="checkpoints", pool_size=5): ...
+    def maybe_save(self, trial_number, objective_value, approximator) -> bool
+    @property
+    def best_checkpoint_dir(self) -> Path | None
+    @property
+    def trial_numbers(self) -> list[int]
+    def cleanup(self) -> None
 ```
 
 ### Cleanup
@@ -297,19 +323,84 @@ compute_condition_metrics(draws, true_values, cond_id, metric_fns) -> dict[str, 
 aggregate_condition_rows(condition_rows: list[dict]) -> dict[str, float]
 ```
 
+### C2ST Metrics
+
+```python
+lc2st(posterior_samples, true_params, observations, *,
+      n_folds=5, n_null_trials=0, clf_kwargs=None, seed=42) -> LC2STResult
+
+global_c2st(samples_p, samples_q, *, clf_kwargs=None, seed=42) -> GlobalC2STResult
+
+make_lc2st_validate_fn(base_metrics=None, n_folds=5, n_null_trials=0,
+                        clf_kwargs=None, seed=42) -> ValidateFn
+```
+
+`make_lc2st_validate_fn()` returns a `ValidateFn` compatible with `optimize(validate_fn=...)` that computes standard per-parameter metrics and L-C2ST from a single inference pass.
+
+### SBC Tests
+
+```python
+compute_sbc_uniformity_tests(ranks, n_posterior_samples, n_bins=20) -> dict[str, float]
+```
+
+Returns KS statistic, KS p-value, chi-squared statistic, and chi-squared p-value for SBC rank uniformity.
+
 ---
 
 ## Results
 
+### Extraction
+
 ```python
 get_pareto_trials(study) -> list[optuna.trial.FrozenTrial]
-trials_to_dataframe(study, trained_only=True, include_pruned=False, extra_attrs=None) -> pd.DataFrame
-summarize_study(study, select_by=0, top_k=5) -> str
-plot_pareto_front(study, ax=None) -> matplotlib.axes.Axes
-plot_optimization_history(study, ax=None) -> matplotlib.axes.Axes
-plot_metric_scatter(study, x_metric, y_metric, ax=None, show_iso_lines=None) -> matplotlib.axes.Axes
-plot_metric_panels(study, metrics=None, axes=None) -> matplotlib.axes.Axes | np.ndarray
-plot_param_importance(study, ax=None, top_k=10, *, target_name=None) -> matplotlib.axes.Axes
+
+trials_to_dataframe(study, trained_only=True, include_pruned=False,
+                    extra_attrs=None, include_ranks=True) -> pd.DataFrame
+
+trial_table(study, top_k=None, select_by=0, metrics=None,
+            trained_only=True) -> pd.DataFrame
+
+best_config(study, trial_number=None, select_by=0,
+            priorities=None) -> dict[str, Any]
+
+compare_trials(study, trial_numbers, metrics=None) -> pd.DataFrame
+
+summarize_study(study, select_by=0) -> str
+
+select_best_trial(study, priorities) -> tuple[FrozenTrial, SelectionResult]
+```
+
+### Visualization
+
+```python
+plot_study(study, *, third_dim="color", figsize=None, row_labels=True) -> Figure
+
+plot_pareto_front(study, axes=None, *, third_dim="color",
+                  max_cols=3, figsize=None) -> Axes
+
+plot_optimization_history(study, axes=None, *, max_cols=3, figsize=None) -> Axes
+
+plot_param_importance(study, axes=None, top_k=10, *,
+                      max_cols=3, figsize=None) -> Axes | None
+
+plot_metric_scatter(study, x_metric, y_metric, ax=None, *,
+                    show_iso_lines=None) -> Axes
+
+plot_metric_panels(study, metrics=None, axes=None, *,
+                   max_cols=3, figsize=None) -> Axes | np.ndarray
+
+plot_pareto_3d(study, ax=None, *, cost_display="color") -> Axes
+
+plot_pareto_projections(study, axes=None, *, cost_display="color",
+                        max_cols=3, figsize=None) -> Axes
+
+plot_parallel_coordinates(study, ax=None, *, top_k=20, select_by=0,
+                          metric_order=None) -> Axes
+```
+
+### Export
+
+```python
 get_workflow_metadata(config, model_type, validation_results=None, extra=None) -> dict
 save_workflow_with_metadata(approximator, path, metadata) -> Path
 load_workflow_with_metadata(path) -> tuple[Any, dict]
