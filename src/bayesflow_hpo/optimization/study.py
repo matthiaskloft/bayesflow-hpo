@@ -67,7 +67,9 @@ def _make_constraints_func(
 
         if budget_aware:
             rejected_reason = trial.user_attrs.get("rejected_reason")
-            values.append(1.0 if rejected_reason is not None else 0.0)
+            values.append(
+                1.0 if rejected_reason in _PRE_TRAINING_REJECTIONS else 0.0
+            )
 
         for metric, threshold, direction in thresholds:
             raw = trial.user_attrs.get(metric)
@@ -80,7 +82,10 @@ def _make_constraints_func(
             elif direction == "below":
                 values.append(max(0.0, float(threshold) - metric_value))
             else:
-                values.append(0.0)
+                raise ValueError(
+                    f"Unsupported constraint direction {direction!r} for metric "
+                    f"{metric!r}; expected 'above' or 'below'."
+                )
         return values
 
     return _constraints

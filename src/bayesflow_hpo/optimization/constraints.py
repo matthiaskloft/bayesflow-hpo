@@ -296,6 +296,12 @@ def _detect_gpu_memory_mb(safety_margin: float = 0.2) -> float | None:
 
     Returns ``None`` when CUDA is unavailable or cannot be queried.
     """
+    if not (0.0 <= float(safety_margin) < 1.0):
+        raise ValueError(
+            "safety_margin must satisfy 0.0 <= safety_margin < 1.0, "
+            f"got {safety_margin!r}"
+        )
+
     try:
         import torch
     except ImportError:

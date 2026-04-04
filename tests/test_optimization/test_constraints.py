@@ -86,6 +86,7 @@ def test_exceeds_memory_budget_threshold_behavior():
 
 def test_detect_gpu_memory_mb_returns_none_without_torch(monkeypatch):
     import builtins
+    import sys
 
     real_import = builtins.__import__
 
@@ -94,8 +95,15 @@ def test_detect_gpu_memory_mb_returns_none_without_torch(monkeypatch):
             raise ImportError("torch not installed")
         return real_import(name, *args, **kwargs)
 
+    monkeypatch.delitem(sys.modules, "torch", raising=False)
     monkeypatch.setattr(builtins, "__import__", _fake_import)
     assert _detect_gpu_memory_mb() is None
+
+
+@pytest.mark.parametrize("bad_margin", [-0.1, 1.0, 1.2])
+def test_detect_gpu_memory_mb_invalid_safety_margin_raises(bad_margin):
+    with pytest.raises(ValueError, match="safety_margin must satisfy"):
+        _detect_gpu_memory_mb(safety_margin=bad_margin)
 
 
 def test_detect_gpu_memory_mb_returns_none_when_cuda_unavailable(monkeypatch):

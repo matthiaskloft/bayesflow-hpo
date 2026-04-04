@@ -231,6 +231,7 @@ def test_make_constraints_func_budget_only():
     fn = _make_constraints_func(budget_aware=True, soft_thresholds=None)
     assert fn(_mk_frozen_trial()) == [0.0]
     assert fn(_mk_frozen_trial(user_attrs={"rejected_reason": "param_budget"})) == [1.0]
+    assert fn(_mk_frozen_trial(user_attrs={"rejected_reason": "metric_constraint"})) == [0.0]
 
 
 def test_make_constraints_func_soft_violation_above():
@@ -257,6 +258,15 @@ def test_make_constraints_func_missing_metric_is_feasible():
         soft_thresholds=[("sbc_ks", 0.1, "above")],
     )
     assert fn(_mk_frozen_trial()) == [0.0]
+
+
+def test_make_constraints_func_invalid_direction_raises():
+    fn = _make_constraints_func(
+        budget_aware=False,
+        soft_thresholds=[("sbc_ks", 0.1, "sideways")],  # type: ignore[list-item]
+    )
+    with pytest.raises(ValueError, match="Unsupported constraint direction"):
+        fn(_mk_frozen_trial(user_attrs={"sbc_ks": 0.2}))
 
 
 def test_make_constraints_func_combined_budget_and_soft():
