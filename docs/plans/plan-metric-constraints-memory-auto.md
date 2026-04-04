@@ -12,7 +12,7 @@
 | Phase 1: Metric constraints dataclass + hard rejection | IMPLEMENTED | 2026-04-04 | code + tests + docs |
 | Phase 2: Soft constraints (feasibility-guided sampling) | IMPLEMENTED | 2026-04-04 | code + tests + docs |
 | Phase 3: GPU memory auto-detection | IMPLEMENTED | 2026-04-04 | code + tests + docs |
-| Ship | TODO | | |
+| Ship | BLOCKED | 2026-04-04 | `gh auth` token invalid (HTTP 401); branch pushed |
 
 ## Spec
 
@@ -437,6 +437,10 @@ _Living section — updated during implementation._
 - Verification:
   - `ruff check` on all touched modules: pass
   - `pytest` targeted suite (5 files): 171 passed
+- Shipping blocker:
+  - `gh pr create` failed with `HTTP 401: Requires authentication`.
+  - Branch is pushed: `feat/metric-constraints-memory-auto`.
+  - Next step after re-auth: create PR from that branch into `main`.
 
 ## Review Feedback
 
