@@ -1,5 +1,7 @@
 """Tests for objective training failure handling and budget enforcement."""
 
+import logging
+
 import numpy as np
 import pytest
 
@@ -453,6 +455,20 @@ def test_objective_config_rejects_invalid_cost_metric():
             num_batches=1,
             validation_data=_DUMMY_VALIDATION_DATA,
             cost_metric="unknown",
+        )
+
+
+def test_objective_config_rejects_invalid_hard_constraint_direction():
+    """ObjectiveConfig eagerly validates hard metric constraint direction."""
+    with pytest.raises(ValueError, match="Invalid hard metric constraint direction"):
+        ObjectiveConfig(
+            simulator=object(),
+            adapter=object(),
+            search_space=_FakeSearchSpace(),
+            epochs=1,
+            num_batches=1,
+            validation_data=_DUMMY_VALIDATION_DATA,
+            metric_constraints_hard=[("calibration_error", 0.2, "sideways")],
         )
 
 
@@ -1276,7 +1292,7 @@ def test_hard_metric_constraints_missing_metric_warns_and_skips(
         )
     )
 
-    with caplog.at_level("WARNING"):
+    with caplog.at_level(logging.WARNING):
         trial = _FakeTrial()
         values = objective(trial)
     assert trial.user_attrs.get("rejected_reason") is None
@@ -1313,8 +1329,8 @@ def test_hard_metric_constraints_multiple_partial_violation(monkeypatch):
             build_approximator_fn=lambda hp: _FakeApproximator(10_000),
             train_fn=lambda approx, sim, hp, cb: None,
             validate_fn=lambda approx, vd, n: {
-                "calibration_error": 0.05,  # passes "above 0.2"
-                "nrmse": 0.04,  # violates "below 0.05"
+                "calibration_error": 0.05,  # 0.05 <= 0.2, passes "above"
+                "nrmse": 0.04,  # 0.04 < 0.05, violates "below"
             },
             metric_constraints_hard=[
                 ("calibration_error", 0.2, "above"),

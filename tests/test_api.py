@@ -772,6 +772,12 @@ class TestResolveMemoryBudget:
     def test_float_passthrough(self):
         assert _resolve_memory_budget(max_memory_mb=512.0, safety_margin=0.2) == 512.0
 
+    def test_bool_rejected(self):
+        with pytest.raises(
+            ValueError,
+            match="max_memory_mb must be float, None, or 'auto', got bool",
+        ):
+            _resolve_memory_budget(max_memory_mb=True, safety_margin=0.2)
     def test_invalid_string_raises(self):
         with pytest.raises(
             ValueError,
