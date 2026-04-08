@@ -308,6 +308,14 @@ class ObjectiveConfig:
                 f"Unknown cost_metric: {self.cost_metric!r}. "
                 f"Expected 'inference_time' or 'param_count'."
             )
+        if self.metric_constraints_hard is not None:
+            for metric, _, direction in self.metric_constraints_hard:
+                if direction not in ("above", "below"):
+                    raise ValueError(
+                        "Invalid hard metric constraint direction "
+                        f"{direction!r} for metric {metric!r}; "
+                        "expected 'above' or 'below'."
+                    )
         if self.report_frequency < 1:
             raise ValueError(
                 f"report_frequency must be >= 1, got {self.report_frequency}."

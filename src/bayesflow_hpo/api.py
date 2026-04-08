@@ -702,6 +702,11 @@ def _resolve_memory_budget(
     if max_memory_mb is None:
         return None
 
+    if isinstance(max_memory_mb, bool):
+        raise ValueError(
+            "max_memory_mb must be float, None, or 'auto', got bool."
+        )
+
     if isinstance(max_memory_mb, (float, int)):
         return float(max_memory_mb)
 

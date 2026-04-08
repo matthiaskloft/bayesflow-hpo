@@ -311,7 +311,7 @@ def _detect_gpu_memory_mb(safety_margin: float = 0.2) -> float | None:
         if not torch.cuda.is_available():
             return None
         free_bytes, _ = torch.cuda.mem_get_info()
-    except RuntimeError:
+    except (AttributeError, RuntimeError):
         return None
 
     return float(free_bytes) * (1.0 - float(safety_margin)) / (1024.0 ** 2)

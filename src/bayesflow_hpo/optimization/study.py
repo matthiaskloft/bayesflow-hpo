@@ -520,6 +520,12 @@ def create_study(
     budget_aware
         Whether to attach a constraints function that marks
         budget-rejected trials as infeasible for the sampler.
+    metric_constraints_soft
+        Optional soft metric thresholds passed to sampler presets via
+        ``constraints_func``. Supported samplers treat positive values
+        as constraint violations and bias sampling away from them. When
+        a user-supplied sampler instance is passed, this parameter is
+        ignored because sampler internals cannot be patched safely.
     qmc_startup_trials
         Number of initial trials to sample with a Sobol quasi-random
         sequence before the main sampler takes over.  Sobol provides

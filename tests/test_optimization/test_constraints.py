@@ -128,6 +128,14 @@ def test_detect_gpu_memory_mb_returns_none_on_runtime_error(monkeypatch):
     assert _detect_gpu_memory_mb() is None
 
 
+def test_detect_gpu_memory_mb_returns_none_without_mem_get_info(monkeypatch):
+    torch_stub = types.SimpleNamespace(
+        cuda=types.SimpleNamespace(is_available=lambda: True),
+    )
+    monkeypatch.setitem(__import__("sys").modules, "torch", torch_stub)
+    assert _detect_gpu_memory_mb() is None
+
+
 def test_detect_gpu_memory_mb_applies_safety_margin(monkeypatch):
     free_bytes = 2 * 1024 * 1024 * 1024  # 2 GiB
     torch_stub = types.SimpleNamespace(
