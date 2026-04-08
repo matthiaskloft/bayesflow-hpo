@@ -3,8 +3,7 @@
 Tracked items for ongoing development. Updated by contributors and Claude Code sessions.
 
 Items are grouped into packages of related work that should be shipped together.
-Suggested execution order: H → I.
-Package I (literature audit) can be done at any time independently.
+Suggested execution order: I, then research follow-ups A2/A3.
 
 ## Open
 
@@ -33,45 +32,16 @@ parameters:
 
 #### Research: QMC warm-up effectiveness
 
-Empirically test whether QMC startup improves convergence compared to random
-startup, especially for GP and TPE. May become a secondary finding in the
-HPO benchmark paper.
+Status:
+- Feature implementation is complete (see Done entry: Package A3, PR #57).
+- Research notebook already exists:
+  `examples/qmc_warmup_benchmark.ipynb`.
 
----
-
----
-
-### Package H: Metric Constraints & Memory Auto-Detection
-
-#### Add metric constraints on objective values
-
-Add layered metric constraints to the optimization loop:
-
-- **Soft constraints (feasibility-guided search):** Extend `_budget_constraints_func()`
-  so trials violating user-specified metric thresholds (e.g., `calibration_error > 0.10`)
-  are marked infeasible via Optuna's `constraints_func`. The sampler learns to avoid
-  those regions while still considering them in its model.
-- **Hard constraints (post-validation rejection):** After validation, check metrics
-  against user-specified bounds. Violating trials are marked rejected (like budget
-  rejection) — keeps the Pareto front clean.
-- Both layers compose: hard thresholds reject clearly bad trials; soft constraints
-  guide the sampler away from borderline regions.
-
-Design considerations:
-- New `MetricConstraints` config (or extend `ObjectiveConfig`) with per-metric
-  upper/lower bounds
-- Applies to objective metrics and optionally non-objective diagnostic metrics
-  (e.g., SBC uniformity)
-- Rejected-by-metric trials should not count toward `n_trained` (like budget rejection)
-
-#### Auto-detect GPU memory budget
-
-Add `auto_detect_memory_budget()` that queries available VRAM via
-`torch.cuda.get_device_properties()` / `torch.cuda.mem_get_info()`, subtracts
-a configurable safety margin (default 20%), and returns usable MB. Wire into
-`optimize()` as `max_memory_mb="auto"` option alongside explicit numeric values.
-
-Falls back gracefully when no GPU is available (use system RAM estimate or skip).
+Remaining work:
+- Run `examples/qmc_warmup_benchmark.ipynb` end-to-end and record empirical
+  results (convergence, final metrics, and statistical tests) in docs.
+- Decide whether findings justify default changes for QMC startup settings
+  and/or inclusion in the HPO benchmark paper.
 
 ---
 
@@ -99,6 +69,20 @@ lexicographic-Pareto selection.
 ---
 
 ## Done
+
+### Package H: Metric Constraints & Memory Auto-Detection (2026-04-05)
+Implemented layered metric constraints and memory auto-detection:
+- Added hard metric constraints via `metric_constraints_hard` in
+  `ObjectiveConfig` / `optimize()`, with post-validation rejection
+  (`rejected_reason="metric_constraint"`).
+- Added soft metric constraints via `metric_constraints_soft`, wired
+  through composed sampler `constraints_func` (`_make_constraints_func`).
+- Updated trial counting semantics so metric-rejected trials count
+  toward non-rejected trial caps while pre-training budget rejections
+  (`memory_budget`, `param_budget`, etc.) remain excluded.
+- Added `max_memory_mb="auto"` plus `memory_safety_margin`, resolved via
+  CUDA free-memory detection (`torch.cuda.mem_get_info()`), with
+  graceful fallback to disabled memory budget when unavailable.
 
 ### Package E: C2ST Metrics (2026-04-02)
 Added classifier two-sample test metrics for multivariate posterior
