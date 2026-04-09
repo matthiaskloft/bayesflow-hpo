@@ -7,6 +7,14 @@ Suggested execution order: I, then research follow-ups A2/A3.
 
 ## Open
 
+### Near-term next steps
+
+1. Finish the QMC warm-up research by running `examples/qmc_warmup_benchmark.ipynb` end-to-end and recording the results.
+2. Research the sampler preset defaults, especially BoTorch, GP, NSGA-II/III, and Auto.
+3. Run the literature audit to verify metrics and features against references.
+4. Polish documentation and examples around the shipped features.
+5. Review the uncommitted `examples/qmc_warmup_benchmark.ipynb` changes, since that appears to be the active work item.
+
 ---
 
 ### Package A2: Research — Detailed Sampler Preset Defaults
