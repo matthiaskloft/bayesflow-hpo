@@ -9,12 +9,11 @@ Suggested execution order: I, then research follow-ups A2/A3.
 
 ### Near-term next steps
 
-1. Finish the QMC warm-up research by running `examples/qmc_warmup_benchmark.ipynb` end-to-end and recording the results.
+1. **Run the QMC warm-up benchmark** — `examples/qmc_warmup_benchmark.ipynb` is configured for final run (10 replications, 40 trials, 30 epochs). Execute and record results in docs.
 2. Research the sampler preset defaults, especially BoTorch, GP, NSGA-II/III, and Auto.
 3. ~~Run the literature audit to verify metrics and features against references.~~ (done — see Package I below)
 4. Polish documentation and examples around the shipped features.
-5. Review the uncommitted `examples/qmc_warmup_benchmark.ipynb` changes, since that appears to be the active work item.
-6. ~~Add docstring citations and inline literature comments.~~ (done — see Package I below)
+5. ~~Add docstring citations and inline literature comments.~~ (done — see Package I below)
 
 ---
 
@@ -43,14 +42,18 @@ parameters:
 
 Status:
 - Feature implementation is complete (see Done entry: Package A3, PR #57).
-- Research notebook already exists:
-  `examples/qmc_warmup_benchmark.ipynb`.
+- Research notebook configured for final run:
+  `examples/qmc_warmup_benchmark.ipynb`
+  - 10 replications per condition (N_REPLICATIONS=10)
+  - 40 trials per run (N_TRIALS=40)
+  - 30 epochs/batches (EPOCHS=30, NUM_BATCHES=30)
+  - Checkpoints at 8, 16, 24 trials
 
 Remaining work:
-- Run `examples/qmc_warmup_benchmark.ipynb` end-to-end and record empirical
-  results (convergence, final metrics, and statistical tests) in docs.
+- Execute the notebook end-to-end (expected runtime: several hours)
+- Record empirical results (convergence, final metrics, statistical tests) in docs
 - Decide whether findings justify default changes for QMC startup settings
-  and/or inclusion in the HPO benchmark paper.
+  and/or inclusion in the HPO benchmark paper
 
 ---
 
