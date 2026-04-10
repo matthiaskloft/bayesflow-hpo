@@ -2,16 +2,13 @@
 
 This directory contains detailed summaries of research papers backing the implementation of bayesflow-hpo features.
 
-## Fulltexts and Extractions
+## Fulltexts
 
-Complete fulltexts and structured extractions are maintained in the sibling repository:
+Local fulltexts are available in `fulltexts/` directory (PDF format). Additional
+extractions and structured data may be maintained in the sibling repository:
 ```
 ../bayesflow_hpo_article/literature/
 ```
-
-- **Fulltexts**: `../bayesflow_hpo_article/literature/references/fulltext_pdf/`
-- **Extractions**: `../bayesflow_hpo_article/literature/pipeline_data/31_all_extractions.json`
-- **Reference index**: `../bayesflow_hpo_article/literature/references/_index.json`
 
 ## Format
 
@@ -28,10 +25,19 @@ Each reference file (`{firstauthor}{year}_{topic}.md`) contains:
 ### Optimization
 - `akiba2019_optuna.md` — Optuna framework (`optimization/study.py`)
 - `bergstra2011_tpe.md` — TPE sampler (`optimization/study.py`)
+- `balandat2020_botorch.md` — BoTorch framework (`optimization/study.py`)
 - `daulton2020_qehvi.md` — qEHVI acquisition (`optimization/study.py`)
+- `daulton2021_qnehvi.md` — qNEHVI acquisition (`optimization/study.py`)
+- `deb2014_nsga3.md` — NSGA-III sampler preset (`optimization/study.py`)
+- `li2018_hyperband.md` — Hyperband (`optimization/study.py`)
+- `sobol1967_qmc.md` — Sobol sequences for QMC warm-up (`optimization/study.py`)
+- `joe2008_sobol.md` — Improved Sobol direction numbers (`optimization/study.py`)
+- `feurer2019_hpo.md` — BOHB algorithm (`optimization/study.py`)
 
 ### Pruning
-- `deb2002_nsga2.md` — NSGA-II, non-dominated sorting (`optimization/pruning_strategies.py`)
+- `deb2002_nsga2.md` — NSGA-II, non-dominated sorting (`optimization/pruning_strategies.py`, `results/extraction.py`)
+- `schmucker2021_moasha.md` — MO-ASHA pruning strategies (`optimization/pruning_strategies.py`)
+- `emmerich2018_moo.md` — Multi-objective fundamentals (`optimization/pruning_strategies.py`)
 
 ### Validation Metrics
 - `talts2018_sbc.md` — SBC methodology (`validation/sbc_tests.py`, `validation/registry.py`)

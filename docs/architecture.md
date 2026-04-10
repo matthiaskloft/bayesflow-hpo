@@ -171,3 +171,42 @@ Multiple objectives are minimized simultaneously:
 2. **Cost metric** — inference time (default) or normalized parameter count
 
 Supports 2–3 objectives. The Pareto front contains all non-dominated solutions, letting users choose their preferred trade-off point. `select_best_trial()` provides lexicographic-Pareto selection with satisficing thresholds.
+
+### Sampler Presets with Budget Constraints
+
+The package provides 7 named sampler presets that auto-wire budget-aware constraints:
+- `"tpe"` — Tree-structured Parzen Estimator (default)
+- `"gp"` — Gaussian Process BO
+- `"botorch"` — BoTorch framework (requires `optuna-integration[botorch]`)
+- `"nsga2"` / `"nsga3"` — Evolutionary multi-objective samplers
+- `"auto"` — Optuna's AutoSampler
+- `"random"` — Random search baseline
+
+All presets automatically compose with budget constraints (parameter count, memory, soft metric constraints).
+
+### QMC Warm-up
+
+Sobol quasi-random sequences replace the main sampler's random startup phase for better space-filling coverage. Optimal at power-of-2 trial counts (8, 16, 32, ...). Composes with all sampler presets and warm-start.
+
+### Metric Constraints
+
+Two-layer constraint system:
+- **Hard constraints** (`metric_constraints_hard`): Post-validation rejection for trials violating thresholds
+- **Soft constraints** (`metric_constraints_soft`): Feasibility guidance for constraint-aware samplers
+
+### Multi-Objective Pruning
+
+Since Optuna doesn't support `trial.report()` for multi-objective studies, `PeriodicValidationCallback` implements custom pruning strategies:
+- `"domiance"` — Normalized median AND rule (adapted from MO-ASHA)
+- `"mo-sha"` — Non-dominated sorting with bottom-fraction pruning
+- `("primary", metric)` — Single-metric median pruning
+- `"none"` — No intermediate validation
+
+### Budget-Aware Sampling
+
+Trials can be rejected pre-training based on:
+- **Parameter count** — `estimate_param_count()` heuristics by network type
+- **Memory** — `estimate_peak_memory_mb()` or GPU-memory auto-detection (`max_memory_mb="auto"`)
+- **Metric constraints** — Hard rejection after validation
+
+Budget-rejected trials don't count toward `n_trials`, ensuring efficient resource use.

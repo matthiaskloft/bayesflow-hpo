@@ -26,11 +26,11 @@ Coupling-based normalizing flow (BayesFlow `CouplingFlow`).
 
 | Dimension | Type | Range | Tuned | Constant |
 |-----------|------|-------|-------|----------|
-| `cf_depth` | int | [2, 12] | yes | — |
+| `cf_depth` | int | [2, 8] | yes | — |
 | `cf_subnet_width` | int | [32, 256], log | yes | — |
 | `cf_subnet_depth` | int | [1, 3] | yes | — |
 | `cf_dropout` | float | [0.0, 0.3] | yes | — |
-| `cf_activation` | cat | silu, relu, mish | yes | — |
+| `cf_activation` | cat | silu, relu, mish | no | `"silu"` |
 | `cf_transform` | cat | affine, spline | no | `"affine"` |
 | `cf_permutation` | cat | random, orthogonal | no | `"random"` |
 | `cf_use_actnorm` | cat | True, False | no | `True` |
@@ -118,7 +118,7 @@ Attention-based set summary (`SetTransformer`).
 | `st_num_heads` | cat | 1, 2, 4, 8 | yes | — |
 | `st_num_layers` | int | [1, 4] | yes | — |
 | `st_dropout` | float | [0.0, 0.3] | yes | — |
-| `st_mlp_width` | int | [64, 512], log | no | `2 * embed_dim` |
+| `st_mlp_width` | int | [64, 512], log | no | `128` |
 | `st_mlp_depth` | int | [1, 4] | no | `2` |
 | `st_num_inducing` | int | [8, 64], step 8 | no | `None` |
 
@@ -147,7 +147,7 @@ Transformer-based temporal summary (`TimeSeriesTransformer`).
 | `tst_num_heads` | cat | 1, 2, 4, 8 | yes | — |
 | `tst_num_layers` | int | [1, 4] | yes | — |
 | `tst_dropout` | float | [0.0, 0.3] | yes | — |
-| `tst_mlp_width` | int | [64, 512], log | no | `2 * embed_dim` |
+| `tst_mlp_width` | int | [64, 512], log | no | `128` |
 | `tst_time_embed` | cat | time2vec, lstm, gru | no | `"time2vec"` |
 
 ### FusionTransformerSpace

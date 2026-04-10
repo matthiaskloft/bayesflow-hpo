@@ -16,9 +16,9 @@ for trial in pareto:
 
 ### Lexicographic-Pareto Selection
 
-Select the best trial using a two-phase algorithm: first filter by satisficing
-thresholds (in priority order), then apply Pareto selection over remaining
-study objectives.
+Select the best trial using a two-phase algorithm (Deb et al., 2002):
+1. **Satisficing phase** — filter candidates by priority thresholds in order; unmet priorities promote to Phase 2
+2. **Pareto phase** — apply non-dominated sorting over remaining study objectives with mean-rank tiebreak
 
 ```python
 from bayesflow_hpo import select_best_trial

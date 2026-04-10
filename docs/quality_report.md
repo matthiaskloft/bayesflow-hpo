@@ -201,3 +201,63 @@ Replaced the 215-line module with two functions:
 - Added `tests/test_validation/test_metric_registry.py` (16 tests: registry CRUD, all built-in metrics, coverage variants)
 - Added `tests/test_validation/test_result.py` (8 tests: table methods, objective extraction, repr)
 - Total: 91 tests passing
+
+---
+
+## Post-v0.2.0 Enhancements
+
+### Sampler Presets (Package A2, PR #56)
+
+Added 7 named sampler presets to `create_study()` and `optimize()`:
+- `"tpe"` — Tree-structured Parzen Estimator (default)
+- `"gp"` — Gaussian Process BO
+- `"botorch"` — BoTorch framework (lazy import)
+- `"nsga2"` / `"nsga3"` — Evolutionary multi-objective
+- `"auto"` — Optuna's AutoSampler (lazy import)
+- `"random"` — Random search baseline
+
+All presets auto-wire `constraints_func` for budget-aware sampling. Bumped Optuna requirement to `>=4.0.0`. 32 new tests.
+
+### QMC Warm-up (Package A3, PR #57)
+
+Added `qmc_startup_trials` parameter to `create_study()` and `optimize()`. `QMCWarmupSampler` composite wrapper delegates to `QMCSampler` (Sobol) for the first N non-rejected trials, then transparently switches to the main sampler. Power-of-2 warning for non-optimal Sobol counts. 34 new tests.
+
+### Metric Constraints & Memory Auto-Detection (Package H)
+
+Added layered metric constraints and memory auto-detection:
+- `metric_constraints_hard` — Post-validation rejection with `rejected_reason="metric_constraint"`
+- `metric_constraints_soft` — Optuna `constraints_func` for feasibility guidance
+- `max_memory_mb="auto"` — CUDA free-memory detection with `memory_safety_margin`
+- Updated trial counting semantics so metric-rejected trials count toward caps while pre-training budget rejections remain excluded.
+
+### Lexicographic-Pareto Trial Selection (Package B)
+
+Added `select_best_trial()` with two-phase algorithm:
+1. Satisficing — filter by priority thresholds in order
+2. Pareto — non-dominated sorting over study objectives with mean-rank tiebreak (Deb et al., 2002)
+
+Integrated into `best_config()` via optional `priorities` parameter. 25 new tests.
+
+### Multi-Objective Pruning Strategies (Package A1, PRs #51-#54)
+
+Four-phase rework:
+- New `optimization/pruning_strategies.py` with literature-backed strategies (Schmucker et al., 2021)
+- Refactored `PeriodicValidationCallback` for pluggable strategies
+- Wired `pruning_strategy` through `optimize()` → `ObjectiveConfig` → callback
+- Added pruner string presets (`"median"`, `"hyperband"`, `"none"`) to `create_study()`
+
+### C2ST Metrics (Package E)
+
+Added classifier two-sample test metrics in `validation/c2st.py`:
+- `lc2st()` — L-C2ST local diagnostics (Linhart et al., 2023)
+- `global_c2st()` — Standard C2ST (López-Paz & Oquab, 2017)
+- `make_lc2st_validate_fn()` — ValidateFn factory for `optimize(validate_fn=...)`
+
+Added `scikit-learn>=1.3` as optional dependency (`pip install bayesflow-hpo[sklearn]`). 14 new tests.
+
+### Source-Backed Reference Details (Package I)
+
+Completed documentation-backed implementation:
+- All 16 reference summaries in `docs/references/` with extensive method details
+- Docstring References sections in `validation/sbc_tests.py`, `validation/registry.py`, `optimization/pruning_strategies.py`, `optimization/study.py`, `results/extraction.py`, `validation/c2st.py`
+- Inline literature comments at key implementation points (SBC ranks, coverage intervals, non-dominated sort, MO-SHA pruning, QMC power-of-2, L-C2ST, global C2ST)

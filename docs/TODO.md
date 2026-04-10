@@ -14,78 +14,7 @@ Suggested execution order: I, then research follow-ups A2/A3.
 3. ~~Run the literature audit to verify metrics and features against references.~~ (done — see Package I below)
 4. Polish documentation and examples around the shipped features.
 5. Review the uncommitted `examples/qmc_warmup_benchmark.ipynb` changes, since that appears to be the active work item.
-
----
-
-### Package I (remaining): Source-Backed Reference Details
-
-BLOCKED on: fulltexts in `bayesflow_hpo_article` sibling repo
-(`../bayesflow_hpo_article/`). Once the article repo has fulltexts
-acquired and extracted, complete these three sub-tasks.
-
-#### Sub-task 1: Tracked article summaries in `docs/references/`
-
-Create one markdown file per reference in `docs/references/`, each
-containing an extensive summary of the paper's relevant method details:
-
-- Key method / algorithm description (with equation/algorithm numbers)
-- Page references for implementation-critical details
-- Edge-case handling recommendations from the original authors
-- Intentional deviations from the reference method (if any) and why
-- Relevance note: which module/function in bayesflow-hpo this backs
-
-References needing summaries (16 total):
-
-| File | Reference | Module(s) |
-|------|-----------|-----------|
-| `talts2018_sbc.md` | Talts et al. (2018) — SBC | `validation/sbc_tests.py`, `validation/registry.py` |
-| `sobol1967_qmc.md` | Sobol' (1967) — Sobol sequences | `optimization/study.py` (QMC warm-up) |
-| `joe2008_sobol.md` | Joe & Kuo (2008) — direction numbers | `optimization/study.py` |
-| `schmucker2021_moasha.md` | Schmucker et al. (2021) — MO-ASHA | `optimization/pruning_strategies.py` |
-| `deb2002_nsga2.md` | Deb et al. (2002) — NSGA-II | `optimization/pruning_strategies.py`, `results/extraction.py` |
-| `deb2014_nsga3.md` | Deb & Jain (2014) — NSGA-III | `optimization/study.py` |
-| `emmerich2018_moo.md` | Emmerich & Deutz (2018) — MOO tutorial | `optimization/pruning_strategies.py` |
-| `li2018_hyperband.md` | Li et al. (2018) — Hyperband | `optimization/study.py` |
-| `linhart2023_lc2st.md` | Linhart et al. (2023) — L-C2ST | `validation/c2st.py` |
-| `lopezpaz2017_c2st.md` | López-Paz & Oquab (2017) — C2ST | `validation/c2st.py` |
-| `akiba2019_optuna.md` | Akiba et al. (2019) — Optuna | `optimization/study.py` |
-| `bergstra2011_tpe.md` | Bergstra et al. (2011) — TPE | `optimization/study.py` |
-| `balandat2020_botorch.md` | Balandat et al. (2020) — BoTorch | `optimization/study.py` |
-| `daulton2020_qehvi.md` | Daulton et al. (2020) — qEHVI | `optimization/study.py` |
-| `daulton2021_qnehvi.md` | Daulton et al. (2021) — qNEHVI | `optimization/study.py` |
-| `bischl2023_hpo.md` | Bischl et al. (2023) — HPO survey | overall |
-
-Also create `docs/references/README.md` pointing to the sibling repo:
-```
-Full texts: ../bayesflow_hpo_article/litreview/fulltexts/
-Extractions: ../bayesflow_hpo_article/litreview/pipeline_data/31_all_extractions.json
-```
-
-#### Sub-task 2: Docstring citations
-
-Add/update `References` sections in module/function docstrings:
-
-- `validation/sbc_tests.py` — cite Talts et al. (2018), Theorem 2
-- `validation/registry.py` (coverage metrics) — cite Talts et al. (2018), Section 4
-- `optimization/pruning_strategies.py` — cite Schmucker et al. (2021) Algs 1-2,
-  Emmerich & Deutz (2018) Defs 5,7,9
-- `optimization/study.py` (QMC section) — cite Sobol' (1967), Joe & Kuo (2008)
-- `results/extraction.py` (select_best_trial) — cite Deb et al. (2002)
-- `validation/c2st.py` — already has citations (verify completeness)
-
-#### Sub-task 3: Inline literature comments
-
-Add concise inline comments at key implementation points:
-
-- SBC rank computation: `# Talts et al. (2018), Theorem 2: ranks uniform iff posterior correct`
-- Rank normalization `(r+0.5)/(n+1)`: `# continuity correction, standard practice`
-- Coverage `[α/2, 1-α/2]`: `# Talts et al. (2018), Sec. 4: credible interval calibration`
-- `_non_dominated_sort`: `# Deb et al. (2002), fast non-dominated sorting`
-- `should_prune_dominance`: `# Schmucker et al. (2021), Algorithm 1, per-objective median AND rule`
-- `should_prune_mo_sha`: `# Schmucker et al. (2021), Algorithm 2, bottom-fraction pruning`
-- QMC power-of-2 check: `# Sobol' (1967): optimal discrepancy at 2^m points`
-- `lc2st()` K-fold: `# Linhart et al. (2023), Algorithms 1-2`
-- `global_c2st()`: `# López-Paz & Oquab (2017), Theorem 1`
+6. ~~Add docstring citations and inline literature comments.~~ (done — see Package I below)
 
 ---
 
@@ -128,6 +57,33 @@ Remaining work:
 ---
 
 ## Done
+
+### Package I: Source-Backed Reference Details (2026-04-10)
+
+Completed all three sub-tasks for documentation-backed implementation.
+
+#### Sub-task 1: Tracked article summaries in `docs/references/`
+
+All 16 reference summaries exist with extensive method details, algorithm
+citations, and implementation notes.
+
+#### Sub-task 2: Docstring citations
+
+Added References sections to module docstrings:
+- `validation/sbc_tests.py` — Talts et al. (2018), Theorem 2
+- `validation/registry.py` — Talts et al. (2018), Section 4
+- `optimization/pruning_strategies.py` — Schmucker et al. (2021), Emmerich & Deutz (2018), Deb et al. (2002)
+- `optimization/study.py` — Sobol' (1967), Joe & Kuo (2008)
+- `results/extraction.py` — Deb et al. (2002)
+- `validation/c2st.py` — Linhart et al. (2023), López-Paz & Oquab (2017)
+
+#### Sub-task 3: Inline literature comments
+
+Added source-backed comments at key implementation points (SBC ranks,
+coverage intervals, non-dominated sort, MO-SHA pruning, QMC power-of-2,
+L-C2ST, global C2ST).
+
+---
 
 ### Package I: Literature Audit (2026-04-09)
 

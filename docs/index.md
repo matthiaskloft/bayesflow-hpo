@@ -9,18 +9,23 @@ Generic hyperparameter optimization for [BayesFlow 2.x](https://github.com/bayes
 ### Key Capabilities
 
 - **Declarative search spaces** for all BayesFlow inference and summary network types
-- **Multi-objective Optuna integration** (configurable quality metric vs. normalized parameter count)
+- **Multi-objective Optuna integration** (configurable quality metrics vs. cost)
+- **Sampler presets** (TPE, GP, BoTorch, NSGA-II/III, Auto, Random) with auto-wired constraints
+- **QMC warm-up** using Sobol sequences for better space-filling startup coverage
 - **Fixed validation datasets** with condition grid helpers for fair comparison across architectures
-- **Metric registry** with built-in BF diagnostic wrappers and native SBC/coverage/bias metrics
+- **Metric registry** with built-in BF diagnostic wrappers and native SBC/coverage/C2ST metrics
 - **SBC rank-based coverage** with two-sided, left-sided (efficiency), and right-sided (futility) variants
+- **Metric constraints** (hard post-validation rejection, soft feasibility guidance for samplers)
 - **Custom metrics** via a plugin registry (`register_metric`)
 - **Structured validation results** with per-condition, per-parameter, and summary tables
 - **Dry-run validation** to catch shape mismatches before a full HPO run
-- **Memory/parameter budget** pre-checks to avoid OOM trials
-- **Configurable training** (default `approximator.fit(simulator=...)`, or user-provided `train_fn` for custom training loops)
+- **Memory/parameter budget** pre-checks with GPU-memory auto-detection
+- **Multi-objective pruning** (dominance, MO-SHA, primary-metric median)
+- **Configurable training** (default `approximator.fit(simulator=...)`, or user-provided `train_fn`)
 - **Warm-start** from prior Optuna studies
 - **Custom network registration** for user-defined architectures
-- **Pareto front extraction** and importance plotting
+- **Pareto front extraction** and lexicographic-Pareto trial selection
+- **Rich visualization** (Pareto fronts, optimization history, parameter importance)
 
 ## Quick Start
 
@@ -32,17 +37,19 @@ import bayesflow_hpo as hpo
 simulator = bf.simulators.make_simulator(...)
 adapter = bf.adapters.Adapter(...)
 
-# Run HPO with sensible defaults (CouplingFlow + DeepSet)
+# Run HPO with sensible defaults
 study = hpo.optimize(
     simulator=simulator,
     adapter=adapter,
-    param_keys=["theta"],
-    data_keys=["x"],
+    search_space=hpo.CompositeSearchSpace(
+        inference_space=hpo.CouplingFlowSpace(),
+        summary_space=hpo.DeepSetSpace(),
+    ),
     validation_conditions={"N": [50, 100, 200]},
     n_trials=50,
     epochs=100,
-    metrics=["calibration_error", "coverage", "rmse"],
-    objective_metric="calibration_error",
+    objective_metrics=["calibration_error", "nrmse"],
+    sampler="tpe",  # or "gp", "botorch", "nsga2", "nsga3", "auto", "random"
 )
 
 # Analyze results
@@ -56,11 +63,11 @@ hpo.plot_pareto_front(study)
 |----------|-------------|
 | [Architecture](architecture.md) | Package structure, module responsibilities, data flow |
 | [Search Spaces](search_spaces.md) | All network search spaces, dimensions, and customization |
-| [Optimization](optimization.md) | Objective function, constraints, study management, callbacks |
-| [Validation](validation.md) | Validation datasets, metric registry, coverage, SBC tests, result tables |
-| [Results & Export](results.md) | Pareto extraction, visualization, model export |
+| [Optimization](optimization.md) | Objective function, constraints, study management, sampler presets, QMC warm-up |
+| [Validation](validation.md) | Validation datasets, metric registry, coverage, C2ST, SBC tests, result tables |
+| [Results & Export](results.md) | Pareto extraction, lexicographic-Pareto selection, visualization, model export |
 | [API Reference](api_reference.md) | Complete public API with signatures and descriptions |
-| [Changelog](quality_report.md) | Changes implemented in the v0.2.0 workover |
+| [Changelog](quality_report.md) | Changes implemented in the v0.2.0 workover and post-v0.2.0 enhancements |
 
 ## Installation
 
@@ -76,5 +83,5 @@ pip install bayesflow-hpo[dev]        # Development tools
 
 - Python >= 3.11
 - BayesFlow >= 2.0.0
-- Optuna >= 3.0.0
+- Optuna >= 4.0.0
 - Keras >= 3.9, < 3.13 (PyTorch backend recommended)

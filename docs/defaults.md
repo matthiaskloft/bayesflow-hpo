@@ -16,11 +16,15 @@ objects (e.g. `ObjectiveConfig`, `create_study`) directly.
 | `epochs` | **200** | Maximum training epochs per trial. |
 | `num_batches` | **50** | Online simulation batches per epoch. |
 | `max_param_count` | **1 000 000** | Trials exceeding this estimated param count are rejected. |
-| `max_memory_mb` | **None** (disabled) | Peak-memory budget in MB (disabled by default). |
+| `max_memory_mb` | **None** (disabled) | Peak-memory budget in MB, or `"auto"` for CUDA free-memory auto-detection. |
+| `metric_constraints_hard` | **None** | Hard metric constraints (post-validation rejection). |
+| `metric_constraints_soft` | **None** | Soft metric constraints (feasibility guidance for sampler presets). |
+| `memory_safety_margin` | **0.2** | Safety margin for `max_memory_mb="auto"`. |
 | `objective_metrics` | **`["calibration_error", "nrmse"]`** | List of metric keys to optimize. |
 | `objective_mode` | **`"pareto"`** | `"pareto"` gives each metric its own Pareto direction; `"mean"` averages metrics into one scalar. |
 | `cost_metric` | **`"inference_time"`** | Cost objective (`"inference_time"` or `"param_count"`). |
 | `pruning_strategy` | **`"dominance"`** | Multi-objective pruning strategy (`"dominance"`, `"mo-sha"`, `("primary", metric)`, `"none"`). |
+| `pruning_n_startup_trials` | **None** (auto-detect) | Min completed trials before pruning. Auto-detects from sampler when None. |
 | `sampler` | **`None`** (= `"tpe"`) | Sampler preset or instance. |
 | `pruner` | **`None`** | Pruner preset or instance. |
 | `resume` | **`False`** | Continue a previously persisted study instead of starting fresh. |
@@ -31,6 +35,7 @@ objects (e.g. `ObjectiveConfig`, `create_study`) directly.
 | `warm_start_top_k` | **25** | Best trials to copy when warm-starting from another study. |
 | `qmc_startup_trials` | **0** (disabled) | Number of initial Sobol QMC trials before the main sampler takes over. |
 | `show_progress_bar` | **True** | Show Optuna's tqdm progress bar. |
+| `report_frequency` | **10** | Optuna report frequency (epochs). |
 
 ---
 
@@ -63,7 +68,7 @@ samples the corresponding network-specific dimensions.
 | `cf_subnet_width` | 32--256, step 32 | yes | — |
 | `cf_subnet_depth` | 1--3 | yes | — |
 | `cf_dropout` | 0.0--0.3 | yes | — |
-| `cf_activation` | silu, relu, mish | yes | — |
+| `cf_activation` | silu, relu, mish | no | `"silu"` |
 | `cf_transform` | affine, spline | no | `"affine"` |
 | `cf_permutation` | random, orthogonal | no | `"random"` |
 | `cf_use_actnorm` | True, False | no | `True` |
@@ -104,7 +109,7 @@ are hardcoded in `build()`.
 | `st_num_heads` | 1, 2, 4, 8 | yes | — |
 | `st_num_layers` | 1--4 | yes | — |
 | `st_dropout` | 0.0--0.3 | yes | — |
-| `st_mlp_width` | 64--512, step 64 | no | `2 * embed_dim` |
+| `st_mlp_width` | 64--512, step 64 | no | `128` |
 | `st_mlp_depth` | 1--4 | no | `2` |
 | `st_num_inducing` | 8--64, step 8 | no | `None` |
 

@@ -144,14 +144,27 @@ Metric constraints use tuple specs:
 (metric_name, threshold, "above" | "below")
 ```
 
-- `"above"` means violation when `metric_value > threshold`
-- `"below"` means violation when `metric_value < threshold`
+- `"above"` means violation when `metric_value > threshold` (useful for metrics to minimize)
+- `"below"` means violation when `metric_value < threshold` (useful for metrics to maximize like coverage)
 
 Two layers are supported:
 
-- `metric_constraints_hard`: post-validation hard rejection in the objective
-- `metric_constraints_soft`: Optuna `constraints_func` feasibility guidance
-  for sampler presets that support constraints
+**Hard constraints** (`metric_constraints_hard`): Post-validation hard rejection in the objective. Trials violating hard constraints return penalty values and are marked with `rejected_reason="metric_constraint"`.
+
+**Soft constraints** (`metric_constraints_soft`): Optuna `constraints_func` feasibility guidance for sampler presets that support constraints. Provides numerical feasibility scores to guide sampling without hard rejection.
+
+```python
+study = hpo.optimize(
+    ...,
+    metric_constraints_hard=[
+        ("calibration_error", 0.1, "below"),  # reject if cal_error > 0.1
+        ("coverage_90", 0.8, "above"),        # reject if coverage < 0.8
+    ],
+    metric_constraints_soft=[
+        ("nrmse", 0.15, "below"),  # guide sampling away from high NRMSE
+    ],
+)
+```
 
 ### Penalty Values
 
@@ -253,8 +266,7 @@ n_added = warm_start_study(target_study, source_study, top_k=20)
 
 ### QMC Warm-up
 
-Replace the main sampler's random startup phase with a Sobol
-quasi-random sequence for better space-filling coverage:
+Replace the main sampler's random startup phase with a Sobol quasi-random sequence for better space-filling coverage:
 
 ```python
 study = create_study(
@@ -273,11 +285,11 @@ study = hpo.optimize(
 )
 ```
 
-Sobol's low-discrepancy guarantee is optimal at n = 2^m (8, 16, 32);
-a warning is logged for non-power-of-2 values.  Only non-rejected
-completions count toward the QMC quota.
-
-QMC warm-up composes with warm-start and all sampler presets:
+**Key properties:**
+- Sobol's low-discrepancy guarantee is optimal at n = 2^m (8, 16, 32, 64, ...)
+- A warning is logged for non-power-of-2 values
+- Only non-rejected completions count toward the QMC quota
+- QMC warm-up composes with warm-start and all sampler presets:
 
 ```python
 study = create_study(
@@ -287,6 +299,8 @@ study = create_study(
     qmc_startup_trials=16,  # QMC exploration + warm-start exploitation
 )
 ```
+
+**References:** Sobol' (1967) introduced Sobol sequences; Joe & Kuo (2008) improved the direction numbers used by SciPy's `scipy.stats.qmc.Sobol` (and thus Optuna's `QMCSampler`).
 
 ## Trial Cleanup
 

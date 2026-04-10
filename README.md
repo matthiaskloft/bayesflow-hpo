@@ -44,14 +44,19 @@ Requires Python >= 3.11 and a Keras 3 backend (PyTorch recommended: `export KERA
 
 - **10 network search spaces** — CouplingFlow, FlowMatching, DiffusionModel, ConsistencyModel, StableConsistencyModel, DeepSet, SetTransformer, FusionTransformer, TimeSeriesNetwork, TimeSeriesTransformer
 - **Network selection** — let Optuna choose the best architecture via `NetworkSelectionSpace` / `SummarySelectionSpace`
+- **Sampler presets** — TPE, GP, BoTorch, NSGA-II/III, Auto, Random with auto-wired budget constraints
+- **QMC warm-up** — Sobol sequences for better space-filling startup coverage
+- **Multi-objective pruning** — dominance, MO-SHA, primary-median strategies
+- **Metric constraints** — hard post-validation rejection, soft feasibility guidance
 - **Custom hooks** — replace build, train, or validate steps while reusing the full trial lifecycle
 - **Pre-flight validation** — `check_pipeline()` catches interface errors before GPU hours are wasted
 - **Multi-objective** — single-metric, mean-aggregated, or full Pareto-front optimization (2-3 objectives)
 - **Rich visualization** — `plot_study()` adaptive dashboard with pairwise Pareto projections, per-objective history, and parameter importance; plus standalone `plot_pareto_3d()`, `plot_parallel_coordinates()`, and more
-- **13 built-in validation metrics** — calibration, accuracy, SBC diagnostics, plus a registry for custom metrics
-- **Budget constraints** — reject infeasible architectures before training (`max_param_count`, `max_memory_mb`)
+- **13 built-in validation metrics** — calibration, accuracy, SBC diagnostics, C2ST, plus a registry for custom metrics
+- **Budget constraints** — reject infeasible architectures before training (`max_param_count`, `max_memory_mb="auto"`)
 - **Custom network registration** — plug in your own inference/summary networks
 - **Study management** — resume, warm-start, save/load workflows, analyze results
+- **Lexicographic-Pareto selection** — `select_best_trial()` with satisficing thresholds
 
 ## Examples
 

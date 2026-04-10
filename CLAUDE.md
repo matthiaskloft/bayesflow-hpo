@@ -97,6 +97,15 @@ src/bayesflow_hpo/
 - **Trial budget**: Trials exceeding `max_param_count` or `max_memory_mb` are rejected pre-training and NOT counted toward `n_trials`
 - **Public API**: `__init__.py` re-exports ~80 high-level symbols; internal helpers (e.g. `BaseSearchSpace`, `Dimension`, `MetricFn`, `sample_hyperparameters`) are accessible via submodule imports but intentionally excluded from the top-level API for stability
 
+## Key Features (non-exhaustive)
+
+- **Sampler presets**: `"tpe"`, `"gp"`, `"botorch"`, `"nsga2"`, `"nsga3"`, `"auto"`, `"random"` with auto-wired budget constraints
+- **QMC warm-up**: Sobol sequences for better space-filling startup (`qmc_startup_trials`)
+- **Metric constraints**: Hard (`metric_constraints_hard`) and soft (`metric_constraints_soft`) layers
+- **Memory auto-detection**: `max_memory_mb="auto"` for CUDA free-memory detection
+- **Multi-objective pruning**: `"dominance"`, `"mo-sha"`, `("primary", metric)`, `"none"` strategies
+- **C2ST metrics**: L-C2ST (reference-free) and global C2ST for posterior validation
+
 ## Project TODOs
 
 See [`docs/TODO.md`](docs/TODO.md) for open and completed project tasks.
