@@ -1,0 +1,4 @@
+sampler,qmc_trials,rep,best_calibration_error,best_nrmse,n_trained
+tpe,0,0,0.007368,0.048225,20
+tpe,8,0,0.007237,0.049093,20
+tpe,16,0,0.007237,0.061312,20
