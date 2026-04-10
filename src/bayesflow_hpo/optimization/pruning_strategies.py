@@ -118,7 +118,7 @@ def should_prune_dominance(
     norm_current = (current - mins) / safe_ranges
     medians = np.median(norm_ref, axis=0)
 
-    # AND rule: prune only if worse than median on ALL objectives.
+    # Schmucker et al. (2021), Algorithm 1, per-objective median AND rule
     return bool(np.all(norm_current > medians))
 
 
@@ -176,7 +176,7 @@ def should_prune_mo_sha(
     all_vectors = ref_vectors + [current]
     current_idx = len(all_vectors) - 1
 
-    # Select top |all| / eta via non-dominated sorting.
+    # Schmucker et al. (2021), Algorithm 2, bottom-fraction pruning
     n_select = max(1, len(all_vectors) // reduction_factor)
     fronts = _non_dominated_sort(np.asarray(all_vectors))
 
@@ -242,6 +242,8 @@ def should_prune_primary(
 
 def _non_dominated_sort(objectives: np.ndarray) -> list[list[int]]:
     """Iteratively extract non-dominated fronts from an objective array.
+
+    # Deb et al. (2002), fast non-dominated sorting
 
     Implements the O(MN^2) fast non-dominated sorting from NSGA-II
     (Deb et al., 2002), confirmed via MO-ASHA Algorithm 1 lines 1--6

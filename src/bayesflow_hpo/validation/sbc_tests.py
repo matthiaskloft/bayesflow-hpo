@@ -7,6 +7,14 @@ are uniformly distributed.  Three tests are provided:
 - **KS test**: Kolmogorov-Smirnov test against Uniform(0, 1).
 - **Chi-squared test**: Binned goodness-of-fit against uniform expected
   counts.  Skipped when bins have fewer than 5 expected observations.
+
+References
+----------
+Talts, S., Betancourt, M., Simpson, D., Vehtari, A., & Gelman, A. (2018).
+    Validating Bayesian inference algorithms with simulation-based
+    calibration. *arXiv preprint* arXiv:1804.06788.
+    Theorem 2: Ranks are uniformly distributed on [0, L] iff posterior
+    inference is correct.
 """
 
 from __future__ import annotations
@@ -31,6 +39,8 @@ def compute_sbc_uniformity_tests(
             "sbc_chi2_pvalue": np.nan,
         }
 
+    # Talts et al. (2018), Theorem 2: ranks uniform iff posterior correct
+    # continuity correction, standard practice
     normalized_ranks = (ranks + 0.5) / (n_posterior_samples + 1)
     ks_stat, ks_pvalue = kstest(normalized_ranks, "uniform")
 

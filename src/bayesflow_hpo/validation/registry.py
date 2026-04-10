@@ -10,6 +10,13 @@ bias, MAE, and correlation.  Users can register custom metrics via
 Metric function signature
 -------------------------
 ``(draws: ndarray[n, s], true_values: ndarray[n]) -> dict``
+
+References
+----------
+Talts, S., Betancourt, M., Simpson, D., Vehtari, A., & Gelman, A. (2018).
+    Validating Bayesian inference algorithms with simulation-based
+    calibration. *arXiv preprint* arXiv:1804.06788.
+    Section 4: Credible interval calibration via rank-based coverage.
 """
 
 from __future__ import annotations
@@ -419,6 +426,7 @@ def _sbc_ranks(
 ) -> tuple[np.ndarray, int]:
     """Compute SBC ranks shared by all SBC metrics."""
     n_posterior_samples = draws.shape[1]
+    # Talts et al. (2018), Theorem 2: ranks uniform iff posterior correct
     ranks = np.sum(draws < true_values[:, None], axis=1)
     return ranks, n_posterior_samples
 
@@ -528,7 +536,9 @@ def make_coverage_metric(
 
     def metric_fn(draws: np.ndarray, true_values: np.ndarray) -> dict[str, float]:
         n_sims, n_samples = draws.shape
+        # Talts et al. (2018), Theorem 2: ranks uniform iff posterior correct
         ranks = np.sum(draws < true_values[:, None], axis=1)
+        # continuity correction, standard practice
         normalized_ranks = ranks / (n_samples + 1)
 
         result: dict[str, float] = {}
@@ -539,6 +549,7 @@ def make_coverage_metric(
 
             if side == "two-sided":
                 alpha = 1 - level
+                # Talts et al. (2018), Sec. 4: credible interval calibration
                 lo = alpha / 2
                 hi = 1 - alpha / 2
                 in_interval = (normalized_ranks >= lo) & (normalized_ranks <= hi)

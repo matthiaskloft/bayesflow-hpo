@@ -761,8 +761,14 @@ def select_best_trial(
 
     References
     ----------
-    Pareto dominance follows the non-dominated sorting relation from
-    NSGA-II (Deb et al., 2002).
+    Deb, K., Pratap, A., Agarwal, S., & Meyarivan, T. (2002). A fast and
+        elitist multiobjective genetic algorithm: NSGA-II. *IEEE Transactions
+        on Evolutionary Computation*, *6*(2), 182--197.
+        https://doi.org/10.1109/4235.996017
+
+        Pareto dominance and non-dominated sorting follow the fast O(MN²)
+        algorithm from Section 3, used here for Pareto front extraction in
+        Phase 2.
     """
     obj_cols = _objective_column_names(study)
     directions = list(study.directions)

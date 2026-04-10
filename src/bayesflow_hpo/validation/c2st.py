@@ -228,6 +228,8 @@ def lc2st(
 ) -> LC2STResult:
     """Local Classifier Two-Sample Test (Linhart et al., 2023).
 
+    # Linhart et al. (2023), Algorithms 1-2
+
     Implements Algorithms 1-2 from the paper. Tests whether the
     approximate posterior ``q(theta|x)`` matches the true posterior
     ``p(theta|x)`` using joint samples, without requiring true
@@ -490,7 +492,7 @@ def global_c2st(
 
     accuracy = float(clf.score(x_test, y_test))
 
-    # p-value from normal approximation (Theorem 1)
+    # López-Paz & Oquab (2017), Theorem 1: p-value from normal approximation
     # Null: accuracy ~ N(0.5, 1/(4*n_test))
     se = np.sqrt(1.0 / (4.0 * n_test))
     z = (accuracy - 0.5) / se

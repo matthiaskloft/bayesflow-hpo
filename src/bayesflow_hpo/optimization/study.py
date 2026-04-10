@@ -332,9 +332,18 @@ class QMCWarmupSampler(optuna.samplers.BaseSampler):
 
     References
     ----------
+    Sobol', I. M. (1967). On the distribution of points in a cube and the
+        approximate evaluation of integrals. *USSR Computational Mathematics
+        and Mathematical Physics*, *7*(4), 86-112.
+        https://doi.org/10.1016/0041-5553(67)90144-9
+
+    Joe, S., & Kuo, F. Y. (2008). Constructing Sobol sequences with
+        better two-dimensional projections. *SIAM Journal on Scientific
+        Computing*, *30*(5), 2635-2654.
+        https://doi.org/10.1137/070709359
+
     Optuna PR #2423: Sobol outperforms Halton in benchmarks.
-    Optuna Issue #1797: QMCSampler significantly better than
-    RandomSampler.
+    Optuna Issue #1797: QMCSampler significantly better than RandomSampler.
     """
 
     def __init__(
@@ -565,6 +574,7 @@ def create_study(
         )
     if qmc_startup_trials > 0:
         if not _is_power_of_two(qmc_startup_trials):
+            # Sobol' (1967): optimal discrepancy at 2^m points
             logger.warning(
                 "qmc_startup_trials=%d is not a power of 2. Sobol's "
                 "low-discrepancy guarantee is optimal at n = 2^m "
