@@ -11,9 +11,81 @@ Suggested execution order: I, then research follow-ups A2/A3.
 
 1. Finish the QMC warm-up research by running `examples/qmc_warmup_benchmark.ipynb` end-to-end and recording the results.
 2. Research the sampler preset defaults, especially BoTorch, GP, NSGA-II/III, and Auto.
-3. Run the literature audit to verify metrics and features against references.
+3. ~~Run the literature audit to verify metrics and features against references.~~ (done — see Package I below)
 4. Polish documentation and examples around the shipped features.
 5. Review the uncommitted `examples/qmc_warmup_benchmark.ipynb` changes, since that appears to be the active work item.
+
+---
+
+### Package I (remaining): Source-Backed Reference Details
+
+BLOCKED on: fulltexts in `bayesflow_hpo_article` sibling repo
+(`../bayesflow_hpo_article/`). Once the article repo has fulltexts
+acquired and extracted, complete these three sub-tasks.
+
+#### Sub-task 1: Tracked article summaries in `docs/references/`
+
+Create one markdown file per reference in `docs/references/`, each
+containing an extensive summary of the paper's relevant method details:
+
+- Key method / algorithm description (with equation/algorithm numbers)
+- Page references for implementation-critical details
+- Edge-case handling recommendations from the original authors
+- Intentional deviations from the reference method (if any) and why
+- Relevance note: which module/function in bayesflow-hpo this backs
+
+References needing summaries (16 total):
+
+| File | Reference | Module(s) |
+|------|-----------|-----------|
+| `talts2018_sbc.md` | Talts et al. (2018) — SBC | `validation/sbc_tests.py`, `validation/registry.py` |
+| `sobol1967_qmc.md` | Sobol' (1967) — Sobol sequences | `optimization/study.py` (QMC warm-up) |
+| `joe2008_sobol.md` | Joe & Kuo (2008) — direction numbers | `optimization/study.py` |
+| `schmucker2021_moasha.md` | Schmucker et al. (2021) — MO-ASHA | `optimization/pruning_strategies.py` |
+| `deb2002_nsga2.md` | Deb et al. (2002) — NSGA-II | `optimization/pruning_strategies.py`, `results/extraction.py` |
+| `deb2014_nsga3.md` | Deb & Jain (2014) — NSGA-III | `optimization/study.py` |
+| `emmerich2018_moo.md` | Emmerich & Deutz (2018) — MOO tutorial | `optimization/pruning_strategies.py` |
+| `li2018_hyperband.md` | Li et al. (2018) — Hyperband | `optimization/study.py` |
+| `linhart2023_lc2st.md` | Linhart et al. (2023) — L-C2ST | `validation/c2st.py` |
+| `lopezpaz2017_c2st.md` | López-Paz & Oquab (2017) — C2ST | `validation/c2st.py` |
+| `akiba2019_optuna.md` | Akiba et al. (2019) — Optuna | `optimization/study.py` |
+| `bergstra2011_tpe.md` | Bergstra et al. (2011) — TPE | `optimization/study.py` |
+| `balandat2020_botorch.md` | Balandat et al. (2020) — BoTorch | `optimization/study.py` |
+| `daulton2020_qehvi.md` | Daulton et al. (2020) — qEHVI | `optimization/study.py` |
+| `daulton2021_qnehvi.md` | Daulton et al. (2021) — qNEHVI | `optimization/study.py` |
+| `bischl2023_hpo.md` | Bischl et al. (2023) — HPO survey | overall |
+
+Also create `docs/references/README.md` pointing to the sibling repo:
+```
+Full texts: ../bayesflow_hpo_article/litreview/fulltexts/
+Extractions: ../bayesflow_hpo_article/litreview/pipeline_data/31_all_extractions.json
+```
+
+#### Sub-task 2: Docstring citations
+
+Add/update `References` sections in module/function docstrings:
+
+- `validation/sbc_tests.py` — cite Talts et al. (2018), Theorem 2
+- `validation/registry.py` (coverage metrics) — cite Talts et al. (2018), Section 4
+- `optimization/pruning_strategies.py` — cite Schmucker et al. (2021) Algs 1-2,
+  Emmerich & Deutz (2018) Defs 5,7,9
+- `optimization/study.py` (QMC section) — cite Sobol' (1967), Joe & Kuo (2008)
+- `results/extraction.py` (select_best_trial) — cite Deb et al. (2002)
+- `validation/c2st.py` — already has citations (verify completeness)
+
+#### Sub-task 3: Inline literature comments
+
+Add concise inline comments at key implementation points:
+
+- SBC rank computation: `# Talts et al. (2018), Theorem 2: ranks uniform iff posterior correct`
+- Rank normalization `(r+0.5)/(n+1)`: `# continuity correction, standard practice`
+- Coverage `[α/2, 1-α/2]`: `# Talts et al. (2018), Sec. 4: credible interval calibration`
+- `_non_dominated_sort`: `# Deb et al. (2002), fast non-dominated sorting`
+- `should_prune_dominance`: `# Schmucker et al. (2021), Algorithm 1, per-objective median AND rule`
+- `should_prune_mo_sha`: `# Schmucker et al. (2021), Algorithm 2, bottom-fraction pruning`
+- QMC power-of-2 check: `# Sobol' (1967): optimal discrepancy at 2^m points`
+- `lc2st()` K-fold: `# Linhart et al. (2023), Algorithms 1-2`
+- `global_c2st()`: `# López-Paz & Oquab (2017), Theorem 1`
 
 ---
 
@@ -53,30 +125,30 @@ Remaining work:
 
 ---
 
-### Package I: Literature Audit
-
-Standalone documentation/verification task. Can run at any point, but
-best done after Packages C–G stabilize the codebase.
-
-#### Audit all metrics and features against literature references
-
-Systematic check that every built-in metric and major feature has a
-verified literature reference in `docs/references.md`. For each:
-
-- Confirm the implementation matches the method described in the paper
-- Verify edge-case handling (e.g., degenerate inputs, numerical guards)
-  is consistent with the original authors' recommendations
-- Document any intentional deviations from the reference method and why
-- Add missing references for metrics currently without citations
-  (e.g., ECE, posterior contraction, z-score, coverage)
-
-Scope: all 13 built-in metrics in `validation/registry.py`, the
-budget-aware sampling design, the pruning strategy, and the
-lexicographic-Pareto selection.
-
 ---
 
 ## Done
+
+### Package I: Literature Audit (2026-04-09)
+
+Audited all HPO-specific features against literature references.
+Reorganized `docs/references.md` with topic-grouped coverage matrix
+mapping each feature to its backing reference. Scope limited to features
+directly implemented in bayesflow-hpo (HPO, pruning, trial selection,
+QMC warm-up, SBC tests, C2ST metrics); BayesFlow core diagnostics
+(ECE, contraction, z-score, log_gamma) are excluded as they wrap
+`bf.diagnostics.*`.
+
+Added 3 missing references:
+- Talts et al. (2018) — SBC methodology (backs `sbc_tests.py`, coverage)
+- Sobol' (1967) — Sobol sequences (backs QMC warm-up)
+- Joe & Kuo (2008) — Improved Sobol direction numbers (used by
+  SciPy/Optuna QMCSampler)
+- Bischl et al. (2023) — HPO foundations survey
+
+Verified implementations match reference methods: SBC rank computation,
+normalization, KS/chi-squared tests, coverage intervals, QMC power-of-2
+properties, pruning strategies.
 
 ### Package H: Metric Constraints & Memory Auto-Detection (2026-04-05)
 Implemented layered metric constraints and memory auto-detection:
