@@ -1,5 +1,8 @@
 """Tests for FlowMatching search space behavior."""
 
+import inspect
+
+import bayesflow as bf
 import pytest
 from conftest import FakeTrial
 
@@ -68,6 +71,31 @@ def test_time_embedding_dim_is_constant():
     dim = space.time_embedding_dim
     assert dim.name == "fm_time_embedding_dim"
     assert dim.constant == 32
+
+
+def test_untuned_defaults_match_bayesflow_defaults():
+    space = FlowMatchingSpace()
+    timemlp_sig = inspect.signature(bf.networks.TimeMLP)
+    integrate_defaults = bf.networks.FlowMatching.INTEGRATE_DEFAULT_CONFIG
+
+    assert space.activation.constant == timemlp_sig.parameters["activation"].default
+    assert (
+        space.time_embedding_dim.constant
+        == timemlp_sig.parameters["time_embedding_dim"].default
+    )
+    assert space.merge.constant == timemlp_sig.parameters["merge"].default
+    assert space.norm.constant == timemlp_sig.parameters["norm"].default
+    assert space.residual.constant == timemlp_sig.parameters["residual"].default
+    assert (
+        space.spectral_normalization.constant
+        == timemlp_sig.parameters["spectral_normalization"].default
+    )
+    assert (
+        space.kernel_initializer.constant
+        == timemlp_sig.parameters["kernel_initializer"].default
+    )
+    assert space.integrate_method.constant == integrate_defaults["method"]
+    assert space.integrate_steps.constant == integrate_defaults["steps"]
 
 
 def test_fast_profile_samples_speed_oriented_defaults():

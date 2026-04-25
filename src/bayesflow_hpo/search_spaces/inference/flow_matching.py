@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -16,16 +17,40 @@ from bayesflow_hpo.search_spaces.base import (
 )
 
 
+def _timemlp_default(param: str, fallback: Any) -> Any:
+    """Read a default value from ``bf.networks.TimeMLP`` safely."""
+    try:
+        value = inspect.signature(bf.networks.TimeMLP).parameters[param].default
+    except (KeyError, ValueError, TypeError):
+        return fallback
+    return fallback if value is inspect._empty else value
+
+
+def _flowmatching_integrate_default(param: str, fallback: Any) -> Any:
+    """Read default integration settings from ``bf.networks.FlowMatching``."""
+    defaults = getattr(bf.networks.FlowMatching, "INTEGRATE_DEFAULT_CONFIG", None)
+    if not isinstance(defaults, dict):
+        return fallback
+    return defaults.get(param, fallback)
+
+
 @dataclass
 class FlowMatchingSpace(BaseSearchSpace):
     """Search space for `bf.networks.FlowMatching`.
 
     Default dimensions (tuned): subnet width/depth and dropout.
 
-    Fixed dimensions default to BayesFlow's current FlowMatching / TimeMLP
-    defaults so untuned dimensions remain semantically neutral. Use
-    :meth:`fast`, :meth:`balanced`, :meth:`quality`, or :meth:`preset` for
-    speed/quality-oriented profiles.
+    Untuned dimensions are synchronized to BayesFlow defaults at runtime so
+    they remain semantically neutral across BayesFlow updates:
+
+    - TimeMLP-related constants are read from
+      ``inspect.signature(bf.networks.TimeMLP)``
+    - Integration constants are read from
+      ``bf.networks.FlowMatching.INTEGRATE_DEFAULT_CONFIG``
+
+    If these runtime lookups are unavailable, safe fallback constants are
+    used. Use :meth:`fast`, :meth:`balanced`, :meth:`quality`, or
+    :meth:`preset` for speed/quality-oriented profiles.
     """
 
     subnet_width: IntDimension = field(
@@ -41,7 +66,8 @@ class FlowMatchingSpace(BaseSearchSpace):
     )
     activation: CategoricalDimension = field(
         default_factory=lambda: CategoricalDimension(
-            "fm_activation", constant="mish"
+            "fm_activation",
+            constant=_timemlp_default("activation", "mish"),
         )
     )
     use_optimal_transport: CategoricalDimension = field(
@@ -56,36 +82,50 @@ class FlowMatchingSpace(BaseSearchSpace):
     )
     time_embedding_dim: IntDimension = field(
         default_factory=lambda: IntDimension(
-            "fm_time_embedding_dim", constant=32
+            "fm_time_embedding_dim",
+            constant=int(_timemlp_default("time_embedding_dim", 32)),
         )
     )
     integrate_method: CategoricalDimension = field(
         default_factory=lambda: CategoricalDimension(
-            "fm_integrate_method", constant="tsit5"
+            "fm_integrate_method",
+            constant=_flowmatching_integrate_default("method", "tsit5"),
         )
     )
     integrate_steps: CategoricalDimension = field(
         default_factory=lambda: CategoricalDimension(
-            "fm_integrate_steps", constant="adaptive"
+            "fm_integrate_steps",
+            constant=_flowmatching_integrate_default("steps", "adaptive"),
         )
     )
     merge: CategoricalDimension = field(
-        default_factory=lambda: CategoricalDimension("fm_merge", constant="concat")
+        default_factory=lambda: CategoricalDimension(
+            "fm_merge",
+            constant=_timemlp_default("merge", "concat"),
+        )
     )
     norm: CategoricalDimension = field(
-        default_factory=lambda: CategoricalDimension("fm_norm", constant="layer")
+        default_factory=lambda: CategoricalDimension(
+            "fm_norm",
+            constant=_timemlp_default("norm", "layer"),
+        )
     )
     residual: CategoricalDimension = field(
-        default_factory=lambda: CategoricalDimension("fm_residual", constant=True)
+        default_factory=lambda: CategoricalDimension(
+            "fm_residual",
+            constant=bool(_timemlp_default("residual", True)),
+        )
     )
     spectral_normalization: CategoricalDimension = field(
         default_factory=lambda: CategoricalDimension(
-            "fm_spectral_normalization", constant=False
+            "fm_spectral_normalization",
+            constant=bool(_timemlp_default("spectral_normalization", False)),
         )
     )
     kernel_initializer: CategoricalDimension = field(
         default_factory=lambda: CategoricalDimension(
-            "fm_kernel_initializer", constant="he_normal"
+            "fm_kernel_initializer",
+            constant=_timemlp_default("kernel_initializer", "he_normal"),
         )
     )
 

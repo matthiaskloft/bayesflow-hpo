@@ -92,6 +92,11 @@ samples the corresponding network-specific dimensions.
 | `fm_spectral_normalization` | — | no | `False` |
 | `fm_kernel_initializer` | — | no | `"he_normal"` |
 
+Untuned constants are synchronized to BayesFlow defaults at runtime
+(`bf.networks.TimeMLP` and
+`bf.networks.FlowMatching.INTEGRATE_DEFAULT_CONFIG`). The listed constants
+are the current defaults in this environment.
+
 Profile helpers:
 - `FlowMatchingSpace.fast()`
 - `FlowMatchingSpace.balanced()`

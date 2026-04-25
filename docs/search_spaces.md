@@ -56,6 +56,11 @@ Continuous normalizing flow via flow matching (`FlowMatching`).
 | `fm_spectral_normalization` | cat | — | no | `False` |
 | `fm_kernel_initializer` | cat | — | no | `"he_normal"` |
 
+Untuned constants are synchronized to BayesFlow defaults at runtime
+(`bf.networks.TimeMLP` defaults plus
+`bf.networks.FlowMatching.INTEGRATE_DEFAULT_CONFIG`). The values in this
+table reflect the current BayesFlow release used by this project.
+
 `build()` maps flat `fm_*` params to:
 - `subnet_kwargs={widths, dropout, activation, time_embedding_dim, merge, norm, residual, spectral_normalization, kernel_initializer}`
 - `integrate_kwargs={method, steps}`
