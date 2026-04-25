@@ -43,6 +43,7 @@ Requires Python >= 3.11 and a Keras 3 backend (PyTorch recommended: `export KERA
 ## Features
 
 - **10 network search spaces** — CouplingFlow, FlowMatching, DiffusionModel, ConsistencyModel, StableConsistencyModel, DeepSet, SetTransformer, FusionTransformer, TimeSeriesNetwork, TimeSeriesTransformer
+- **FlowMatching solver controls** — tune or fix `fm_integrate_method` / `fm_integrate_steps` plus TimeMLP kwargs (`fm_merge`, `fm_norm`, `fm_residual`, `fm_spectral_normalization`) with BayesFlow-default constants when untuned
 - **Network selection** — let Optuna choose the best architecture via `NetworkSelectionSpace` / `SummarySelectionSpace`
 - **Sampler presets** — TPE, GP, BoTorch, NSGA-II/III, Auto, Random with auto-wired budget constraints
 - **QMC warm-up** — Sobol sequences for better space-filling startup coverage
@@ -61,6 +62,14 @@ Requires Python >= 3.11 and a Keras 3 backend (PyTorch recommended: `export KERA
 ## Examples
 
 See the [examples/](examples/) directory for complete walkthroughs:
+
+```python
+# Speed-sensitive FlowMatching search space
+import bayesflow_hpo as hpo
+
+inference_space = hpo.FlowMatchingSpace.fast()
+search_space = hpo.CompositeSearchSpace(inference_space=inference_space)
+```
 
 | Notebook | Description |
 |---|---|

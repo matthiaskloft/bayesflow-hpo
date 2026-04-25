@@ -41,14 +41,47 @@ Continuous normalizing flow via flow matching (`FlowMatching`).
 
 | Dimension | Type | Range | Tuned | Constant |
 |-----------|------|-------|-------|----------|
-| `fm_subnet_width` | int | [32, 256], log | yes | — |
+| `fm_subnet_width` | int | [32, 256], step 32 | yes | — |
 | `fm_subnet_depth` | int | [1, 6] | yes | — |
 | `fm_dropout` | float | [0.0, 0.2] | yes | — |
-| `fm_activation` | cat | mish, silu | yes | — |
-| `fm_use_ot` | cat | True, False | no | `False` |
-| `fm_time_alpha` | float | [0.0, 2.0] | no | `0.0` |
+| `fm_activation` | cat | — | no | `"mish"` |
+| `fm_use_optimal_transport` | cat | — | no | `False` |
+| `fm_time_power_law_alpha` | float | — | no | `0.0` |
+| `fm_time_embedding_dim` | int | — | no | `32` |
+| `fm_integrate_method` | cat | — | no | `"tsit5"` |
+| `fm_integrate_steps` | cat | — | no | `"adaptive"` |
+| `fm_merge` | cat | — | no | `"concat"` |
+| `fm_norm` | cat | — | no | `"layer"` |
+| `fm_residual` | cat | — | no | `True` |
+| `fm_spectral_normalization` | cat | — | no | `False` |
+| `fm_kernel_initializer` | cat | — | no | `"he_normal"` |
 
-**Note:** `loss_fn="mse"` is hardcoded in `build()`.
+`build()` maps flat `fm_*` params to:
+- `subnet_kwargs={widths, dropout, activation, time_embedding_dim, merge, norm, residual, spectral_normalization, kernel_initializer}`
+- `integrate_kwargs={method, steps}`
+
+`fm_integrate_steps` usually has the strongest inference-time effect because it multiplies velocity-network evaluations during ODE sampling.
+
+Profile constructors:
+- `FlowMatchingSpace.fast()` for lower-latency solver/subnet ranges
+- `FlowMatchingSpace.balanced()` for mixed speed/quality exploration
+- `FlowMatchingSpace.quality()` for larger networks and finer solver settings
+- `FlowMatchingSpace.preset("<name>")` with `default|fast|balanced|quality`
+
+Speed-sensitive override example:
+
+```python
+import bayesflow_hpo as hpo
+
+inference_space = hpo.FlowMatchingSpace(
+    subnet_width=hpo.IntDimension("fm_subnet_width", 32, 128, step=32),
+    subnet_depth=hpo.IntDimension("fm_subnet_depth", 1, 3),
+    integrate_method=hpo.CategoricalDimension("fm_integrate_method", ["euler", "tsit5"]),
+    integrate_steps=hpo.CategoricalDimension("fm_integrate_steps", [16, 24, 32]),
+    merge=hpo.CategoricalDimension("fm_merge", ["add", "concat"]),
+    norm=hpo.CategoricalDimension("fm_norm", [None, "layer"]),
+)
+```
 
 ### DiffusionModelSpace
 

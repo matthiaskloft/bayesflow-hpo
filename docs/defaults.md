@@ -80,9 +80,23 @@ samples the corresponding network-specific dimensions.
 | `fm_subnet_width` | 32--256, step 32 | yes | — |
 | `fm_subnet_depth` | 1--6 | yes | — |
 | `fm_dropout` | 0.0--0.2 | yes | — |
-| `fm_activation` | mish, silu | yes | — |
-| `fm_use_ot` | True, False | no | `False` |
-| `fm_time_alpha` | 0.0--2.0 | no | `0.0` |
+| `fm_activation` | — | no | `"mish"` |
+| `fm_use_optimal_transport` | — | no | `False` |
+| `fm_time_power_law_alpha` | — | no | `0.0` |
+| `fm_time_embedding_dim` | — | no | `32` |
+| `fm_integrate_method` | — | no | `"tsit5"` |
+| `fm_integrate_steps` | — | no | `"adaptive"` |
+| `fm_merge` | — | no | `"concat"` |
+| `fm_norm` | — | no | `"layer"` |
+| `fm_residual` | — | no | `True` |
+| `fm_spectral_normalization` | — | no | `False` |
+| `fm_kernel_initializer` | — | no | `"he_normal"` |
+
+Profile helpers:
+- `FlowMatchingSpace.fast()`
+- `FlowMatchingSpace.balanced()`
+- `FlowMatchingSpace.quality()`
+- `FlowMatchingSpace.preset("default" | "fast" | "balanced" | "quality")`
 
 ### DeepSetSpace
 

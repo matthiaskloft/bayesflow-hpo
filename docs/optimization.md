@@ -111,6 +111,15 @@ Callable that implements the Optuna trial loop:
 
 Trials that exceed budgets or crash during training return penalty values without wasting GPU time.
 
+For downstream packages, a customized FlowMatching search space plugs into the same composition API:
+
+```python
+import bayesflow_hpo as hpo
+
+inference_space = hpo.FlowMatchingSpace.balanced()
+search_space = hpo.CompositeSearchSpace(inference_space=inference_space)
+```
+
 ## Constraints
 
 ### Parameter Budget

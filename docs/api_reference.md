@@ -122,6 +122,12 @@ When `constant` is set, the dimension is not tuned by Optuna — it uses the con
 | `ConsistencyModelSpace(epochs, num_batches)` | `bf.networks.ConsistencyModel` |
 | `StableConsistencyModelSpace()` | `bf.networks.StableConsistencyModel` |
 
+`FlowMatchingSpace` profile helpers:
+- `FlowMatchingSpace.fast()`
+- `FlowMatchingSpace.balanced()`
+- `FlowMatchingSpace.quality()`
+- `FlowMatchingSpace.preset("default" | "fast" | "balanced" | "quality")`
+
 ### Summary Spaces
 
 | Class | BayesFlow Network |

@@ -9,9 +9,15 @@
 |-------|--------|------|-------|
 | Spec | DONE | 2026-04-25 | Generic FlowMatching solver and TimeMLP kwargs belong in this package |
 | Plan | DONE | 2026-04-25 | Expansion with BayesFlow-default constants for untuned dimensions |
-| Phase 1: Add Missing BayesFlow-Default Dimensions | TODO | | Constants must match BayesFlow defaults when not optimized |
-| Phase 2: Add Presets Or Tunable Profiles | TODO | | Fast/balanced/quality ergonomics |
-| Phase 3: Documentation And Examples | TODO | | Update search-space docs and downstream usage |
+<<<<<<< HEAD
+| Phase 1: Add Missing BayesFlow-Default Dimensions | DONE | 2026-04-25 | Added solver and TimeMLP dimensions with BayesFlow-default constants; `fm_time_embedding_dim` default set to 32 |
+| Phase 2: Add Presets Or Tunable Profiles | DONE | 2026-04-25 | Added `fast`, `balanced`, `quality`, and `preset(...)` profile helpers |
+| Phase 3: Documentation And Examples | DONE | 2026-04-25 | Updated docs tables/snippets and README usage notes |
+=======
+| Phase 1: Add Missing BayesFlow-Default Dimensions | DONE | 2026-04-25 | Added solver and TimeMLP dimensions with BayesFlow-default constants; `fm_time_embedding_dim` default set to 32 |
+| Phase 2: Add Presets Or Tunable Profiles | DONE | 2026-04-25 | Added `fast`, `balanced`, `quality`, and `preset(...)` profile helpers |
+| Phase 3: Documentation And Examples | DONE | 2026-04-25 | Updated docs tables/snippets and README usage notes |
+>>>>>>> 603a782... Expand FlowMatching search space defaults and profiles
 | Ship | TODO | | |
 
 ## Spec

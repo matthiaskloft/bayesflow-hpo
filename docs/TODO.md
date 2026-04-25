@@ -62,6 +62,22 @@ Remaining work:
 
 ## Done
 
+### Package J: FlowMatching Search-Space Expansion (2026-04-25)
+Expanded `FlowMatchingSpace` to expose BayesFlow-default solver and TimeMLP
+kwargs as dimensions:
+- Added constants matching BayesFlow defaults for
+  `fm_integrate_method`, `fm_integrate_steps`, `fm_merge`, `fm_norm`,
+  `fm_residual`, `fm_spectral_normalization`, and `fm_kernel_initializer`.
+- Updated `fm_time_embedding_dim` default constant from `8` to `32`
+  to match local BayesFlow defaults when the dimension is not tuned.
+- Wired new dimensions through `build()` into
+  `integrate_kwargs` and `subnet_kwargs`.
+- Added profile helpers:
+  `FlowMatchingSpace.fast()`, `.balanced()`, `.quality()`, and
+  `.preset(...)`.
+- Updated docs (`search_spaces.md`, `defaults.md`, `api_reference.md`,
+  `optimization.md`, `README.md`) and tests.
+
 ### Package I: Source-Backed Reference Details (2026-04-10)
 
 Completed all three sub-tasks for documentation-backed implementation.
