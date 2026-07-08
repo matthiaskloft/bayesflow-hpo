@@ -9,6 +9,7 @@ import bayesflow as bf
 
 from bayesflow_hpo.search_spaces.base import (
     BaseSearchSpace,
+    BoolDimension,
     CategoricalDimension,
     FloatDimension,
     IntDimension,
@@ -52,8 +53,8 @@ class TimeSeriesNetworkSpace(BaseSearchSpace):
             "tsn_recurrent_type", constant="gru"
         )
     )
-    bidirectional: CategoricalDimension = field(
-        default_factory=lambda: CategoricalDimension(
+    bidirectional: BoolDimension = field(
+        default_factory=lambda: BoolDimension(
             "tsn_bidirectional", constant=True
         )
     )

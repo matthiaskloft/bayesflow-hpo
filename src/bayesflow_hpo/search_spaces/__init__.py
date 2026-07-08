@@ -2,6 +2,7 @@
 
 from bayesflow_hpo.search_spaces.base import (
     BaseSearchSpace,
+    BoolDimension,
     CategoricalDimension,
     Dimension,
     FloatDimension,
@@ -43,6 +44,7 @@ from bayesflow_hpo.search_spaces.training import TrainingSpace
 
 __all__ = [
     "BaseSearchSpace",
+    "BoolDimension",
     "CategoricalDimension",
     "ConsistencyModelSpace",
     "CompositeSearchSpace",

@@ -10,8 +10,8 @@ import bayesflow as bf
 
 from bayesflow_hpo.search_spaces.base import (
     BaseSearchSpace,
+    BoolDimension,
     CategoricalDimension,
-    Dimension,
     FloatDimension,
     IntDimension,
 )
@@ -70,8 +70,8 @@ class FlowMatchingSpace(BaseSearchSpace):
             constant=_timemlp_default("activation", "mish"),
         )
     )
-    use_optimal_transport: CategoricalDimension = field(
-        default_factory=lambda: CategoricalDimension(
+    use_optimal_transport: BoolDimension = field(
+        default_factory=lambda: BoolDimension(
             "fm_use_optimal_transport", constant=False
         )
     )
@@ -110,14 +110,14 @@ class FlowMatchingSpace(BaseSearchSpace):
             constant=_timemlp_default("norm", "layer"),
         )
     )
-    residual: CategoricalDimension = field(
-        default_factory=lambda: CategoricalDimension(
+    residual: BoolDimension = field(
+        default_factory=lambda: BoolDimension(
             "fm_residual",
             constant=bool(_timemlp_default("residual", True)),
         )
     )
-    spectral_normalization: CategoricalDimension = field(
-        default_factory=lambda: CategoricalDimension(
+    spectral_normalization: BoolDimension = field(
+        default_factory=lambda: BoolDimension(
             "fm_spectral_normalization",
             constant=bool(_timemlp_default("spectral_normalization", False)),
         )
@@ -128,28 +128,6 @@ class FlowMatchingSpace(BaseSearchSpace):
             constant=_timemlp_default("kernel_initializer", "he_normal"),
         )
     )
-
-    @property
-    def dimensions(self) -> list[Dimension]:
-        return [
-            self.subnet_width,
-            self.subnet_depth,
-            self.dropout,
-            self.activation,
-            self.use_optimal_transport,
-            self.time_alpha,
-            self.time_embedding_dim,
-            self.integrate_method,
-            self.integrate_steps,
-            self.merge,
-            self.norm,
-            self.residual,
-            self.spectral_normalization,
-            self.kernel_initializer,
-        ]
-
-    def sample(self, trial: Any) -> dict[str, Any]:
-        return BaseSearchSpace.sample(self, trial)
 
     @classmethod
     def preset(cls, profile: str = "default") -> FlowMatchingSpace:
@@ -184,7 +162,7 @@ class FlowMatchingSpace(BaseSearchSpace):
             ),
             merge=CategoricalDimension("fm_merge", constant="add"),
             norm=CategoricalDimension("fm_norm", choices=[None, "layer"]),
-            residual=CategoricalDimension("fm_residual", constant=False),
+            residual=BoolDimension("fm_residual", constant=False),
         )
 
     @classmethod

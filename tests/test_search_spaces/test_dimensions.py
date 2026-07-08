@@ -1,8 +1,15 @@
 """Tests for dimension dataclass validation."""
 
-import pytest
+from dataclasses import dataclass, field
 
-from bayesflow_hpo.search_spaces.base import IntDimension
+import pytest
+from conftest import FakeTrial
+
+from bayesflow_hpo.search_spaces.base import (
+    BaseSearchSpace,
+    BoolDimension,
+    IntDimension,
+)
 
 
 class TestIntDimensionLogStepValidation:
@@ -35,3 +42,28 @@ class TestIntDimensionLogStepValidation:
         """Constants bypass range validation entirely."""
         dim = IntDimension("x", constant=42)
         assert dim.log is False
+
+
+@dataclass
+class _DummyBoolSpace(BaseSearchSpace):
+    """Minimal search space with a single BoolDimension field."""
+
+    flag: BoolDimension = field(default_factory=lambda: BoolDimension("flag"))
+
+    def build(self, params):
+        return params
+
+
+class TestBoolDimension:
+    """BoolDimension is discovered and sampled like other dimension types."""
+
+    def test_constant_is_discovered_as_dimension_and_constant(self):
+        space = _DummyBoolSpace(flag=BoolDimension("flag", constant=True))
+        assert space.dimensions == [BoolDimension("flag", constant=True)]
+        assert space.constants == {"flag": True}
+
+    def test_non_constant_samples_via_suggest_categorical(self):
+        space = _DummyBoolSpace(flag=BoolDimension("flag"))
+        params = space.sample(FakeTrial())
+        # FakeTrial.suggest_categorical returns choices[0]
+        assert params["flag"] is True
