@@ -1,5 +1,9 @@
 # bayesflow-hpo
 
+Generic hyperparameter optimization for BayesFlow 2.x models,
+wrapping Optuna multi-objective search with BayesFlow-aware
+search spaces, builders, and validation.
+
 ## Source-Backed Implementation (MANDATORY)
 
 - EVERYTHING that is implemented must be theoretically backed by either a research article (accessed via full text) or package documentation.
@@ -7,10 +11,6 @@
 - Do NOT blindly use in-memory knowledge from LLM training — verify against actual sources first.
 - Document the references backing a given implementation in docstrings and docs (e.g., API/architecture documentation).
 - Verify references via the OpenAlex API and save them formatted in APA 7 in [`docs/references.md`](docs/references.md).
-
-Generic hyperparameter optimization for BayesFlow 2.x models,
-wrapping Optuna multi-objective search with BayesFlow-aware
-search spaces, builders, and validation.
 
 ## Scope
 
