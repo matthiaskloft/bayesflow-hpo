@@ -189,9 +189,7 @@ class FlowMatchingSpace(BaseSearchSpace):
             subnet_width=IntDimension("fm_subnet_width", low=96, high=320, step=32),
             subnet_depth=IntDimension("fm_subnet_depth", low=3, high=8),
             dropout=FloatDimension("fm_dropout", low=0.0, high=0.1),
-            use_optimal_transport=CategoricalDimension(
-                "fm_use_optimal_transport", choices=[False, True]
-            ),
+            use_optimal_transport=BoolDimension("fm_use_optimal_transport"),
             time_embedding_dim=IntDimension(
                 "fm_time_embedding_dim", low=32, high=96, step=32
             ),

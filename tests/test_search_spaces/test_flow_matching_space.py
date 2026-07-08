@@ -124,7 +124,7 @@ def test_quality_profile_samples_quality_range():
     assert params["fm_subnet_width"] == 96
     assert params["fm_subnet_depth"] == 3
     assert params["fm_time_embedding_dim"] == 32
-    assert params["fm_use_optimal_transport"] is False
+    assert params["fm_use_optimal_transport"] is True
     assert params["fm_integrate_method"] == "tsit5"
     assert params["fm_integrate_steps"] == 32
 

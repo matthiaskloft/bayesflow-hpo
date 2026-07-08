@@ -777,7 +777,7 @@ class TestSelectBestTrial:
         # Pareto front should have at least 2 members.
         assert len(result.pareto_front) >= 2
 
-    def test_best_trial_is_never_dominated(self):
+    def test_best_trial_is_never_dominated(self) -> None:
         """The returned trial must always be a Pareto-front member.
 
         Regression test: a dominated candidate can tie a Pareto-front
@@ -788,6 +788,12 @@ class TestSelectBestTrial:
         trial number gives it a mean rank equal to every front member.
         Selecting purely by mean rank over all candidates (ignoring the
         Pareto front) would wrongly return the dominated trial 0.
+
+        The m1 priority threshold must be unmet so m1 is promoted into
+        Phase 2 alongside m2 — otherwise m1 drops out of the remaining
+        objectives, ranking collapses to m2 alone, and the (single-
+        objective) Pareto front trivially coincides with the argmin,
+        so the old buggy code would already avoid trial 0 here too.
         """
         study = optuna.create_study(
             directions=["minimize", "minimize"],
@@ -811,11 +817,12 @@ class TestSelectBestTrial:
             )
             study.add_trial(trial)
 
-        trial, result = select_best_trial(study, priorities=[("m1", 1000.0)])
+        trial, result = select_best_trial(study, priorities=[("m1", 0.0)])
 
         # Trial 0 is dominated and must never be selected.
-        assert trial.number != 0
-        assert trial.number in {t.number for t in result.pareto_front}
+        assert result.thresholds_met["m1"] is False
+        assert {t.number for t in result.pareto_front} == {1, 2, 3}
+        assert trial.number == 1
 
     def test_deterministic_tiebreak(self):
         """Tied mean-rank trials are broken by trial number."""

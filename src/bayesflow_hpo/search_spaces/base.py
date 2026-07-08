@@ -197,10 +197,11 @@ class BaseSearchSpace:
     """Base class with automatic ``dimensions``, ``sample``, and validation.
 
     Subclasses declare hyperparameters as dataclass fields of type
-    :class:`IntDimension`, :class:`FloatDimension`, or
-    :class:`CategoricalDimension`.  The ``dimensions`` property, ``sample``
-    method, and ``_validate`` helper are derived automatically — subclasses
-    only need to implement ``build``.
+    :class:`IntDimension`, :class:`FloatDimension`,
+    :class:`CategoricalDimension`, or :class:`BoolDimension`.  The
+    ``dimensions`` property, ``sample`` method, and ``_validate`` helper
+    are derived automatically — subclasses only need to implement
+    ``build``.
 
     Dimensions with ``constant`` set are injected directly into the params
     dict without going through Optuna.  Use the ``.constants`` property to

@@ -892,14 +892,14 @@ def select_best_trial(
 
     # Pick the Pareto-front member with lowest mean rank, breaking ties
     # by trial number for determinism.
-    front_mean_ranks = mean_ranks[front_indices]
-    min_rank = front_mean_ranks.min()
-    tied_front_indices = [
+    front_mean_ranks: np.ndarray = mean_ranks[front_indices]
+    min_rank: float = float(front_mean_ranks.min())
+    tied_front_indices: list[int] = [
         idx
         for idx, rank in zip(front_indices, front_mean_ranks)
         if rank == min_rank
     ]
-    best_idx = min(tied_front_indices, key=lambda i: candidates[i].number)
+    best_idx: int = min(tied_front_indices, key=lambda i: candidates[i].number)
     best_trial = candidates[best_idx]
 
     return best_trial, SelectionResult(
