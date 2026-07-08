@@ -74,9 +74,22 @@ def test_time_embedding_dim_is_constant():
 
 
 def test_untuned_defaults_match_bayesflow_defaults():
+    """Untuned constants track BayesFlow's own defaults where introspectable.
+
+    ``FlowMatching.INTEGRATE_DEFAULT_CONFIG`` is read defensively in
+    production code (:func:`_flowmatching_integrate_default`) because it
+    isn't part of BayesFlow's public API contract and may be renamed or
+    removed across versions. Mirror that same defensive lookup here so
+    this test validates the real defaults when the attribute is
+    available, and validates the documented fallback behavior
+    (``"tsit5"``/``"adaptive"``) when it isn't — rather than crashing on
+    BayesFlow versions that no longer expose it.
+    """
     space = FlowMatchingSpace()
     timemlp_sig = inspect.signature(bf.networks.TimeMLP)
-    integrate_defaults = bf.networks.FlowMatching.INTEGRATE_DEFAULT_CONFIG
+    integrate_defaults = getattr(
+        bf.networks.FlowMatching, "INTEGRATE_DEFAULT_CONFIG", None
+    )
 
     assert space.activation.constant == timemlp_sig.parameters["activation"].default
     assert (
@@ -94,8 +107,13 @@ def test_untuned_defaults_match_bayesflow_defaults():
         space.kernel_initializer.constant
         == timemlp_sig.parameters["kernel_initializer"].default
     )
-    assert space.integrate_method.constant == integrate_defaults["method"]
-    assert space.integrate_steps.constant == integrate_defaults["steps"]
+
+    if isinstance(integrate_defaults, dict):
+        assert space.integrate_method.constant == integrate_defaults["method"]
+        assert space.integrate_steps.constant == integrate_defaults["steps"]
+    else:
+        assert space.integrate_method.constant == "tsit5"
+        assert space.integrate_steps.constant == "adaptive"
 
 
 def test_fast_profile_samples_speed_oriented_defaults():
