@@ -9,6 +9,7 @@ import bayesflow as bf
 
 from bayesflow_hpo.search_spaces.base import (
     BaseSearchSpace,
+    BoolDimension,
     CategoricalDimension,
     FloatDimension,
     IntDimension,
@@ -72,8 +73,8 @@ class CouplingFlowSpace(BaseSearchSpace):
             "cf_permutation", constant="random"
         )
     )
-    use_actnorm: CategoricalDimension = field(
-        default_factory=lambda: CategoricalDimension(
+    use_actnorm: BoolDimension = field(
+        default_factory=lambda: BoolDimension(
             "cf_use_actnorm", constant=True
         )
     )

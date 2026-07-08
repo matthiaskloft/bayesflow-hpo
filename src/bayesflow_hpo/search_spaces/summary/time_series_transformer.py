@@ -27,6 +27,8 @@ class TimeSeriesTransformerSpace(BaseSearchSpace):
     --------------------------------
     tst_mlp_width : int
         Feed-forward MLP width. Fixed at ``128``.
+    tst_mlp_depth : int
+        Feed-forward MLP depth. Fixed at ``2``.
     tst_time_embedding : str
         Time embedding type. Fixed at ``"time2vec"``.
     """
@@ -50,6 +52,9 @@ class TimeSeriesTransformerSpace(BaseSearchSpace):
     )
     mlp_width: IntDimension = field(
         default_factory=lambda: IntDimension("tst_mlp_width", constant=128)
+    )
+    mlp_depth: IntDimension = field(
+        default_factory=lambda: IntDimension("tst_mlp_depth", constant=2)
     )
     time_embed: CategoricalDimension = field(
         default_factory=lambda: CategoricalDimension(
@@ -76,6 +81,7 @@ class TimeSeriesTransformerSpace(BaseSearchSpace):
         embed_dim = int(params["tst_embed_dim"])
         num_heads = int(params["tst_num_heads"])
         mlp_width = int(params["tst_mlp_width"])
+        mlp_depth = int(params["tst_mlp_depth"])
 
         return bf.networks.TimeSeriesTransformer(
             summary_dim=int(params["tst_summary_dim"]),
@@ -83,5 +89,6 @@ class TimeSeriesTransformerSpace(BaseSearchSpace):
             num_heads=tuple([num_heads] * num_layers),
             dropout=float(params["tst_dropout"]),
             mlp_widths=tuple([mlp_width] * num_layers),
+            mlp_depths=tuple([mlp_depth] * num_layers),
             time_embedding=params["tst_time_embedding"],
         )

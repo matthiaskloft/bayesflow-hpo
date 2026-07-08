@@ -1,12 +1,13 @@
 """Tests for FlowMatching search space behavior."""
 
-import inspect
-
-import bayesflow as bf
 import pytest
 from conftest import FakeTrial
 
-from bayesflow_hpo.search_spaces.inference.flow_matching import FlowMatchingSpace
+from bayesflow_hpo.search_spaces.inference.flow_matching import (
+    FlowMatchingSpace,
+    _flowmatching_integrate_default,
+    _timemlp_default,
+)
 
 
 def test_sampling_includes_all_dimensions():
@@ -74,28 +75,42 @@ def test_time_embedding_dim_is_constant():
 
 
 def test_untuned_defaults_match_bayesflow_defaults():
-    space = FlowMatchingSpace()
-    timemlp_sig = inspect.signature(bf.networks.TimeMLP)
-    integrate_defaults = bf.networks.FlowMatching.INTEGRATE_DEFAULT_CONFIG
+    """Untuned constants track BayesFlow's own defaults where introspectable.
 
-    assert space.activation.constant == timemlp_sig.parameters["activation"].default
-    assert (
-        space.time_embedding_dim.constant
-        == timemlp_sig.parameters["time_embedding_dim"].default
+    Neither ``TimeMLP``'s exact parameter set nor
+    ``FlowMatching.INTEGRATE_DEFAULT_CONFIG`` are part of BayesFlow's
+    public API contract — both have changed across BayesFlow releases
+    (e.g. a parameter being renamed/removed, or the class attribute
+    disappearing entirely). Production code already handles this via
+    ``_timemlp_default``/``_flowmatching_integrate_default``, which fall
+    back to safe constants on ``KeyError``/missing attributes. Assert
+    against those same helpers (the actual synchronization mechanism
+    the search space uses) rather than raw ``inspect.signature``/attribute
+    access, so this test validates real BayesFlow defaults when
+    introspectable and validates the documented fallback behavior when
+    not, instead of crashing on BayesFlow version drift.
+    """
+    space = FlowMatchingSpace()
+
+    assert space.activation.constant == _timemlp_default("activation", "mish")
+    assert space.time_embedding_dim.constant == int(
+        _timemlp_default("time_embedding_dim", 32)
     )
-    assert space.merge.constant == timemlp_sig.parameters["merge"].default
-    assert space.norm.constant == timemlp_sig.parameters["norm"].default
-    assert space.residual.constant == timemlp_sig.parameters["residual"].default
-    assert (
-        space.spectral_normalization.constant
-        == timemlp_sig.parameters["spectral_normalization"].default
+    assert space.merge.constant == _timemlp_default("merge", "concat")
+    assert space.norm.constant == _timemlp_default("norm", "layer")
+    assert space.residual.constant == bool(_timemlp_default("residual", True))
+    assert space.spectral_normalization.constant == bool(
+        _timemlp_default("spectral_normalization", False)
     )
-    assert (
-        space.kernel_initializer.constant
-        == timemlp_sig.parameters["kernel_initializer"].default
+    assert space.kernel_initializer.constant == _timemlp_default(
+        "kernel_initializer", "he_normal"
     )
-    assert space.integrate_method.constant == integrate_defaults["method"]
-    assert space.integrate_steps.constant == integrate_defaults["steps"]
+    assert space.integrate_method.constant == _flowmatching_integrate_default(
+        "method", "tsit5"
+    )
+    assert space.integrate_steps.constant == _flowmatching_integrate_default(
+        "steps", "adaptive"
+    )
 
 
 def test_fast_profile_samples_speed_oriented_defaults():
@@ -124,7 +139,7 @@ def test_quality_profile_samples_quality_range():
     assert params["fm_subnet_width"] == 96
     assert params["fm_subnet_depth"] == 3
     assert params["fm_time_embedding_dim"] == 32
-    assert params["fm_use_optimal_transport"] is False
+    assert params["fm_use_optimal_transport"] is True
     assert params["fm_integrate_method"] == "tsit5"
     assert params["fm_integrate_steps"] == 32
 

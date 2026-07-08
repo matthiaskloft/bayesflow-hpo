@@ -9,6 +9,7 @@ import bayesflow as bf
 
 from bayesflow_hpo.search_spaces.base import (
     BaseSearchSpace,
+    BoolDimension,
     CategoricalDimension,
     FloatDimension,
     IntDimension,
@@ -65,8 +66,8 @@ class DeepSetSpace(BaseSearchSpace):
             "ds_activation", constant="silu"
         )
     )
-    spectral_norm: CategoricalDimension = field(
-        default_factory=lambda: CategoricalDimension(
+    spectral_norm: BoolDimension = field(
+        default_factory=lambda: BoolDimension(
             "ds_spectral_normalization", constant=False
         )
     )

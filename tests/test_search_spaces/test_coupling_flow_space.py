@@ -2,7 +2,7 @@
 
 from conftest import FakeTrial
 
-from bayesflow_hpo.search_spaces.base import CategoricalDimension
+from bayesflow_hpo.search_spaces.base import BoolDimension
 from bayesflow_hpo.search_spaces.inference.coupling_flow import CouplingFlowSpace
 
 
@@ -24,9 +24,7 @@ def test_sampling_includes_all_dimensions():
 
 def test_user_can_widen_constant_to_tunable():
     space = CouplingFlowSpace(
-        use_actnorm=CategoricalDimension(
-            "cf_use_actnorm", choices=[True, False]
-        )
+        use_actnorm=BoolDimension("cf_use_actnorm")
     )
     params = space.sample(FakeTrial())
     # Now sampled via Optuna, not constant

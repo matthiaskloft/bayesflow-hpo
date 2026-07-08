@@ -9,6 +9,7 @@ import bayesflow as bf
 
 from bayesflow_hpo.search_spaces.base import (
     BaseSearchSpace,
+    BoolDimension,
     CategoricalDimension,
     FloatDimension,
     IntDimension,
@@ -59,8 +60,8 @@ class FusionTransformerSpace(BaseSearchSpace):
     mlp_depth: IntDimension = field(
         default_factory=lambda: IntDimension("ft_mlp_depth", constant=2)
     )
-    bidirectional: CategoricalDimension = field(
-        default_factory=lambda: CategoricalDimension(
+    bidirectional: BoolDimension = field(
+        default_factory=lambda: BoolDimension(
             "ft_bidirectional", constant=True
         )
     )

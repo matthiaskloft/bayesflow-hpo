@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
 
 from bayesflow_hpo.search_spaces.base import (
     BaseSearchSpace,
-    Dimension,
     FloatDimension,
     IntDimension,
 )
@@ -27,10 +25,3 @@ class TrainingSpace(BaseSearchSpace):
             "batch_size", constant=256
         )
     )
-
-    @property
-    def dimensions(self) -> list[Dimension]:
-        return [self.initial_lr, self.batch_size]
-
-    def sample(self, trial: Any) -> dict[str, Any]:
-        return BaseSearchSpace.sample(self, trial)

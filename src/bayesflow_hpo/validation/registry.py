@@ -539,7 +539,7 @@ def make_coverage_metric(
         # Talts et al. (2018), Theorem 2: ranks uniform iff posterior correct
         ranks = np.sum(draws < true_values[:, None], axis=1)
         # continuity correction, standard practice
-        normalized_ranks = ranks / (n_samples + 1)
+        normalized_ranks = (ranks + 0.5) / (n_samples + 1)
 
         result: dict[str, float] = {}
         cal_errors: list[float] = []

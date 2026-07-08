@@ -43,6 +43,7 @@ from bayesflow_hpo.objectives import (
     compute_inference_time_per_dataset,
     extract_multi_objective_values,
     get_param_count,
+    mean_objective_score,
     normalize_param_count,
 )
 from bayesflow_hpo.optimization.callbacks import (
@@ -696,6 +697,7 @@ class GenericObjective:
                 cleanup_trial()
                 return self._penalty()
         except MemoryError:
+            cleanup_trial()
             raise
         except Exception as exc:
             logger.warning(
@@ -884,7 +886,7 @@ class GenericObjective:
         # --- Step 10: Checkpoint pool ---
         self._checkpoint_pool.maybe_save(
             trial_number=trial.number,
-            objective_value=values[0],
+            objective_value=mean_objective_score(values),
             approximator=approximator,
         )
 

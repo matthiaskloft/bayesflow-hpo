@@ -870,8 +870,10 @@ def select_best_trial(
     front_indices = _pareto_front_indices(obj_matrix, minimize_flags)
     pareto_trials = [candidates[i] for i in front_indices]
 
-    # Tiebreak: lowest mean rank across remaining objectives
-    # (rank computed among ALL Phase 1 survivors).
+    # Tiebreak: lowest mean rank across remaining objectives, computed
+    # among ALL Phase 1 survivors but restricted to Pareto-front members
+    # when selecting the winner, so a dominated candidate can never be
+    # returned as "best" (see NSGA-II front semantics referenced above).
     n_candidates = len(candidates)
     trial_numbers = np.array([t.number for t in candidates])
     ranks = np.zeros((n_candidates, len(remaining_obj_indices)))
@@ -888,11 +890,16 @@ def select_best_trial(
 
     mean_ranks = ranks.mean(axis=1)
 
-    # Pick the candidate with lowest mean rank, breaking ties by
-    # trial number for determinism.
-    min_rank = mean_ranks.min()
-    tied_indices = np.where(mean_ranks == min_rank)[0]
-    best_idx = int(min(tied_indices, key=lambda i: candidates[i].number))
+    # Pick the Pareto-front member with lowest mean rank, breaking ties
+    # by trial number for determinism.
+    front_mean_ranks: np.ndarray = mean_ranks[front_indices]
+    min_rank: float = float(front_mean_ranks.min())
+    tied_front_indices: list[int] = [
+        idx
+        for idx, rank in zip(front_indices, front_mean_ranks)
+        if rank == min_rank
+    ]
+    best_idx: int = min(tied_front_indices, key=lambda i: candidates[i].number)
     best_trial = candidates[best_idx]
 
     return best_trial, SelectionResult(

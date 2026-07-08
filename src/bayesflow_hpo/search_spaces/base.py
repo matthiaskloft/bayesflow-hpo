@@ -3,7 +3,8 @@
 This module defines the building blocks for hyperparameter search spaces:
 
 - **Dimension dataclasses** (``IntDimension``, ``FloatDimension``,
-  ``CategoricalDimension``) describe individual tunable knobs.
+  ``CategoricalDimension``, ``BoolDimension``) describe individual tunable
+  knobs.
 - **SearchSpace protocol** defines the three-method interface every
   network search space must satisfy: ``dimensions``, ``sample``, ``build``.
 - **BaseSearchSpace** provides automatic ``dimensions`` discovery,
@@ -155,9 +156,26 @@ class CategoricalDimension:
             )
 
 
-Dimension = IntDimension | FloatDimension | CategoricalDimension
+@dataclass
+class BoolDimension:
+    """Boolean hyperparameter dimension.
 
-_DIMENSION_TYPES = (IntDimension, FloatDimension, CategoricalDimension)
+    Parameters
+    ----------
+    name
+        Optuna parameter name (must be unique within a search space).
+    constant
+        Fix this dimension to a specific value.  When unset, the
+        dimension is tunable over ``{True, False}``.
+    """
+
+    name: str
+    constant: Any = field(default=_UNSET)
+
+
+Dimension = IntDimension | FloatDimension | CategoricalDimension | BoolDimension
+
+_DIMENSION_TYPES = (IntDimension, FloatDimension, CategoricalDimension, BoolDimension)
 
 
 class SearchSpace(Protocol):
@@ -179,10 +197,11 @@ class BaseSearchSpace:
     """Base class with automatic ``dimensions``, ``sample``, and validation.
 
     Subclasses declare hyperparameters as dataclass fields of type
-    :class:`IntDimension`, :class:`FloatDimension`, or
-    :class:`CategoricalDimension`.  The ``dimensions`` property, ``sample``
-    method, and ``_validate`` helper are derived automatically — subclasses
-    only need to implement ``build``.
+    :class:`IntDimension`, :class:`FloatDimension`,
+    :class:`CategoricalDimension`, or :class:`BoolDimension`.  The
+    ``dimensions`` property, ``sample`` method, and ``_validate`` helper
+    are derived automatically — subclasses only need to implement
+    ``build``.
 
     Dimensions with ``constant`` set are injected directly into the params
     dict without going through Optuna.  Use the ``.constants`` property to
@@ -194,8 +213,9 @@ class BaseSearchSpace:
         """Collect all ``Dimension`` fields from this dataclass instance.
 
         Iterates over dataclass fields and returns those whose runtime
-        value is an ``IntDimension``, ``FloatDimension``, or
-        ``CategoricalDimension``.  This auto-discovery avoids requiring
+        value is an ``IntDimension``, ``FloatDimension``,
+        ``CategoricalDimension``, or ``BoolDimension``.  This auto-discovery
+        avoids requiring
         subclasses to manually list their dimensions.
         """
         try:
@@ -271,6 +291,10 @@ class BaseSearchSpace:
             elif isinstance(dim, CategoricalDimension):
                 params[dim.name] = trial.suggest_categorical(
                     dim.name, list(dim.choices)
+                )
+            elif isinstance(dim, BoolDimension):
+                params[dim.name] = trial.suggest_categorical(
+                    dim.name, [True, False]
                 )
             else:
                 raise TypeError(f"Unsupported dimension type: {type(dim)!r}")

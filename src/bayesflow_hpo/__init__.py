@@ -42,6 +42,7 @@ from bayesflow_hpo.objectives import (
     extract_multi_objective_values,
     extract_objective_values,
     get_param_count,
+    mean_objective_score,
     normalize_param_count,
 )
 from bayesflow_hpo.optimization import (
@@ -90,6 +91,7 @@ from bayesflow_hpo.results import (
     trials_to_dataframe,
 )
 from bayesflow_hpo.search_spaces import (
+    BoolDimension,
     CategoricalDimension,
     CompositeSearchSpace,
     ConsistencyModelSpace,
@@ -160,6 +162,7 @@ __all__ = [
     "extract_multi_objective_values",
     "extract_objective_values",
     "get_param_count",
+    "mean_objective_score",
     "normalize_param_count",
     # Optimization
     "CheckpointPool",
@@ -202,6 +205,7 @@ __all__ = [
     "trial_table",
     "trials_to_dataframe",
     # Search spaces
+    "BoolDimension",
     "CategoricalDimension",
     "CompositeSearchSpace",
     "ConsistencyModelSpace",
