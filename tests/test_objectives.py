@@ -11,6 +11,7 @@ from bayesflow_hpo.objectives import (
     denormalize_param_count,
     extract_multi_objective_values,
     extract_objective_values,
+    mean_objective_score,
     normalize_param_count,
 )
 
@@ -140,6 +141,27 @@ def test_extract_multi_rejects_unknown_mode():
         )
 
 
+# --- mean_objective_score tests ---
+
+
+def test_mean_objective_score_multi_value_pareto_shape():
+    """Pareto-shaped values: mean of all metrics, excluding the last (cost)."""
+    values = (0.10, 0.30, 0.99)  # cal_err, nrmse, cost
+    assert np.isclose(mean_objective_score(values), 0.20)
+
+
+def test_mean_objective_score_two_value_mean_shape():
+    """Mean-mode shape (metric, cost) reduces to the metric itself."""
+    values = (0.30, 0.80)
+    assert mean_objective_score(values) == 0.30
+
+
+def test_mean_objective_score_single_value():
+    """Single-element tuple returns that element directly."""
+    values = (0.42,)
+    assert mean_objective_score(values) == 0.42
+
+
 # --- normalize_param_count tests ---
 
 
@@ -217,6 +239,15 @@ def test_denormalize_raises_on_max_lt_min():
     """denormalize_param_count raises ValueError when max_count < min_count."""
     with pytest.raises(ValueError, match="max_count.*must be greater"):
         denormalize_param_count(0.5, min_count=100, max_count=10)
+
+
+def test_denormalize_round_trips_with_auto_tightened_max_count():
+    """denormalize_param_count must mirror normalize_param_count's
+    auto-tightening so round-tripping a custom max_count recovers the
+    original param count."""
+    normalized = normalize_param_count(3000, max_count=5000)
+    round_tripped = denormalize_param_count(normalized, max_count=5000)
+    assert abs(round_tripped - 3000) <= 1
 
 
 # --- compute_inference_time_per_dataset tests ---

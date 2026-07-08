@@ -350,6 +350,12 @@ def test_objective_reraises_memory_error_from_probe(monkeypatch):
         lambda params: 1.0,
     )
 
+    cleanup_called = []
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.cleanup_trial",
+        lambda: cleanup_called.append(True),
+    )
+
     class _OOMApprox:
         def compile(self, *args, **kwargs):
             pass
@@ -384,6 +390,9 @@ def test_objective_reraises_memory_error_from_probe(monkeypatch):
     trial = _FakeTrial()
     with pytest.raises(MemoryError, match="CUDA OOM"):
         objective(trial)
+
+    # GPU cache must be released before the MemoryError propagates.
+    assert cleanup_called == [True]
 
 
 def test_objective_config_early_stopping_defaults():
@@ -1166,6 +1175,71 @@ def test_training_loss_fallback_single_metric_pareto():
     assert len(values) == 2
     assert values[0] == pytest.approx(0.25)
     assert 0.0 < values[1] < 1e6  # normalized param count
+
+
+def test_checkpoint_pool_receives_mean_of_pareto_metrics(monkeypatch):
+    """Step 10 must rank/evict by the mean of all metrics, not just the first.
+
+    Regression test: previously ``values[0]`` (the first pareto metric
+    only) was passed to the checkpoint pool, silently ignoring every
+    other objective metric.
+    """
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.estimate_peak_memory_mb",
+        lambda params: 1.0,
+    )
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.cleanup_trial",
+        lambda: None,
+    )
+
+    class _FakeSimulator:
+        def sample(self, shape):
+            return {}
+
+    class _FakeAdapter:
+        def __call__(self, data):
+            return data
+
+    saved_calls = []
+
+    class _RecordingCheckpointPool:
+        def maybe_save(self, trial_number, objective_value, approximator):
+            saved_calls.append(objective_value)
+            return True
+
+    objective = GenericObjective(
+        ObjectiveConfig(
+            simulator=_FakeSimulator(),
+            adapter=_FakeAdapter(),
+            search_space=_FakeSearchSpace(),
+            validation_data=_DUMMY_VALIDATION_DATA_1COND,
+            epochs=1,
+            num_batches=1,
+            build_approximator_fn=lambda hp: _FakeApproximator(10_000),
+            train_fn=lambda approx, sim, hp, cb: None,
+            validate_fn=lambda approx, vd, n: {
+                "calibration_error": 0.05,  # first pareto metric — good
+                "nrmse": 0.95,  # second pareto metric — bad
+            },
+            objective_metrics=["calibration_error", "nrmse"],
+            objective_mode="pareto",
+            checkpoint_pool=_RecordingCheckpointPool(),
+        )
+    )
+
+    trial = _FakeTrial()
+    values = objective(trial)
+
+    # values = (calibration_error, nrmse, cost_score)
+    assert values[0] == pytest.approx(0.05)
+    assert values[1] == pytest.approx(0.95)
+
+    # The checkpoint pool must have received the mean of the two
+    # metrics (excluding cost), not just values[0].
+    assert len(saved_calls) == 1
+    assert saved_calls[0] == pytest.approx(np.mean([0.05, 0.95]))
+    assert saved_calls[0] != values[0]
 
 
 def test_hard_metric_constraints_pass_through_when_satisfied(monkeypatch):

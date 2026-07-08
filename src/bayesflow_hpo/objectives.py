@@ -60,6 +60,36 @@ def get_param_count(model: Any) -> int:
     raise TypeError(f"Cannot count parameters for type: {type(model)}")
 
 
+def _resolve_min_count(min_count: int, max_count: int) -> int:
+    """Auto-tighten ``min_count`` to match ``normalize_param_count``.
+
+    When ``max_count`` is below the default ``MAX_PARAM_COUNT`` and
+    ``min_count`` is still at the default, the lower bound is
+    automatically tightened to ``max_count / 100`` so the normalized
+    values spread across the full [0, 1] range. Also clamps non-positive
+    values to ``1``.
+
+    Parameters
+    ----------
+    min_count
+        Lower reference as passed by the caller.
+    max_count
+        Upper reference as passed by the caller.
+
+    Returns
+    -------
+    int
+        The resolved ``min_count`` to use.
+    """
+    # Auto-tighten min_count when user specified a smaller max_count
+    # but left min_count at its default.
+    if min_count == MIN_PARAM_COUNT and max_count < MAX_PARAM_COUNT:
+        min_count = max(1, max_count // 100)
+    if min_count <= 0:
+        min_count = 1
+    return min_count
+
+
 def normalize_param_count(
     param_count: int,
     min_count: int = MIN_PARAM_COUNT,
@@ -89,14 +119,9 @@ def normalize_param_count(
     ValueError
         If *max_count* <= *min_count* after auto-tightening.
     """
-    # Auto-tighten min_count when user specified a smaller max_count
-    # but left min_count at its default.
-    if min_count == MIN_PARAM_COUNT and max_count < MAX_PARAM_COUNT:
-        min_count = max(1, max_count // 100)
+    min_count = _resolve_min_count(min_count, max_count)
     if param_count <= 0:
         return 1.0  # worst score — signals broken or unbuilt model
-    if min_count <= 0:
-        min_count = 1
     if max_count <= min_count:
         raise ValueError(
             f"max_count ({max_count}) must be greater than min_count ({min_count})"
@@ -117,10 +142,9 @@ def denormalize_param_count(
     ValueError
         If *max_count* <= *min_count*.
     """
+    min_count = _resolve_min_count(min_count, max_count)
     if normalized <= 0:
         return 0
-    if min_count <= 0:
-        min_count = 1
     if max_count <= min_count:
         raise ValueError(
             f"max_count ({max_count}) must be greater than min_count ({min_count})"
@@ -248,3 +272,30 @@ def extract_multi_objective_values(
     # "mean" mode — arithmetic mean of all metric values
     mean_val = float(np.mean(raw_values))
     return (mean_val, cost_score)
+
+
+def mean_objective_score(values: list[float] | tuple[float, ...]) -> float:
+    """Reduce a multi-objective values tuple to a single ranking score.
+
+    Averages all elements except the last (assumed to be the cost
+    score), matching the ``(*metric_values, cost_score)`` shape
+    returned by :func:`extract_multi_objective_values` in both
+    ``"pareto"`` mode (multiple metrics + cost) and ``"mean"`` mode
+    (single metric + cost). Falls back to the sole element when only
+    one value is given.
+
+    Parameters
+    ----------
+    values
+        Objective values tuple, e.g. ``(metric_1, ..., metric_n,
+        cost_score)``.
+
+    Returns
+    -------
+    float
+        Mean of all elements except the last, or the single element
+        when ``len(values) == 1``.
+    """
+    if len(values) > 1:
+        return float(np.mean(values[:-1]))
+    return float(values[0])

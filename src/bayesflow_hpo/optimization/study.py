@@ -22,10 +22,10 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
-import numpy as np
 import optuna
 from optuna.trial import TrialState
 
+from bayesflow_hpo.objectives import mean_objective_score
 from bayesflow_hpo.optimization.constraints import MetricConstraintSpec
 from bayesflow_hpo.results.extraction import _objective_column_names
 
@@ -97,12 +97,8 @@ def _mean_ranking_key(trial: optuna.trial.FrozenTrial) -> float:
     Falls back to the first objective value when multi-objective values
     are not available.
     """
-    if trial.values and len(trial.values) > 1:
-        # All values except the last (cost score) — lower is better.
-        metric_values = trial.values[:-1]
-        return float(np.mean(metric_values))
     if trial.values:
-        return float(trial.values[0])
+        return mean_objective_score(trial.values)
     return float("inf")
 
 
