@@ -777,6 +777,46 @@ class TestSelectBestTrial:
         # Pareto front should have at least 2 members.
         assert len(result.pareto_front) >= 2
 
+    def test_best_trial_is_never_dominated(self):
+        """The returned trial must always be a Pareto-front member.
+
+        Regression test: a dominated candidate can tie a Pareto-front
+        member on mean rank when it is dominated via a tied objective
+        value (rank ties are broken by trial number, not objective
+        value). Trial 0 below is dominated by trial 1 (trial 1 has a
+        strictly smaller obj1 and a tied obj2), yet trial 0's lower
+        trial number gives it a mean rank equal to every front member.
+        Selecting purely by mean rank over all candidates (ignoring the
+        Pareto front) would wrongly return the dominated trial 0.
+        """
+        study = optuna.create_study(
+            directions=["minimize", "minimize"],
+            study_name="dominated_tiebreak_test",
+        )
+        study.set_metric_names(["m1", "m2"])
+        configs = [
+            (5, 5),  # trial 0: dominated by trial 1
+            (4, 5),  # trial 1: dominates trial 0 -> Pareto front
+            (1, 100),  # trial 2: extreme obj1 -> Pareto front
+            (100, 1),  # trial 3: extreme obj2 -> Pareto front
+        ]
+        for x, y in configs:
+            trial = optuna.trial.create_trial(
+                params={"x": float(x)},
+                distributions={
+                    "x": optuna.distributions.FloatDistribution(0, 200),
+                },
+                values=[float(x), float(y)],
+                state=optuna.trial.TrialState.COMPLETE,
+            )
+            study.add_trial(trial)
+
+        trial, result = select_best_trial(study, priorities=[("m1", 1000.0)])
+
+        # Trial 0 is dominated and must never be selected.
+        assert trial.number != 0
+        assert trial.number in {t.number for t in result.pareto_front}
+
     def test_deterministic_tiebreak(self):
         """Tied mean-rank trials are broken by trial number."""
         # Create 2 trials with identical objective values.
