@@ -49,6 +49,7 @@ from bayesflow_hpo.search_spaces.summary.time_series_transformer import (
         (TimeSeriesNetworkSpace(), "tsn_bidirectional", True),
         (TimeSeriesNetworkSpace(), "tsn_skip_steps", 4),
         (TimeSeriesTransformerSpace(), "tst_mlp_width", 128),
+        (TimeSeriesTransformerSpace(), "tst_mlp_depth", 2),
         (TimeSeriesTransformerSpace(), "tst_time_embedding", "time2vec"),
         (FusionTransformerSpace(), "ft_mlp_width", 128),
         (FusionTransformerSpace(), "ft_mlp_depth", 2),
@@ -107,7 +108,7 @@ def test_constant_injected_during_sampling(space, constant_key, expected_value):
         ),
         (
             TimeSeriesTransformerSpace(),
-            {"tst_mlp_width", "tst_time_embedding"},
+            {"tst_mlp_width", "tst_mlp_depth", "tst_time_embedding"},
         ),
     ],
 )
