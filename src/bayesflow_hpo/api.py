@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from collections.abc import Sequence
+from typing import Any, Literal
 
 import bayesflow as bf
 import optuna
@@ -120,10 +121,14 @@ def optimize(
     # Pruning
     pruning_strategy: str | tuple[str, str] = "dominance",
     # Training
+    training_mode: Literal["fixed_budget", "open_ended"] = "fixed_budget",
     epochs: int = 200,
     num_batches: int = 50,
-    early_stopping_patience: int = 5,
+    early_stopping_patience: int | None = None,
     early_stopping_window: int = 7,
+    early_stopping_monitor: str = "objective_mean",
+    lr_warmup_epochs: int | Sequence[int] | None = None,
+    lr_warmup_steps: int | Sequence[int] | None = None,
     # Logging
     report_frequency: int = 10,
     # Budget
@@ -269,14 +274,32 @@ def optimize(
 
         Only applies to multi-objective studies; single-objective
         studies always use Optuna's built-in pruner.
+    training_mode
+        ``"fixed_budget"`` (default) couples cosine decay with training to
+        the full trial budget. ``"open_ended"`` couples inverse-square-root
+        decay with validation-objective early stopping.
     epochs
-        Maximum training epochs per trial (default 200).
+        Training epochs per trial. In ``open_ended`` mode this is a generous
+        safety cap (default 200).
     num_batches
         Number of online simulation batches per epoch (default 50).
     early_stopping_patience
-        Moving-average patience epochs for early stopping (default 5).
+        Validation checks without improvement before stopping in
+        ``open_ended`` mode. ``None`` selects 5 checks. Setting this in
+        ``fixed_budget`` mode raises an error.
     early_stopping_window
         Moving-average window size for early stopping (default 7).
+    early_stopping_monitor
+        Validation stopping objective. ``"objective_mean"`` (default) averages all
+        minimize-oriented objective metrics. A metric name monitors only that
+        objective.
+    lr_warmup_epochs
+        Linear-warmup length measured in each trial's actual epochs. ``None``
+        selects 0 for ``fixed_budget`` and 1 for ``open_ended``. A sequence
+        enables opt-in categorical HPO.
+    lr_warmup_steps
+        Exact optimizer-step warmup override. A sequence enables opt-in
+        categorical HPO. Takes precedence over ``lr_warmup_epochs``.
     report_frequency
         How often (in epochs) the ``OptunaReportCallback`` stores
         ``epoch_{N}_loss`` user attributes on each trial.  Higher
@@ -422,10 +445,14 @@ def optimize(
         adapter=adapter,
         search_space=search_space,
         validation_data=validation_data,
+        training_mode=training_mode,
         epochs=epochs,
         num_batches=num_batches,
         early_stopping_patience=early_stopping_patience,
         early_stopping_window=early_stopping_window,
+        early_stopping_monitor=early_stopping_monitor,
+        lr_warmup_epochs=lr_warmup_epochs,
+        lr_warmup_steps=lr_warmup_steps,
         max_param_count=max_param_count,
         max_memory_mb=resolved_max_memory_mb,
         metric_constraints_hard=metric_constraints_hard,
@@ -543,10 +570,14 @@ def _build_objective(
     adapter: bf.adapters.Adapter,
     search_space: CompositeSearchSpace,
     validation_data: ValidationDataset,
+    training_mode: Literal["fixed_budget", "open_ended"],
     epochs: int,
     num_batches: int,
-    early_stopping_patience: int,
+    early_stopping_patience: int | None,
     early_stopping_window: int,
+    early_stopping_monitor: str,
+    lr_warmup_epochs: int | Sequence[int] | None,
+    lr_warmup_steps: int | Sequence[int] | None,
     max_param_count: int,
     max_memory_mb: float | None,
     metric_constraints_hard: list[MetricConstraintSpec] | None,
@@ -568,10 +599,14 @@ def _build_objective(
             adapter=adapter,
             search_space=search_space,
             validation_data=validation_data,
+            training_mode=training_mode,
             epochs=epochs,
             num_batches=num_batches,
             early_stopping_patience=early_stopping_patience,
             early_stopping_window=early_stopping_window,
+            early_stopping_monitor=early_stopping_monitor,
+            lr_warmup_epochs=lr_warmup_epochs,
+            lr_warmup_steps=lr_warmup_steps,
             max_param_count=max_param_count,
             max_memory_mb=max_memory_mb,
             metric_constraints_hard=metric_constraints_hard,

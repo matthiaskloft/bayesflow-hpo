@@ -4,7 +4,7 @@ This module defines the building blocks for hyperparameter search spaces:
 
 - **Dimension dataclasses** (``IntDimension``, ``FloatDimension``,
   ``CategoricalDimension``, ``BoolDimension``) describe individual tunable
-  knobs.
+  knobs; ``DerivedDimension`` computes exact relationships after sampling.
 - **SearchSpace protocol** defines the three-method interface every
   network search space must satisfy: ``dimensions``, ``sample``, ``build``.
 - **BaseSearchSpace** provides automatic ``dimensions`` discovery,
@@ -24,7 +24,7 @@ exclusive.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, fields
 from typing import Any, Protocol
 
@@ -173,9 +173,47 @@ class BoolDimension:
     constant: Any = field(default=_UNSET)
 
 
-Dimension = IntDimension | FloatDimension | CategoricalDimension | BoolDimension
+@dataclass
+class DerivedDimension:
+    """Hyperparameter computed from the sampled parameters.
 
-_DIMENSION_TYPES = (IntDimension, FloatDimension, CategoricalDimension, BoolDimension)
+    Derived dimensions are evaluated after every sampled and constant
+    dimension in the same search space.  They are useful for enforcing exact
+    relationships such as a fixed online-simulation budget::
+
+        DerivedDimension(
+            "num_batches",
+            lambda p: p["simulation_budget"] // (p["batch_size"] * p["epochs"]),
+        )
+
+    Parameters
+    ----------
+    name
+        Name inserted into the sampled parameter dictionary.
+    derive
+        Callable receiving the sampled parameter dictionary and returning the
+        derived value.
+    """
+
+    name: str
+    derive: Callable[[dict[str, Any]], Any]
+
+
+Dimension = (
+    IntDimension
+    | FloatDimension
+    | CategoricalDimension
+    | BoolDimension
+    | DerivedDimension
+)
+
+_DIMENSION_TYPES = (
+    IntDimension,
+    FloatDimension,
+    CategoricalDimension,
+    BoolDimension,
+    DerivedDimension,
+)
 
 
 class SearchSpace(Protocol):
@@ -237,6 +275,7 @@ class BaseSearchSpace:
         return {
             d.name: d.constant
             for d in self.dimensions
+            if not isinstance(d, DerivedDimension)
             if d.constant is not _UNSET
         }
 
@@ -269,6 +308,8 @@ class BaseSearchSpace:
         """
         params: dict[str, Any] = {}
         for dim in self.dimensions:
+            if isinstance(dim, DerivedDimension):
+                continue
             # Constants bypass Optuna entirely.
             if dim.constant is not _UNSET:
                 params[dim.name] = dim.constant
@@ -298,5 +339,9 @@ class BaseSearchSpace:
                 )
             else:
                 raise TypeError(f"Unsupported dimension type: {type(dim)!r}")
+
+        for dim in self.dimensions:
+            if isinstance(dim, DerivedDimension):
+                params[dim.name] = dim.derive(params)
 
         return params

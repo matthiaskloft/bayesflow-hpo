@@ -25,8 +25,9 @@ from __future__ import annotations
 import logging
 import math
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 import bayesflow as bf
 import optuna
@@ -34,6 +35,7 @@ import optuna
 from bayesflow_hpo.builders.workflow import (
     _compile_for_compat,
     _make_cosine_decay_optimizer,
+    _make_inverse_sqrt_optimizer,
     build_continuous_approximator,
 )
 from bayesflow_hpo.objectives import (
@@ -173,6 +175,43 @@ def _validate_metric_keys(
     return cleaned
 
 
+def _normalize_warmup_spec(
+    name: str,
+    value: int | Sequence[int] | None,
+    *,
+    default: int | None = None,
+) -> int | tuple[int, ...] | None:
+    """Validate a fixed or categorical warmup configuration."""
+    if value is None:
+        return default
+    if type(value) is int:
+        return value
+    if isinstance(value, (str, bytes)):
+        raise TypeError(f"{name} must be an int, a sequence of ints, or None.")
+    try:
+        choices = tuple(value)
+    except TypeError as exc:
+        raise TypeError(
+            f"{name} must be an int, a sequence of ints, or None."
+        ) from exc
+    if not choices or any(type(choice) is not int for choice in choices):
+        raise TypeError(f"{name} choices must be a non-empty sequence of ints.")
+    if len(set(choices)) != len(choices):
+        raise ValueError(f"{name} choices must be unique.")
+    return choices
+
+
+def _sample_warmup_spec(
+    trial: optuna.Trial,
+    name: str,
+    spec: int | tuple[int, ...],
+) -> int:
+    """Resolve a fixed value or sample an explicitly configured choice."""
+    if isinstance(spec, tuple):
+        return int(trial.suggest_categorical(name, list(spec)))
+    return spec
+
+
 @dataclass
 class ObjectiveConfig:
     """Configuration for one objective function instance.
@@ -187,14 +226,31 @@ class ObjectiveConfig:
         Pre-generated :class:`ValidationDataset` (required).
         Use :func:`~bayesflow_hpo.validation.data.generate_validation_dataset`
         to create one.
+    training_mode
+        ``"fixed_budget"`` (default) uses cosine decay and runs to the
+        trial's full budget. ``"open_ended"`` uses inverse-square-root decay
+        with warmup and stops on the configured validation objective.
     epochs
-        Maximum training epochs per trial (default 200).
+        Training epochs per trial. In ``open_ended`` mode this is a generous
+        safety cap rather than a target (default 200).
     num_batches
         Online simulation batches per epoch (default 50).
     early_stopping_patience
-        Moving-average patience epochs (default 5).
+        Validation checks without improvement before stopping in
+        ``open_ended`` mode. ``None`` selects 5 checks. It must remain
+        ``None`` in ``fixed_budget`` mode.
     early_stopping_window
         Moving-average window size (default 7).
+    early_stopping_monitor
+        Validation stopping objective. ``"objective_mean"`` (default) combines all
+        objective metrics; a metric name monitors only that metric.
+    lr_warmup_epochs
+        Linear warmup measured using the trial's actual ``num_batches``.
+        ``None`` selects 0 epochs in ``fixed_budget`` mode and 1 epoch in
+        ``open_ended`` mode. A sequence enables opt-in categorical HPO.
+    lr_warmup_steps
+        Exact warmup-step override. A sequence enables opt-in categorical
+        HPO. When provided, this takes precedence over ``lr_warmup_epochs``.
     max_param_count
         Trials with actual param count above this are rejected
         before training (default 1 000 000).
@@ -268,10 +324,14 @@ class ObjectiveConfig:
     adapter: bf.adapters.Adapter
     search_space: CompositeSearchSpace
     validation_data: ValidationDataset
+    training_mode: Literal["fixed_budget", "open_ended"] = "fixed_budget"
     epochs: int = 200
     num_batches: int = 50
-    early_stopping_patience: int = 5
+    early_stopping_patience: int | None = None
     early_stopping_window: int = 7
+    early_stopping_monitor: str = "objective_mean"
+    lr_warmup_epochs: int | Sequence[int] | None = None
+    lr_warmup_steps: int | Sequence[int] | None = None
     max_param_count: int = MAX_PARAM_COUNT
     max_memory_mb: float | None = None
     metric_constraints_hard: list[MetricConstraintSpec] | None = None
@@ -293,6 +353,64 @@ class ObjectiveConfig:
     validate_fn: ValidateFn | None = None
 
     def __post_init__(self):
+        if self.training_mode not in ("fixed_budget", "open_ended"):
+            raise ValueError(
+                f"Unknown training_mode: {self.training_mode!r}. "
+                "Expected 'fixed_budget' or 'open_ended'."
+            )
+        if (
+            self.training_mode == "fixed_budget"
+            and self.early_stopping_patience is not None
+        ):
+            raise ValueError(
+                "early_stopping_patience cannot be set in fixed_budget mode; "
+                "finite-horizon cosine annealing must run to its horizon."
+            )
+        if (
+            self.training_mode == "open_ended"
+            and self.early_stopping_patience is None
+        ):
+            self.early_stopping_patience = 5
+        if (
+            self.early_stopping_patience is not None
+            and self.early_stopping_patience < 1
+        ):
+            raise ValueError("early_stopping_patience must be >= 1 or None.")
+        if self.early_stopping_window < 1:
+            raise ValueError("early_stopping_window must be >= 1.")
+        if (
+            self.early_stopping_monitor != "objective_mean"
+            and self.early_stopping_monitor not in self.objective_metrics
+        ):
+            raise ValueError(
+                "early_stopping_monitor must be 'objective_mean' or one of "
+                f"objective_metrics, got {self.early_stopping_monitor!r}."
+            )
+        default_warmup_epochs = 0 if self.training_mode == "fixed_budget" else 1
+        self.lr_warmup_epochs = _normalize_warmup_spec(
+            "lr_warmup_epochs",
+            self.lr_warmup_epochs,
+            default=default_warmup_epochs,
+        )
+        self.lr_warmup_steps = _normalize_warmup_spec(
+            "lr_warmup_steps",
+            self.lr_warmup_steps,
+        )
+        minimum_warmup = 0 if self.training_mode == "fixed_budget" else 1
+        active_specs = (
+            (("lr_warmup_steps", self.lr_warmup_steps),)
+            if self.lr_warmup_steps is not None
+            else (("lr_warmup_epochs", self.lr_warmup_epochs),)
+        )
+        for name, spec in active_specs:
+            if spec is None:
+                continue
+            values = spec if isinstance(spec, tuple) else (spec,)
+            if any(value < minimum_warmup for value in values):
+                raise ValueError(
+                    f"{name} must be >= {minimum_warmup} in "
+                    f"{self.training_mode!r} mode."
+                )
         if not isinstance(self.validation_data, ValidationDataset):
             raise TypeError(
                 f"validation_data must be a ValidationDataset, "
@@ -483,10 +601,10 @@ class GenericObjective:
     The trial lifecycle:
 
     1. Sample hparams from search_space
-    2. Inject training config into hparams
+    2. Supply fallback training config in hparams
     3. Budget pre-check (memory estimate)
     4. BUILD approximator (custom or default)
-    5. COMPILE with Adam + CosineDecay
+    5. COMPILE with the training mode's Adam learning-rate schedule
     6. Exact param count check
     7. TRAIN (custom or default)
     8. VALIDATE (custom or default)
@@ -620,9 +738,46 @@ class GenericObjective:
         # --- Step 1: Sample hparams ---
         params = config.search_space.sample(trial)
 
-        # --- Step 2: Inject training config ---
-        params["epochs"] = config.epochs
-        params["num_batches"] = config.num_batches
+        # --- Step 2: Supply fallback training config ---
+        # Search-space values (including DerivedDimension results) take
+        # precedence so the optimizer schedule and train_fn share one source.
+        params.setdefault("epochs", config.epochs)
+        params.setdefault("num_batches", config.num_batches)
+        epochs = int(params["epochs"])
+        num_batches = int(params["num_batches"])
+        if epochs < 1 or num_batches < 1:
+            raise ValueError("Trial epochs and num_batches must both be >= 1.")
+        trial.set_user_attr("training_mode", config.training_mode)
+        trial.set_user_attr("epochs", epochs)
+        trial.set_user_attr("num_batches", num_batches)
+
+        if "lr_warmup_steps" in params:
+            warmup_steps = int(params["lr_warmup_steps"])
+        elif config.lr_warmup_steps is not None:
+            warmup_steps = _sample_warmup_spec(
+                trial,
+                "lr_warmup_steps",
+                config.lr_warmup_steps,
+            )
+        else:
+            if "lr_warmup_epochs" in params:
+                warmup_epochs = int(params["lr_warmup_epochs"])
+            else:
+                assert config.lr_warmup_epochs is not None
+                warmup_epochs = _sample_warmup_spec(
+                    trial,
+                    "lr_warmup_epochs",
+                    config.lr_warmup_epochs,
+                )
+            warmup_steps = warmup_epochs * num_batches
+        minimum_warmup = 0 if config.training_mode == "fixed_budget" else 1
+        if warmup_steps < minimum_warmup:
+            raise ValueError(
+                f"Effective warmup steps must be >= {minimum_warmup} in "
+                f"{config.training_mode!r} mode, got {warmup_steps}."
+            )
+        trial.set_user_attr("lr_warmup_steps", warmup_steps)
+        trial.set_user_attr("lr_warmup_epochs", warmup_steps / num_batches)
 
         # --- Step 3: Budget pre-check (memory) ---
         estimated_memory = estimate_peak_memory_mb(params)
@@ -655,7 +810,7 @@ class GenericObjective:
             cleanup_trial()
             return self._penalty()
 
-        # --- Step 5: COMPILE with Adam + CosineDecay ---
+        # --- Step 5: COMPILE with the mode's coherent LR schedule ---
         if config.train_fn is None and "initial_lr" not in params:
             logger.warning(
                 "Trial #%d: 'initial_lr' not in hparams, defaulting to 1e-3. "
@@ -664,11 +819,19 @@ class GenericObjective:
                 trial.number,
             )
         initial_lr = float(params.get("initial_lr", 1e-3))
-        decay_steps = config.num_batches * config.epochs
+        trial.set_user_attr("peak_learning_rate", initial_lr)
         try:
-            optimizer = _make_cosine_decay_optimizer(
-                initial_lr, decay_steps,
-            )
+            if config.training_mode == "fixed_budget":
+                optimizer = _make_cosine_decay_optimizer(
+                    initial_lr,
+                    num_batches * epochs,
+                    warmup_steps,
+                )
+            else:
+                optimizer = _make_inverse_sqrt_optimizer(
+                    initial_lr,
+                    warmup_steps,
+                )
         except Exception as exc:
             return self._reject_compile(trial, exc)
         try:
@@ -714,8 +877,8 @@ class GenericObjective:
             MovingAverageEarlyStopping(
                 monitor="loss",
                 window=config.early_stopping_window,
-                patience=config.early_stopping_patience,
-                restore_best_weights=True,
+                patience=None,
+                restore_best_weights=False,
             ),
             OptunaReportCallback(
                 trial, monitor="loss",
@@ -729,7 +892,7 @@ class GenericObjective:
             if isinstance(config.pruning_strategy, tuple)
             else config.pruning_strategy
         )
-        if _strategy != "none":
+        if _strategy != "none" or config.training_mode == "open_ended":
             from bayesflow_hpo.optimization.validation_callback import (
                 PeriodicValidationCallback,
             )
@@ -746,6 +909,9 @@ class GenericObjective:
                     validate_fn=config.validate_fn,
                     pruning_strategy=config.pruning_strategy,
                     objective_metrics=config.objective_metrics,
+                    early_stopping_patience=config.early_stopping_patience,
+                    early_stopping_window=config.early_stopping_window,
+                    early_stopping_monitor=config.early_stopping_monitor,
                 )
             )
 

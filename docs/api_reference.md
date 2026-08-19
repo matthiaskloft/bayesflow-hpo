@@ -18,8 +18,10 @@ def optimize(
     # Objectives
     objective_metrics=None, objective_mode="pareto", cost_metric="inference_time",
     # Training
-    epochs=200, num_batches=50,
-    early_stopping_patience=5, early_stopping_window=7,
+    training_mode="fixed_budget", epochs=200, num_batches=50,
+    early_stopping_patience=None, early_stopping_window=7,
+    early_stopping_monitor="objective_mean",
+    lr_warmup_epochs=None, lr_warmup_steps=None,
     pruning_strategy="dominance",
     # Budget
     max_param_count=1_000_000, max_memory_mb=None,
@@ -50,10 +52,14 @@ def optimize(
 | `objective_metrics` | Metric keys to optimize. Default `["calibration_error", "nrmse"]`. |
 | `objective_mode` | `"pareto"` (default) — each metric is its own objective. `"mean"` — arithmetic mean of metrics. |
 | `cost_metric` | Cost objective: `"inference_time"` (default) or `"param_count"`. |
-| `epochs` | Max training epochs per trial (default 200). |
+| `training_mode` | `"fixed_budget"` (cosine, full budget) or `"open_ended"` (inverse-sqrt, validation early stopping). |
+| `epochs` | Training epochs, or safety cap in open-ended mode (default 200). |
 | `num_batches` | Online simulation batches per epoch (default 50). |
-| `early_stopping_patience` | Moving-average patience for early stopping (default 5). |
+| `early_stopping_patience` | Validation checks without improvement in open-ended mode (`None` selects 5). |
 | `early_stopping_window` | Moving-average window size (default 7). |
+| `early_stopping_monitor` | `"objective_mean"` combines all minimize-oriented objectives; a metric name monitors one objective. |
+| `lr_warmup_epochs` | Warmup in epochs; `None` selects 0 fixed-budget / 1 open-ended. A sequence enables categorical HPO. |
+| `lr_warmup_steps` | Exact step override; a sequence enables categorical HPO. |
 | `pruning_strategy` | Multi-objective pruning: `"dominance"` (default), `"mo-sha"`, `("primary", "metric")`, or `"none"`. |
 | `max_param_count` | Reject trials exceeding this param count pre-training (default 1 000 000). |
 | `max_memory_mb` | Optional peak-memory budget in MB, or `"auto"` for CUDA free-memory auto-detection. |
@@ -109,6 +115,7 @@ ValidateFn = Callable[[Any, ValidationDataset, int], dict[str, float]]
 | `IntDimension(name, low, high, step, log, constant)` | Integer hyperparameter. Set `constant=<value>` to fix. |
 | `FloatDimension(name, low, high, log, constant)` | Float hyperparameter. Set `constant=<value>` to fix. |
 | `CategoricalDimension(name, choices, constant)` | Categorical hyperparameter. Set `constant=<value>` to fix. |
+| `DerivedDimension(name, derive)` | Value computed after the sampled dimensions. |
 
 When `constant` is set, the dimension is not tuned by Optuna — it uses the constant value instead. When unset (default `_UNSET` sentinel), the dimension is tunable.
 
@@ -174,7 +181,7 @@ build_continuous_approximator(hparams, adapter, search_space,
                                checkpoint_dir=None) -> ContinuousApproximator
 ```
 
-Builds an **uncompiled** `ContinuousApproximator` from sampled hyperparameters. Handles inference + optional summary network construction. Compiles with Adam + CosineDecay schedule.
+Builds an **uncompiled** `ContinuousApproximator` from sampled hyperparameters. Handles inference + optional summary network construction; the objective compiles it with the selected training-mode schedule.
 
 ### Default Hook Wrappers
 
@@ -197,10 +204,14 @@ Public default implementations used by `optimize()` when no custom hooks are pro
 | `adapter` | *(required)* | BayesFlow adapter |
 | `search_space` | *(required)* | Composite search space |
 | `validation_data` | *(required)* | Pre-generated `ValidationDataset` |
+| `training_mode` | `"fixed_budget"` | Coherent schedule/stopping mode |
 | `epochs` | `200` | Max training epochs per trial |
 | `num_batches` | `50` | Online batches per epoch |
-| `early_stopping_patience` | `5` | Moving-average patience |
+| `early_stopping_patience` | `None` | Open-ended validation patience (`None` selects 5) |
 | `early_stopping_window` | `7` | Moving-average window |
+| `early_stopping_monitor` | `"objective_mean"` | Combined minimize-oriented validation objective or one metric name |
+| `lr_warmup_epochs` | `None` | Mode-specific warmup default or categorical choices |
+| `lr_warmup_steps` | `None` | Exact warmup-step override |
 | `max_param_count` | `1_000_000` | Pre-training param budget |
 | `max_memory_mb` | `None` | Peak-memory budget (disabled) |
 | `metric_constraints_hard` | `None` | Hard metric constraints (post-validation rejection) |

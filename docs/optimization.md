@@ -13,10 +13,14 @@ class ObjectiveConfig:
     adapter: bf.adapters.Adapter
     search_space: CompositeSearchSpace
     validation_data: ValidationDataset
+    training_mode: Literal["fixed_budget", "open_ended"] = "fixed_budget"
     epochs: int = 200
     num_batches: int = 50
-    early_stopping_patience: int = 5
+    early_stopping_patience: int | None = None
     early_stopping_window: int = 7
+    early_stopping_monitor: str = "objective_mean"
+    lr_warmup_epochs: int | Sequence[int] | None = None
+    lr_warmup_steps: int | Sequence[int] | None = None
     max_param_count: int = 1_000_000
     max_memory_mb: float | None = None
     metric_constraints_hard: list[MetricConstraintSpec] | None = None
@@ -36,6 +40,38 @@ class ObjectiveConfig:
     validate_fn: ValidateFn | None = None
 ```
 
+#### Training modes
+
+`training_mode` keeps the learning-rate schedule and stopping rule coherent:
+
+| Mode | Learning-rate schedule | Stopping rule |
+|------|------------------------|---------------|
+| `"fixed_budget"` (default) | Optional linear warmup, then cosine decay over the remaining `epochs * num_batches` budget | Runs to the full budget; pruning may still discard a trial |
+| `"open_ended"` | Linear warmup, then inverse-square-root decay with no terminal horizon | Stops on a moving average of the mean minimize-oriented validation objectives by default |
+
+Setting `early_stopping_patience` in `fixed_budget` mode raises an error because
+stopping before a finite annealing horizon leaves the model mid-schedule. In
+`open_ended` mode, `None` selects five validation checks. `epochs` is then a
+safety cap rather than a target.
+
+Sampled or derived `epochs` and `num_batches` values take precedence over the
+configuration fallbacks. The same values are passed to `train_fn` and used to
+construct the learning-rate schedule.
+
+`lr_warmup_epochs=None` resolves to zero epochs in fixed-budget mode and one
+epoch in open-ended mode. `lr_warmup_steps` provides an exact override. Passing
+a sequence to either option makes Optuna sample from those categorical choices;
+for example, `lr_warmup_epochs=[0, 1, 2, 4]` in fixed-budget mode. Every trial
+records `lr_warmup_steps`, its epoch equivalent, and `peak_learning_rate` as
+user attributes. Warmup must leave at least one cosine-decay step in a
+fixed-budget trial, while open-ended inverse-square-root decay requires at least
+one warmup step.
+
+`early_stopping_monitor="objective_mean"` combines every configured objective metric
+after converting higher-is-better metrics to minimize-is-better values, matching
+the final objective convention. Pass a metric name to stop on one explicitly
+chosen validation objective instead.
+
 #### Configurable Validation Metrics
 
 `objective_metrics` controls which validation metrics are optimized. It accepts a list of metric names resolved via the [metric registry](validation.md#metric-registry). Defaults to `["calibration_error", "nrmse"]`.
@@ -51,7 +87,7 @@ class ObjectiveConfig:
 | `"dominance"` (default) | Per-objective normalized median check; prunes only if worse than median on ALL objectives. Adapted from MO-ASHA (Schmucker et al., 2021). |
 | `"mo-sha"` | Non-dominated sorting at each step; prunes trials outside the top 1/η fraction. Full MO-ASHA Algorithm 2 (Schmucker et al., 2021). |
 | `("primary", "metric_name")` | Single-metric median pruning on the named metric. Equivalent to Optuna's MedianPruner (Akiba et al., 2019). |
-| `"none"` | No intermediate validation or pruning. |
+| `"none"` | No pruning. Intermediate validation still runs when `training_mode="open_ended"` because it supplies the stopping objective. |
 
 `pruning_n_startup_trials` controls how many completed trials are needed before pruning activates. When `None` (default), it is auto-detected from the sampler: `_n_startup_trials` for TPE/GP (25/10), `population_size` for NSGA-II/III (50), fallback 10 for others.
 
@@ -105,7 +141,7 @@ Callable that implements the Optuna trial loop:
 1. **Sample hyperparameters** from the composite search space via `trial.suggest_*`
 2. **Pre-filter** by estimated parameter count and peak memory
 3. **Build** inference network, summary network, and workflow
-4. **Train** using `train_fn` (default: `approximator.fit(simulator=...)`) with early stopping and pruning callbacks
+4. **Train** using `train_fn` (default: `approximator.fit(simulator=...)`) with the selected mode and pruning callbacks
 5. **Validate** on the fixed validation dataset using the metric registry
 6. **Return** `(objective_metric_value, normalized_param_score)`
 
@@ -340,6 +376,9 @@ The function:
 2. Wraps them in a `bf.ContinuousApproximator`
 3. Optionally loads weights from a checkpoint directory
 
-The returned approximator is **uncompiled**. The trial lifecycle in `GenericObjective.__call__()` compiles it separately with an `Adam + CosineDecay` schedule:
-- `CosineDecay(initial_learning_rate=initial_lr, decay_steps=max(1, total_steps))`
-- `total_steps = epochs * num_batches`
+The returned approximator is **uncompiled**. `GenericObjective.__call__()`
+compiles it with Adam and the schedule selected by `training_mode`: optional
+linear warmup followed by cosine decay over the actual trial horizon for
+`fixed_budget` (Goyal et al., 2017; Keras `CosineDecay`), or linear warmup
+followed by inverse-square-root decay for `open_ended` (Vaswani et al., 2017,
+Sec. 5.3).

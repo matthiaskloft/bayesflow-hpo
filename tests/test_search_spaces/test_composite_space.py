@@ -21,8 +21,7 @@ def test_composite_space_merges_inference_summary_and_training():
     assert "ds_summary_dim" in params
     assert "initial_lr" in params
 
-    # batch_size is a constant (256) — always present
-    assert params["batch_size"] == 256
+    assert params["batch_size"] == 32
 
 
 def test_composite_constants_merges_sub_spaces():
@@ -33,5 +32,4 @@ def test_composite_constants_merges_sub_spaces():
     )
 
     constants = space.constants
-    assert "batch_size" in constants
-    assert constants["batch_size"] == 256
+    assert "batch_size" not in constants

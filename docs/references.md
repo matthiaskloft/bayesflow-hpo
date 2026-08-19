@@ -18,6 +18,9 @@ Feature implementations and their backing references.
 | NSGA-II sampler preset | `optimization/study.py` | Deb et al. (2002) |
 | NSGA-III sampler preset | `optimization/study.py` | Deb & Jain (2014) |
 | HPO foundations and best practices | overall | Bischl et al. (2023) |
+| Batch-size / learning-rate search ranges and coupling | `search_spaces/training.py`, `search_spaces/base.py` | Smith et al. (2018); Shallue et al. (2019) |
+| Linear learning-rate warmup | `builders/workflow.py` | Goyal et al. (2017) |
+| Inverse-square-root schedule with warmup | `builders/workflow.py` | Vaswani et al. (2017) |
 
 ### Pruning
 
@@ -205,6 +208,37 @@ promotion. Algorithm 2: non-dominated sorting + bottom-fraction pruning.
 Key finding: dominance-based approaches consistently outperform
 scalarization-based ones.
 
+### Goyal, P., Dollár, P., Girshick, R., Noordhuis, P., Wesolowski, L., Kyrola, A., Tulloch, A., Jia, Y., & He, K. (2017)
+
+*Accurate, large minibatch SGD: Training ImageNet in 1 hour* [Preprint].
+arXiv. https://doi.org/10.48550/arXiv.1706.02677
+
+Introduces gradual learning-rate warmup to avoid early optimization problems
+when training with aggressive learning rates. OpenAlex work
+`W2622263826`. Together with the Keras `CosineDecay` documentation, this backs
+the optional fixed-budget warmup.
+
+### Smith, S. L., Kindermans, P.-J., Ying, C., & Le, Q. V. (2018)
+
+Don't decay the learning rate, increase the batch size. In *Proceedings of the
+6th International Conference on Learning Representations (ICLR 2018)*.
+https://doi.org/10.48550/arXiv.1711.00489
+
+Shows that the gradient-noise scale couples learning rate and batch size and
+supports reparameterizing known resource relationships instead of tuning
+redundant coordinates independently.
+
+### Shallue, C. J., Lee, J., Antognini, J. M., Sohl-Dickstein, J., Frostig, R., & Dahl, G. E. (2019)
+
+Measuring the effects of data parallelism on neural network training. *Journal
+of Machine Learning Research, 20*(112), 1–49.
+https://www.jmlr.org/papers/v20/18-789.html
+
+Shows that batch-size effects and suitable metaparameter settings vary greatly
+between workloads, supporting joint batch-size and learning-rate exploration
+instead of a fixed package-wide batch size. OpenAlex work `W2900167092`; full
+text verified via the JMLR article PDF.
+
 ### Sobol', I. M. (1967)
 
 On the distribution of points in a cube and the approximate evaluation of
@@ -222,3 +256,12 @@ Validating Bayesian inference algorithms with simulation-based calibration.
 
 Introduces SBC: verify that posterior rank statistics are uniformly
 distributed. Backs `sbc_tests.py` and the SBC rank-based coverage metrics.
+
+### Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones, L., Gomez, A. N., Kaiser, L., & Polosukhin, I. (2017)
+
+Attention is all you need. In *Advances in Neural Information Processing
+Systems 30* (pp. 5998--6008). https://doi.org/10.48550/arXiv.1706.03762
+
+Section 5.3 defines linear learning-rate warmup followed by decay proportional
+to the inverse square root of the optimizer step. This backs the horizon-free
+schedule used by `open_ended` training mode.

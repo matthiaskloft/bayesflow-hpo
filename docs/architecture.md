@@ -34,7 +34,7 @@ src/bayesflow_hpo/
 ├── builders/                # Construct BayesFlow objects from param dicts
 │   ├── adapter.py           # (deprecated since v0.2.0)
 │   ├── registry.py          # Builder function lookup tables
-│   └── workflow.py          # build_continuous_approximator, CosineDecay optimizer
+│   └── workflow.py          # approximator builder and LR schedule helpers
 │
 ├── optimization/            # Optuna integration layer
 │   ├── objective.py         # ObjectiveConfig, GenericObjective, default_train/validate_fn
@@ -101,7 +101,7 @@ A single HPO run follows this pipeline:
                     │   4. build_continuous_        │
                     │      approximator()           │
                     │   (ContinuousApproximator     │
-                    │    + Adam/CosineDecay)        │
+                    │    + mode-specific Adam LR)   │
                     └──────────┬───────────────────┘
                                │
                     ┌──────────▼───────────────────┐

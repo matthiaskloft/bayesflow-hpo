@@ -13,8 +13,13 @@ objects (e.g. `ObjectiveConfig`, `create_study`) directly.
 |-----------|---------|-------------|
 | `n_trials` | **50** | Number of *trained* trials to collect (budget-rejected trials don't count). |
 | `max_total_trials` | **3 &times; n_trials** | Hard cap on total trials including budget-rejected. |
+| `training_mode` | **`"fixed_budget"`** | Cosine decay over the full, equal trial budget. |
 | `epochs` | **200** | Maximum training epochs per trial. |
 | `num_batches` | **50** | Online simulation batches per epoch. |
+| `early_stopping_patience` | **None** | Disabled in fixed-budget mode; selects 5 validation checks in open-ended mode. |
+| `early_stopping_window` | **7** | Moving-average window over validation checks in open-ended mode. |
+| `lr_warmup_epochs` | **None** | Resolves to 0 in fixed-budget mode and 1 in open-ended mode. |
+| `lr_warmup_steps` | **None** | Optional exact override of the epoch-derived warmup. |
 | `max_param_count` | **1 000 000** | Trials exceeding this estimated param count are rejected. |
 | `max_memory_mb` | **None** (disabled) | Peak-memory budget in MB, or `"auto"` for CUDA free-memory auto-detection. |
 | `metric_constraints_hard` | **None** | Hard metric constraints (post-validation rejection). |
@@ -136,8 +141,8 @@ are hardcoded in `build()`.
 
 | Dimension | Range | Tuned | Constant |
 |-----------|-------|-------|----------|
-| `initial_lr` | 1e-4 -- 5e-3 (log) | yes | — |
-| `batch_size` | 32--1024, step 32 | no | `256` |
+| `initial_lr` | 1e-4 -- 1e-2 (log) | yes | — |
+| `batch_size` | 32--256, step 32 | yes | — |
 | `decay_rate` | 0.8--0.99 | no | `0.95` |
 
 Constant dimensions can be made tunable by setting `constant=_UNSET`
@@ -149,14 +154,13 @@ on individual dimensions or creating the space with overridden fields.
 
 | Setting | Default | Location |
 |---------|---------|----------|
-| Optimizer | **Adam + CosineDecay** | `build_workflow()` |
-| LR schedule | `CosineDecay(initial_lr, total_steps)` | `build_workflow()` |
+| Optimizer | **Adam** | `GenericObjective` |
+| Fixed-budget LR schedule | Optional linear warmup, then cosine decay over the remaining trial budget | `GenericObjective` |
+| Open-ended LR schedule | Linear warmup then inverse-square-root decay | `GenericObjective` |
 | Batch size (when not tuned) | **256** | `_default_train_fn()` |
-| Early stopping window | **7** | `ObjectiveConfig` |
-| Early stopping patience | **5** | `ObjectiveConfig` |
-| Early stopping monitor | `"loss"` | `GenericObjective` |
-| Restore best weights | `True` | `MovingAverageEarlyStopping` |
-| Stagnation detection | ~12 epochs | window + patience |
+| Default stopping | Full fixed budget | `ObjectiveConfig` |
+| Open-ended stopping monitor | Mean of minimize-oriented `objective_metrics` on validation data | `PeriodicValidationCallback` |
+| Restore best open-ended weights | `True` | `PeriodicValidationCallback` |
 
 ---
 

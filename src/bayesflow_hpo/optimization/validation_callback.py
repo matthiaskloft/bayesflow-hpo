@@ -27,9 +27,11 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import numpy as np
 import optuna
 from keras.callbacks import Callback
 
+from bayesflow_hpo.objectives import _metric_to_minimize
 from bayesflow_hpo.optimization.pruning_strategies import (
     should_prune_dominance,
     should_prune_mo_sha,
@@ -88,6 +90,16 @@ class PeriodicValidationCallback(Callback):
     objective_metrics
         Metric keys to compute during intermediate validation.
         Defaults to ``["calibration_error", "nrmse"]``.
+    early_stopping_patience
+        Validation checks without improvement before stopping. ``None``
+        disables early stopping. This is intended for horizon-free schedules;
+        finite-budget schedules should run to their horizon.
+    early_stopping_window
+        Number of validation scores in the moving average.
+    early_stopping_monitor
+        Validation objective used for stopping. ``"objective_mean"`` (default) averages
+        all objective metrics after converting them to minimize-is-better
+        values. A metric name selects that metric alone.
     """
 
     def __init__(
@@ -102,6 +114,9 @@ class PeriodicValidationCallback(Callback):
         validate_fn: ValidateFn | None = None,
         pruning_strategy: str | tuple[str, str] = "dominance",
         objective_metrics: list[str] | None = None,
+        early_stopping_patience: int | None = None,
+        early_stopping_window: int = 1,
+        early_stopping_monitor: str = "objective_mean",
     ):
         super().__init__()
         self.trial = trial
@@ -115,6 +130,18 @@ class PeriodicValidationCallback(Callback):
         self._step = 0  # monotonic step counter for Optuna
         self._consecutive_failures = 0
         self._is_multi_objective = len(trial.study.directions) > 1
+        self.early_stopping_patience = early_stopping_patience
+        self.early_stopping_window = early_stopping_window
+        self.early_stopping_monitor = early_stopping_monitor
+        self._early_stopping_values: list[float] = []
+        self._early_stopping_wait = 0
+        self.best_validation_score = np.inf
+        self.best_weights: Any = None
+
+        if early_stopping_patience is not None and early_stopping_patience < 1:
+            raise ValueError("early_stopping_patience must be >= 1 or None.")
+        if early_stopping_window < 1:
+            raise ValueError("early_stopping_window must be >= 1.")
 
         # Parse pruning strategy.
         if isinstance(pruning_strategy, tuple):
@@ -143,6 +170,15 @@ class PeriodicValidationCallback(Callback):
             if objective_metrics is not None
             else ["calibration_error", "nrmse"]
         )
+        if (
+            self.early_stopping_monitor != "objective_mean"
+            and self.early_stopping_monitor not in self.objective_metrics
+        ):
+            raise ValueError(
+                "early_stopping_monitor must be 'objective_mean' or one of "
+                "objective_metrics, got "
+                f"{self.early_stopping_monitor!r}."
+            )
 
         # Default primary metric to first objective metric.
         if self._strategy_name == "primary" and self._primary_metric is None:
@@ -175,6 +211,8 @@ class PeriodicValidationCallback(Callback):
 
         self._step += 1
 
+        self._update_early_stopping(scores)
+
         if self._is_multi_objective:
             # Store per-metric user attrs for strategy functions.
             for metric, val in scores.items():
@@ -192,6 +230,42 @@ class PeriodicValidationCallback(Callback):
             self.trial.report(primary_val, step=self._step)
             if self.trial.should_prune():
                 raise optuna.TrialPruned()
+
+    def _update_early_stopping(self, scores: dict[str, float]) -> None:
+        """Stop on a moving average of the configured validation objective."""
+        if self.early_stopping_patience is None:
+            return
+
+        if self.early_stopping_monitor == "objective_mean":
+            value = float(
+                np.mean(
+                    [
+                        _metric_to_minimize(metric, float(scores[metric]))
+                        for metric in self.objective_metrics
+                    ]
+                )
+            )
+        else:
+            value = _metric_to_minimize(
+                self.early_stopping_monitor,
+                float(scores[self.early_stopping_monitor]),
+            )
+        self._early_stopping_values.append(value)
+        if len(self._early_stopping_values) > self.early_stopping_window:
+            self._early_stopping_values.pop(0)
+        moving_average = float(np.mean(self._early_stopping_values))
+
+        if moving_average < self.best_validation_score:
+            self.best_validation_score = moving_average
+            self._early_stopping_wait = 0
+            self.best_weights = self.approximator.get_weights()
+            return
+
+        self._early_stopping_wait += 1
+        if self._early_stopping_wait >= self.early_stopping_patience:
+            self.approximator.stop_training = True
+            if self.best_weights is not None:
+                self.approximator.set_weights(self.best_weights)
 
     # ------------------------------------------------------------------
     # Internal

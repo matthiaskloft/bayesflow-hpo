@@ -63,9 +63,8 @@ class MovingAverageEarlyStopping(Callback):
     window
         Moving-average window size (default 7).
     patience
-        Number of epochs with no MA improvement before stopping
-        (default 5).  Together with *window* this means stagnation is
-        detected within roughly ``window + patience`` epochs.
+        Number of epochs with no MA improvement before stopping.  ``None``
+        records the moving average without stopping training.
     restore_best_weights
         Whether to restore model weights from the epoch with the best
         moving average (default ``True``).
@@ -75,7 +74,7 @@ class MovingAverageEarlyStopping(Callback):
         self,
         monitor: str = "loss",
         window: int = 7,
-        patience: int = 5,
+        patience: int | None = 5,
         restore_best_weights: bool = True,
     ):
         super().__init__()
@@ -116,7 +115,7 @@ class MovingAverageEarlyStopping(Callback):
             return
 
         self.wait += 1
-        if self.wait >= self.patience:
+        if self.patience is not None and self.wait >= self.patience:
             self.model.stop_training = True
             if self.restore_best_weights and self.best_weights is not None:
                 self.model.set_weights(self.best_weights)

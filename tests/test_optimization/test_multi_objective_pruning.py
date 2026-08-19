@@ -87,6 +87,92 @@ class TestCallbackPerMetricAttrs:
         assert trial.user_attrs["val_nrmse_step_1"] == 0.02
 
 
+class _WeightTrackingApproximator:
+    def __init__(self):
+        self.stop_training = False
+        self.weights = [0]
+
+    def get_weights(self):
+        return list(self.weights)
+
+    def set_weights(self, weights):
+        self.weights = list(weights)
+
+
+def test_open_ended_early_stopping_uses_validation_metric_and_restores_weights():
+    study = _make_study()
+    trial = study.ask()
+    approximator = _WeightTrackingApproximator()
+    callback = PeriodicValidationCallback(
+        trial=trial,
+        approximator=approximator,
+        validation_data=_DUMMY_VALIDATION_DATA,
+        interval=1,
+        warmup=0,
+        pruning_strategy="none",
+        objective_metrics=["calibration_error", "nrmse"],
+        early_stopping_patience=2,
+        early_stopping_window=1,
+        early_stopping_monitor="calibration_error",
+    )
+
+    scores = iter(
+        [
+            {"calibration_error": 0.4, "nrmse": 0.1},
+            {"calibration_error": 0.3, "nrmse": 0.1},
+            {"calibration_error": 0.35, "nrmse": 0.1},
+            {"calibration_error": 0.36, "nrmse": 0.1},
+        ]
+    )
+    with patch.object(
+        callback,
+        "_run_lightweight_validation",
+        side_effect=lambda: next(scores),
+    ):
+        for epoch in range(4):
+            approximator.weights = [epoch]
+            callback.on_epoch_end(epoch)
+
+    assert approximator.stop_training is True
+    assert approximator.weights == [1]
+    assert callback.best_validation_score == pytest.approx(0.3)
+
+
+def test_open_ended_early_stopping_defaults_to_mean_objective():
+    study = _make_study()
+    trial = study.ask()
+    approximator = _WeightTrackingApproximator()
+    callback = PeriodicValidationCallback(
+        trial=trial,
+        approximator=approximator,
+        validation_data=_DUMMY_VALIDATION_DATA,
+        interval=1,
+        warmup=0,
+        pruning_strategy="none",
+        objective_metrics=["calibration_error", "correlation"],
+        early_stopping_patience=1,
+    )
+
+    callback._update_early_stopping(
+        {"calibration_error": 0.2, "correlation": 0.8}
+    )
+
+    # correlation is higher-is-better and therefore contributes 1 - 0.8.
+    assert callback.best_validation_score == pytest.approx(0.2)
+
+
+def test_early_stopping_rejects_unknown_monitor():
+    study = _make_study()
+    with pytest.raises(ValueError, match="must be 'objective_mean'"):
+        PeriodicValidationCallback(
+            trial=study.ask(),
+            approximator=_WeightTrackingApproximator(),
+            validation_data=_DUMMY_VALIDATION_DATA,
+            objective_metrics=["calibration_error", "nrmse"],
+            early_stopping_monitor="recovery",
+        )
+
+
 class TestCallbackPruning:
     """Verify pruning dispatch."""
 
