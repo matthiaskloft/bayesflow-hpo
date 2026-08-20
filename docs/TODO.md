@@ -22,9 +22,12 @@ Suggested execution order: I, then research follow-ups A2/A3.
 
 ### Package K: Training Search Space — Batch, Learning Rate, Budget
 
+Tracked in https://github.com/matthiaskloft/bayesflow-hpo/issues/69
+
 Motivated by a 3x3 batch x learning-rate grid run in `bayesflow-irt`
-(9 arms x 3 seeds, simulation-matched at 102,400 simulations). Full results
-and discussion: https://github.com/matthiaskloft/bayesflow-hpo/issues/67
+(9 arms x 3 seeds, simulation-matched at 102,400 simulations). Grid results
+are in #67, which is closed: it settled the schedule/stopping modes, and #69
+carries the search-space work forward.
 
 1. **`batch_size` is currently `IntDimension("batch_size", constant=256)`** in
    `search_spaces/training.py`. At a constant batch the batch x learning-rate
