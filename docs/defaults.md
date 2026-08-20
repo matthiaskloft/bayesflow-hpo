@@ -187,7 +187,6 @@ on individual dimensions or creating the space with overridden fields.
 | Setting | Default | Location |
 |---------|---------|----------|
 | `DEFAULT_METRICS` | calibration_error, nrmse, correlation, coverage, rmse, contraction | `registry.py` |
-
 | Coverage levels | `[0.9, 0.95, 0.975, 0.99]` | `DEFAULT_COVERAGE_LEVELS` |
 | Coverage weights | Uniform | `make_coverage_metric()` |
 | Posterior samples (final) | **500** | `ObjectiveConfig` |

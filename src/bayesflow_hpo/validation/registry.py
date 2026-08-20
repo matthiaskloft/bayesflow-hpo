@@ -13,8 +13,12 @@ Metric function signature
 
 References
 ----------
+Bland, J. M., & Altman, D. G. (1986). Statistical methods for assessing
+    agreement between two methods of clinical measurement. *The Lancet*,
+    *327*(8476), 307–310. https://doi.org/10.1016/S0140-6736(86)90837-8
+    Pearson correlation measures linear association, not agreement.
 Gneiting, T. (2011). Making and evaluating point forecasts. *Journal of the
-    American Statistical Association*, *106*(494), 746--762.
+    American Statistical Association*, *106*(494), 746–762.
     https://doi.org/10.1198/jasa.2011.r10138
     Point summaries must be matched to their scoring loss: the mean is
     appropriate for squared error and the median for absolute error.
@@ -29,6 +33,7 @@ from __future__ import annotations
 import html as _html
 import warnings
 from collections.abc import Callable
+from typing import Literal
 
 import numpy as np
 
@@ -52,7 +57,7 @@ def register_metric(
     aliases: list[str] | None = None,
     overwrite: bool = False,
     description: str | None = None,
-    kind: str = "objective",
+    kind: Literal["objective", "diagnostic"] = "objective",
     requires: str = "",
 ) -> None:
     """Register a metric function under *name* (and optional aliases).
@@ -88,13 +93,18 @@ def register_metric(
     Raises
     ------
     ValueError
-        If *name* is already registered and *overwrite* is ``False``.
+        If *kind* is not ``"objective"`` or ``"diagnostic"``, or if *name*
+        is already registered and *overwrite* is ``False``.
 
     See Also
     --------
     describe_metrics : Discover all registered metrics.
     get_metric : Look up a single metric by name or alias.
     """
+    if kind not in ("objective", "diagnostic"):
+        raise ValueError(
+            f"kind must be 'objective' or 'diagnostic', got {kind!r}."
+        )
     if name in _REGISTRY and not overwrite:
         raise ValueError(
             f"Metric '{name}' is already registered. "
@@ -164,7 +174,7 @@ def resolve_metrics(names: list[str]) -> dict[str, MetricFn]:
     return {n: get_metric(n) for n in names}
 
 
-def _validate_objective_metric_kinds(names: list[str]) -> None:
+def validate_objective_metric_kinds(names: list[str]) -> None:
     """Reject registered diagnostic-only metrics used as objectives.
 
     Unknown names remain valid because a custom ``validate_fn`` may return
@@ -512,7 +522,9 @@ def _correlation_metric(
     This is an exploratory diagnostic, not a recovery-error measure:
     correlation does not penalize additive or multiplicative bias. The
     posterior mean is retained for consistency with the squared-error
-    recovery metrics (RMSE and NRMSE; Gneiting, 2011).
+    recovery metrics (RMSE and NRMSE; Gneiting, 2011). Bland and Altman
+    (1986) establish that Pearson correlation measures association rather
+    than agreement and is insensitive to changes in scale.
     """
     posterior_mean = np.mean(draws, axis=1)
     if np.std(true_values) < 1e-12 or np.std(posterior_mean) < 1e-12:

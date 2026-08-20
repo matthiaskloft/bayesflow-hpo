@@ -52,6 +52,15 @@ def test_register_custom_metric():
     assert result["my_val"] == 42.0
 
 
+def test_register_rejects_invalid_kind() -> None:
+    with pytest.raises(ValueError, match="kind must be"):
+        register_metric(
+            "_test_invalid_kind",
+            lambda draws, true_values: {"value": 0.0},
+            kind="objetive",  # type: ignore[arg-type]
+        )
+
+
 def test_register_duplicate_raises():
     def dummy(d, t):
         return {}
@@ -160,7 +169,7 @@ def test_correlation_metric_perfect():
     assert abs(result["correlation"] - 1.0) < 1e-6
 
 
-def test_correlation_does_not_measure_agreement():
+def test_correlation_does_not_measure_agreement() -> None:
     """Affine bias can preserve perfect correlation despite large NRMSE."""
     true_values = np.linspace(-2, 2, 100)
     posterior_means = 100.0 + 2.0 * true_values
