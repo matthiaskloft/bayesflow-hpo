@@ -193,6 +193,8 @@ on individual dimensions or creating the space with overridden fields.
 | Posterior samples (intermediate) | **250** | `ObjectiveConfig` |
 | Validation dataset seed | **42** | `generate_validation_dataset()` |
 
+`correlation` is included in validation output as a diagnostic but is not objective-ready. The default HPO recovery objective remains `nrmse`; correlation measures association and does not penalize location or scale bias.
+
 ---
 
 ## Budget & Penalties

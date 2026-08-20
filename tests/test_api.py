@@ -191,6 +191,28 @@ def test_optimize_default_objective_metrics():
     assert config.objective_metrics == ["calibration_error", "nrmse"]
 
 
+@pytest.mark.parametrize("metric", ["correlation", "corr"])
+def test_optimize_rejects_diagnostic_metric_as_objective(metric: str) -> None:
+    """Diagnostic-only metrics fail before validation or study setup."""
+    with (
+        patch("bayesflow_hpo.api.generate_validation_dataset") as mock_generate,
+        patch("bayesflow_hpo.api.check_pipeline") as mock_pipeline,
+        patch("bayesflow_hpo.api.create_study") as mock_create_study,
+        pytest.raises(ValueError, match=f"{metric}.*cannot be used"),
+    ):
+        optimize(
+            simulator=MagicMock(),
+            adapter=canonical_adapter(),
+            search_space=_make_fake_search_space(),
+            objective_metrics=[metric],
+            storage=None,
+        )
+
+    mock_generate.assert_not_called()
+    mock_pipeline.assert_not_called()
+    mock_create_study.assert_not_called()
+
+
 def test_optimize_default_objective_mode():
     """Default objective_mode is "pareto"."""
     config = _patched_optimize()
@@ -615,6 +637,10 @@ class TestObjectiveConfigPruningValidation:
         )
         defaults.update(overrides)
         return ObjectiveConfig(**defaults)
+
+    def test_diagnostic_objective_metric_raises(self) -> None:
+        with pytest.raises(ValueError, match="correlation.*cannot be used"):
+            self._make_config(objective_metrics=["correlation"])
 
     def test_valid_strategies(self):
         """All valid strategy names should be accepted."""

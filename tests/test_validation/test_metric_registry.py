@@ -52,6 +52,15 @@ def test_register_custom_metric():
     assert result["my_val"] == 42.0
 
 
+def test_register_rejects_invalid_kind() -> None:
+    with pytest.raises(ValueError, match="kind must be"):
+        register_metric(
+            "_test_invalid_kind",
+            lambda draws, true_values: {"value": 0.0},
+            kind="objetive",  # type: ignore[arg-type]
+        )
+
+
 def test_register_duplicate_raises():
     def dummy(d, t):
         return {}
@@ -158,6 +167,19 @@ def test_correlation_metric_perfect():
     fn = get_metric("correlation")
     result = fn(draws, true_values)
     assert abs(result["correlation"] - 1.0) < 1e-6
+
+
+def test_correlation_does_not_measure_agreement() -> None:
+    """Affine bias can preserve perfect correlation despite large NRMSE."""
+    true_values = np.linspace(-2, 2, 100)
+    posterior_means = 100.0 + 2.0 * true_values
+    draws = np.tile(posterior_means[:, None], (1, 50))
+
+    correlation = get_metric("correlation")(draws, true_values)["correlation"]
+    nrmse = get_metric("nrmse")(draws, true_values)["nrmse"]
+
+    assert correlation == pytest.approx(1.0)
+    assert nrmse > 20.0
 
 
 def test_correlation_metric_alias():
@@ -267,5 +289,6 @@ def test_describe_metrics_kind_and_requires():
     # Diagnostic metrics return multiple sub-keys
     assert rows["z_score"]["kind"] == "diagnostic"
     assert rows["coverage"]["kind"] == "diagnostic"
+    assert rows["correlation"]["kind"] == "diagnostic"
     # Dependency tracking
     assert rows["nrmse"]["requires"] == ""

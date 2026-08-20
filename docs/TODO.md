@@ -14,7 +14,7 @@ Suggested execution order: I, then research follow-ups A2/A3.
 3. ~~Run the literature audit to verify metrics and features against references.~~ (done — see Package I below)
 4. Polish documentation and examples around the shipped features.
 5. ~~Add docstring citations and inline literature comments.~~ (done — see Package I below)
-6. Revisit the `correlation` diagnostic: it is currently defined as Pearson correlation between posterior means and true values in `validation/registry.py`. Evaluate whether posterior medians are the more appropriate point summary for skewed posteriors, and if so update the implementation, tests, and docs (`validation.md`, `defaults.md`, docstrings, and any examples mentioning correlation).
+6. ~~Revisit the `correlation` diagnostic.~~ (done — retained posterior means for squared-error consistency, classified correlation as diagnostic-only, and documented future recovery extensions)
 
 ---
 
@@ -61,6 +61,10 @@ Remaining work:
 ---
 
 ## Done
+
+### Correlation Recovery Diagnostic Review (2026-08-21)
+
+Retained posterior means in `correlation` to remain consistent with RMSE/NRMSE and squared-error loss. Reclassified correlation as diagnostic-only because Pearson association does not penalize additive or multiplicative bias, and added early rejection when it is supplied through `objective_metrics`. Documented prior-scale NRMSE, held-out NPE posterior NLL, and TARP as possible future extensions.
 
 ### Package J: FlowMatching Search-Space Expansion (2026-04-25)
 Expanded `FlowMatchingSpace` to expose BayesFlow-default solver and TimeMLP

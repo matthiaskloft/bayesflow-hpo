@@ -62,6 +62,7 @@ from bayesflow_hpo.optimization.constraints import (
 from bayesflow_hpo.search_spaces.composite import CompositeSearchSpace
 from bayesflow_hpo.types import BuildApproximatorFn, TrainFn, ValidateFn
 from bayesflow_hpo.validation.data import ValidationDataset
+from bayesflow_hpo.validation.registry import validate_objective_metric_kinds
 
 logger = logging.getLogger(__name__)
 
@@ -410,6 +411,7 @@ class ObjectiveConfig:
     validate_fn: ValidateFn | None = None
 
     def __post_init__(self):
+        validate_objective_metric_kinds(self.objective_metrics)
         if self.training_mode not in ("fixed_budget", "open_ended"):
             raise ValueError(
                 f"Unknown training_mode: {self.training_mode!r}. "
