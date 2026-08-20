@@ -24,6 +24,9 @@ the same search space. It supports exact resource couplings without presenting
 redundant coordinates to the sampler. For example, a training-space subclass
 can fix the number of online simulations while tuning batch size:
 
+This supports the workload-aware joint-tuning rationale of Shallue et al.
+(2019); see [References](references.md).
+
 ```python
 num_batches = hpo.DerivedDimension(
     "num_batches",

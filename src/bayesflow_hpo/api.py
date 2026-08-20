@@ -289,11 +289,12 @@ def optimize(
         ``open_ended`` mode. ``None`` selects 5 checks. Setting this in
         ``fixed_budget`` mode raises an error.
     early_stopping_window
-        Moving-average window size for early stopping (default 7).
+        Moving-average window measured in validation checks for open-ended
+        stopping and in epochs for the training-loss callback (default 7).
     early_stopping_monitor
-        Validation stopping objective. ``"objective_mean"`` (default) averages all
-        minimize-oriented objective metrics. A metric name monitors only that
-        objective.
+        Validation stopping objective. ``"objective_mean"`` (default) averages
+        ``objective_metrics`` after minimize-direction conversion; the separate
+        cost objective is excluded. A metric name monitors only that metric.
     lr_warmup_epochs
         Linear-warmup length measured in each trial's actual epochs. ``None``
         selects 0 for ``fixed_budget`` and 1 for ``open_ended``. A sequence

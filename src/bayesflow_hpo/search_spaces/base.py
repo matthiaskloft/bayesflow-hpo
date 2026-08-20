@@ -193,6 +193,16 @@ class DerivedDimension:
     derive
         Callable receiving the sampled parameter dictionary and returning the
         derived value.
+
+    Notes
+    -----
+    Derived dimensions support exact coupling between training-budget
+    parameters instead of sampling mutually inconsistent values. This follows
+    the workload-aware joint-tuning rationale of Shallue et al. (2019).
+
+    See Also
+    --------
+    https://doi.org/10.48550/arXiv.1811.03600
     """
 
     name: str

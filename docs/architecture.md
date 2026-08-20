@@ -100,19 +100,24 @@ A single HPO run follows this pipeline:
                     ┌──────────▼───────────────────┐
                     │   4. build_continuous_        │
                     │      approximator()           │
-                    │   (ContinuousApproximator     │
-                    │    + mode-specific Adam LR)   │
+                    │   (uncompiled                 │
+                    │    ContinuousApproximator)    │
                     └──────────┬───────────────────┘
                                │
                     ┌──────────▼───────────────────┐
-                    │   5. Train (configurable)     │
+                    │   5. Compile with the mode's  │
+                    │      Adam LR schedule         │
+                    └──────────┬───────────────────┘
+                               │
+                    ┌──────────▼───────────────────┐
+                    │   6. Train (configurable)     │
                     │   (default: fit_online with   │
                     │    early stopping & pruning,  │
                     │    or user-provided train_fn) │
                     └──────────┬───────────────────┘
                                │
                     ┌──────────▼───────────────────┐
-                    │   6. run_validation_pipeline  │
+                    │   7. run_validation_pipeline  │
                     │   (per-condition metrics via  │
                     │    registry → ValidationResult│
                     │    with table methods)        │

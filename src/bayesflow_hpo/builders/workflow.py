@@ -28,13 +28,20 @@ class InverseSqrtDecay(keras.optimizers.schedules.LearningRateSchedule):
     are proportional to the inverse square root of the optimizer step.  This
     is the horizon-free schedule described by Vaswani et al. (2017, Sec. 5.3).
 
+    Parameters
+    ----------
+    peak_learning_rate
+        Learning rate reached at the end of warmup.
+    warmup_steps
+        Number of linear-warmup optimizer steps. Must be at least one.
+
     See Also
     --------
     https://doi.org/10.48550/arXiv.1706.03762
     https://keras.io/api/optimizers/learning_rate_schedules/learning_rate_schedule/
     """
 
-    def __init__(self, peak_learning_rate: float, warmup_steps: int = 1):
+    def __init__(self, peak_learning_rate: float, warmup_steps: int = 1) -> None:
         if warmup_steps < 1:
             raise ValueError(f"warmup_steps must be >= 1, got {warmup_steps}.")
         self.peak_learning_rate = float(peak_learning_rate)

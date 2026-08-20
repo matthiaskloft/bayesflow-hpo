@@ -49,7 +49,7 @@ Requires Python >= 3.11 and a Keras 3 backend (PyTorch recommended: `export KERA
 - **QMC warm-up** — Sobol sequences for better space-filling startup coverage
 - **Multi-objective pruning** — dominance, MO-SHA, primary-median strategies
 - **Metric constraints** — hard post-validation rejection, soft feasibility guidance
-- **Coherent training modes** — equal-budget cosine runs or open-ended inverse-sqrt runs with validation early stopping
+- **Coherent training modes** — equal-budget cosine runs, plus open-ended inverse-sqrt runs with validation early stopping
 - **Derived hyperparameters** — express exact simulation-budget relationships without redundant sampler dimensions
 - **Custom hooks** — replace build, train, or validate steps while reusing the full trial lifecycle
 - **Pre-flight validation** — `check_pipeline()` catches interface errors before GPU hours are wasted

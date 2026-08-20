@@ -119,7 +119,7 @@ def test_inference_conditions_fallback_for_data_keys():
 # ---------------------------------------------------------------------------
 
 
-def test_optimize_forwards_early_stopping_params_to_objective_config():
+def test_optimize_forwards_early_stopping_params_to_objective_config() -> None:
     """optimize() forwards early_stopping_patience/window to ObjectiveConfig."""
     config = _patched_optimize(
         training_mode="open_ended",
@@ -132,7 +132,7 @@ def test_optimize_forwards_early_stopping_params_to_objective_config():
     assert config.early_stopping_monitor == "nrmse"
 
 
-def test_optimize_early_stopping_default_values():
+def test_optimize_early_stopping_default_values() -> None:
     """Fixed-budget mode disables early stopping by default."""
     config = _patched_optimize()
     assert config.training_mode == "fixed_budget"
@@ -141,7 +141,8 @@ def test_optimize_early_stopping_default_values():
     assert config.early_stopping_monitor == "objective_mean"
 
 
-def test_optimize_forwards_warmup_configuration():
+def test_optimize_forwards_warmup_configuration() -> None:
+    """optimize() forwards warmup configuration to ObjectiveConfig."""
     config = _patched_optimize(
         lr_warmup_epochs=[1, 2, 4],
         lr_warmup_steps=[50, 100],

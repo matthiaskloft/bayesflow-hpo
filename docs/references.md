@@ -1,6 +1,7 @@
 # References
 
-Verified via OpenAlex API. APA 7 format.
+Checked against the OpenAlex API, with version exceptions documented below.
+APA 7 format.
 
 ## Coverage Matrix
 
@@ -236,8 +237,9 @@ https://www.jmlr.org/papers/v20/18-789.html
 
 Shows that batch-size effects and suitable metaparameter settings vary greatly
 between workloads, supporting joint batch-size and learning-rate exploration
-instead of a fixed package-wide batch size. OpenAlex work `W2900167092`; full
-text verified via the JMLR article PDF.
+instead of a fixed package-wide batch size. OpenAlex work `W2900167092` maps
+the preprint record to the cited 2019 JMLR version; full text was verified via
+the JMLR article PDF.
 
 ### Sobol', I. M. (1967)
 
@@ -264,4 +266,8 @@ Systems 30* (pp. 5998--6008). https://doi.org/10.48550/arXiv.1706.03762
 
 Section 5.3 defines linear learning-rate warmup followed by decay proportional
 to the inverse square root of the optimizer step. This backs the horizon-free
-schedule used by `open_ended` training mode.
+schedule used by `open_ended` training mode. OpenAlex candidate
+`W2626778328` is unrelated (a 2025 record with DOI `10.65215/2q58a426`) and is
+therefore not used as the bibliographic record. The cited 2017 arXiv DOI,
+authors, and Section 5.3 were verified directly against the full text because
+OpenAlex did not return a correctly mapped work for that DOI.

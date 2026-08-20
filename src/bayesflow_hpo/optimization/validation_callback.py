@@ -196,8 +196,8 @@ class PeriodicValidationCallback(Callback):
         if (epoch - self.warmup) % self.interval != 0:
             return
 
-        scores = self._run_lightweight_validation()
-        if scores is None:
+        raw_scores = self._run_lightweight_validation()
+        if raw_scores is None:
             self._consecutive_failures += 1
             if self._consecutive_failures == 3:
                 logger.warning(
@@ -211,7 +211,11 @@ class PeriodicValidationCallback(Callback):
 
         self._step += 1
 
-        self._update_early_stopping(scores)
+        self._update_early_stopping(raw_scores)
+        scores = {
+            metric: _metric_to_minimize(metric, float(raw_scores[metric]))
+            for metric in self.objective_metrics
+        }
 
         if self._is_multi_objective:
             # Store per-metric user attrs for strategy functions.
@@ -226,7 +230,7 @@ class PeriodicValidationCallback(Callback):
                 raise optuna.TrialPruned()
         else:
             # Single-objective: use first metric with Optuna's pruner.
-            primary_val = float(scores[self.objective_metrics[0]])
+            primary_val = scores[self.objective_metrics[0]]
             self.trial.report(primary_val, step=self._step)
             if self.trial.should_prune():
                 raise optuna.TrialPruned()

@@ -56,8 +56,8 @@ def optimize(
 | `epochs` | Training epochs, or safety cap in open-ended mode (default 200). |
 | `num_batches` | Online simulation batches per epoch (default 50). |
 | `early_stopping_patience` | Validation checks without improvement in open-ended mode (`None` selects 5). |
-| `early_stopping_window` | Moving-average window size (default 7). |
-| `early_stopping_monitor` | `"objective_mean"` combines all minimize-oriented objectives; a metric name monitors one objective. |
+| `early_stopping_window` | Moving-average window in validation checks for open-ended runs, or epochs for the training-loss callback (default 7). |
+| `early_stopping_monitor` | `"objective_mean"` averages `objective_metrics` after minimize-direction conversion; the separate cost objective is excluded. A metric name monitors one validation metric. |
 | `lr_warmup_epochs` | Optional epoch override; `None` selects 1 in open-ended mode. A sequence enables categorical HPO. |
 | `lr_warmup_steps` | Exact step override; a sequence enables categorical HPO. |
 | `lr_warmup_fraction` | Fixed-budget fraction; `None` selects 5%, maximum 10%. A sequence enables categorical HPO. |

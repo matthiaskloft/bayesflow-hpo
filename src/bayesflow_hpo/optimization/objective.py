@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import logging
 import math
+import numbers
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -184,8 +185,8 @@ def _normalize_warmup_spec(
     """Validate a fixed or categorical warmup configuration."""
     if value is None:
         return default
-    if type(value) is int:
-        return value
+    if isinstance(value, numbers.Integral) and not isinstance(value, bool):
+        return int(value)
     if isinstance(value, (str, bytes)):
         raise TypeError(f"{name} must be an int, a sequence of ints, or None.")
     try:
@@ -194,8 +195,12 @@ def _normalize_warmup_spec(
         raise TypeError(
             f"{name} must be an int, a sequence of ints, or None."
         ) from exc
-    if not choices or any(type(choice) is not int for choice in choices):
+    if not choices or any(
+        not isinstance(choice, numbers.Integral) or isinstance(choice, bool)
+        for choice in choices
+    ):
         raise TypeError(f"{name} choices must be a non-empty sequence of ints.")
+    choices = tuple(int(choice) for choice in choices)
     if len(set(choices)) != len(choices):
         raise ValueError(f"{name} choices must be unique.")
     return choices
@@ -459,16 +464,12 @@ class ObjectiveConfig:
             default=0.05 if self.training_mode == "fixed_budget" else None,
         )
         minimum_warmup = 0 if self.training_mode == "fixed_budget" else 1
-        active_specs = (
-            (("lr_warmup_steps", self.lr_warmup_steps),)
-            if self.lr_warmup_steps is not None
-            else (
-                (("lr_warmup_epochs", self.lr_warmup_epochs),)
-                if self.lr_warmup_epochs is not None
-                else (("lr_warmup_fraction", self.lr_warmup_fraction),)
-            )
+        precedence = (
+            ("lr_warmup_steps", self.lr_warmup_steps),
+            ("lr_warmup_epochs", self.lr_warmup_epochs),
+            ("lr_warmup_fraction", self.lr_warmup_fraction),
         )
-        for name, spec in active_specs:
+        for name, spec in precedence:
             if spec is None:
                 continue
             values = spec if isinstance(spec, tuple) else (spec,)
@@ -476,6 +477,20 @@ class ObjectiveConfig:
                 raise ValueError(
                     f"{name} must be >= {minimum_warmup} in "
                     f"{self.training_mode!r} mode."
+                )
+            break
+        if self.training_mode == "fixed_budget":
+            total_steps = self.epochs * self.num_batches
+            if isinstance(self.lr_warmup_steps, int):
+                static_warmup_steps = self.lr_warmup_steps
+            elif isinstance(self.lr_warmup_epochs, int):
+                static_warmup_steps = self.lr_warmup_epochs * self.num_batches
+            else:
+                static_warmup_steps = None
+            if static_warmup_steps is not None and static_warmup_steps >= total_steps:
+                raise ValueError(
+                    "Static warmup must be shorter than the fixed training budget, "
+                    f"got {static_warmup_steps} >= {total_steps} optimizer steps."
                 )
         if not isinstance(self.validation_data, ValidationDataset):
             raise TypeError(
@@ -812,7 +827,14 @@ class GenericObjective:
         epochs = int(params["epochs"])
         num_batches = int(params["num_batches"])
         if epochs < 1 or num_batches < 1:
-            raise ValueError("Trial epochs and num_batches must both be >= 1.")
+            trial.set_user_attr("rejected_reason", "invalid_training_budget")
+            logger.info(
+                "Trial #%d rejected: epochs=%d and num_batches=%d must be >= 1.",
+                trial.number,
+                epochs,
+                num_batches,
+            )
+            return self._penalty()
         trial.set_user_attr("training_mode", config.training_mode)
         trial.set_user_attr("epochs", epochs)
         trial.set_user_attr("num_batches", num_batches)
@@ -839,10 +861,12 @@ class GenericObjective:
             if "lr_warmup_fraction" in params:
                 warmup_fraction = float(params["lr_warmup_fraction"])
                 normalized_fraction = _normalize_warmup_fraction_spec(warmup_fraction)
-                assert isinstance(normalized_fraction, float)
-                warmup_fraction = normalized_fraction
+                if not isinstance(normalized_fraction, float):
+                    raise TypeError("A sampled warmup fraction must be scalar.")
+                warmup_fraction = float(normalized_fraction)
             else:
-                assert config.lr_warmup_fraction is not None
+                if config.lr_warmup_fraction is None:
+                    raise TypeError("Fixed-budget training requires a warmup fraction.")
                 warmup_fraction = _sample_warmup_fraction(
                     trial,
                     config.lr_warmup_fraction,
@@ -850,10 +874,15 @@ class GenericObjective:
             warmup_steps = round(warmup_fraction * epochs * num_batches)
         minimum_warmup = 0 if config.training_mode == "fixed_budget" else 1
         if warmup_steps < minimum_warmup:
-            raise ValueError(
-                f"Effective warmup steps must be >= {minimum_warmup} in "
-                f"{config.training_mode!r} mode, got {warmup_steps}."
+            trial.set_user_attr("rejected_reason", "invalid_warmup")
+            logger.info(
+                "Trial #%d rejected: warmup_steps=%d must be >= %d in %r mode.",
+                trial.number,
+                warmup_steps,
+                minimum_warmup,
+                config.training_mode,
             )
+            return self._penalty()
         trial.set_user_attr("lr_warmup_steps", warmup_steps)
         trial.set_user_attr("lr_warmup_epochs", warmup_steps / num_batches)
         trial.set_user_attr(

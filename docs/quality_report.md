@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Training budgets now use explicit `fixed_budget` and `open_ended` modes.
+  Existing studies should not be resumed across this change: intermediate
+  higher-is-better metrics such as `contraction` are now stored and reported in
+  minimize-oriented form, so their historical values are not comparable.
+
 Changes implemented during the v0.2.0 workover (quality fixes, BayesFlow decoupling, validation redesign).
 
 ---

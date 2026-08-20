@@ -79,6 +79,14 @@ class _PerTrialBudgetSearchSpace(_FakeSearchSpace):
         }
 
 
+class _InvalidPerTrialBudgetSearchSpace(_FakeSearchSpace):
+    """Search space returning an invalid derived training budget."""
+
+    def sample(self, trial):
+        """Return a zero-batch budget that must be rejected."""
+        return {"initial_lr": 1e-3, "epochs": 3, "num_batches": 0}
+
+
 class _FakeApproximator:
     """Approximator stub that reports a configurable param count."""
 
@@ -527,6 +535,20 @@ def test_open_ended_mode_rejects_warmup_fraction():
         )
 
 
+def test_fixed_budget_rejects_static_warmup_at_training_horizon() -> None:
+    """Static warmup is validated before starting an all-invalid study."""
+    with pytest.raises(ValueError, match="shorter than the fixed training budget"):
+        ObjectiveConfig(
+            simulator=object(),
+            adapter=object(),
+            search_space=_FakeSearchSpace(),
+            validation_data=_DUMMY_VALIDATION_DATA,
+            epochs=2,
+            num_batches=10,
+            lr_warmup_steps=20,
+        )
+
+
 def test_objective_config_rejects_early_stopping_with_fixed_budget():
     """A finite-horizon schedule cannot stop before its horizon."""
     with pytest.raises(ValueError, match="cannot be set in fixed_budget"):
@@ -548,6 +570,24 @@ def test_objective_config_rejects_unknown_training_mode():
             validation_data=_DUMMY_VALIDATION_DATA,
             training_mode="adaptive",
         )
+
+
+def test_invalid_sampled_training_budget_returns_penalty() -> None:
+    """Invalid derived budgets reject one trial without aborting the study."""
+    objective = GenericObjective(
+        ObjectiveConfig(
+            simulator=object(),
+            adapter=object(),
+            search_space=_InvalidPerTrialBudgetSearchSpace(),
+            validation_data=_DUMMY_VALIDATION_DATA,
+        )
+    )
+    trial = _FakeTrial()
+
+    values = objective(trial)
+
+    assert values == objective._penalty()
+    assert trial.user_attrs["rejected_reason"] == "invalid_training_budget"
 
 
 @pytest.mark.parametrize(
@@ -630,6 +670,55 @@ def test_fixed_budget_schedule_uses_per_trial_training_length(
         expected_steps / 21
     )
     assert trial.user_attrs["peak_learning_rate"] == pytest.approx(1e-3)
+
+
+def test_open_ended_schedule_uses_one_trial_epoch_of_warmup(monkeypatch) -> None:
+    """Open-ended scheduling derives warmup from the sampled batch count."""
+    captured = {}
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective._make_inverse_sqrt_optimizer",
+        lambda initial_lr, warmup_steps: captured.update(
+            initial_lr=initial_lr,
+            warmup_steps=warmup_steps,
+        )
+        or object(),
+    )
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.estimate_peak_memory_mb",
+        lambda params: 1.0,
+    )
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.cleanup_trial",
+        lambda: None,
+    )
+
+    class _Simulator:
+        def sample(self, shape):
+            return {}
+
+    class _Adapter:
+        def __call__(self, data):
+            return data
+
+    objective = GenericObjective(
+        ObjectiveConfig(
+            simulator=_Simulator(),
+            adapter=_Adapter(),
+            search_space=_PerTrialBudgetSearchSpace(),
+            validation_data=_DUMMY_VALIDATION_DATA_1COND,
+            training_mode="open_ended",
+            build_approximator_fn=lambda params: _FakeApproximator(100),
+            train_fn=lambda approximator, simulator, params, callbacks: None,
+            validate_fn=lambda approximator, data, samples: {
+                "calibration_error": 0.1,
+                "nrmse": 0.2,
+            },
+        )
+    )
+
+    objective(_FakeTrial())
+
+    assert captured == {"initial_lr": 1e-3, "warmup_steps": 7}
 
 
 def test_objective_config_rejects_invalid_mode():

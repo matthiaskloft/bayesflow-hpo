@@ -86,6 +86,29 @@ class TestCallbackPerMetricAttrs:
         assert "val_nrmse_step_1" in trial.user_attrs
         assert trial.user_attrs["val_nrmse_step_1"] == 0.02
 
+    def test_stores_contraction_in_minimize_orientation(self) -> None:
+        """Higher contraction is converted before storage and pruning."""
+        study = _make_study()
+        trial = study.ask()
+        callback = PeriodicValidationCallback(
+            trial=trial,
+            approximator=None,
+            validation_data=_DUMMY_VALIDATION_DATA,
+            interval=1,
+            warmup=0,
+            pruning_strategy="none",
+            objective_metrics=["contraction"],
+        )
+
+        with patch.object(
+            callback,
+            "_run_lightweight_validation",
+            return_value={"contraction": 0.8},
+        ):
+            callback.on_epoch_end(epoch=0)
+
+        assert trial.user_attrs["val_contraction_step_1"] == pytest.approx(0.2)
+
 
 class _WeightTrackingApproximator:
     def __init__(self):

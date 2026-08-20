@@ -64,19 +64,22 @@ def test_make_cosine_decay_optimizer():
     assert opt is not None
 
 
-def test_cosine_decay_optimizer_supports_linear_warmup():
+def test_cosine_decay_optimizer_supports_linear_warmup() -> None:
+    """Cosine decay reaches its target after linear warmup."""
     opt = _make_cosine_decay_optimizer(1.0, 12, 4)
     schedule = opt._learning_rate
     values = [float(schedule(step)) for step in range(5)]
     np.testing.assert_allclose(values, [0.0, 0.25, 0.5, 0.75, 1.0])
 
 
-def test_cosine_decay_optimizer_rejects_warmup_without_decay_budget():
+def test_cosine_decay_optimizer_rejects_warmup_without_decay_budget() -> None:
+    """Warmup must leave at least one step for cosine decay."""
     with np.testing.assert_raises_regex(ValueError, "smaller than"):
         _make_cosine_decay_optimizer(1e-3, 4, 4)
 
 
-def test_inverse_sqrt_decay_warms_up_then_decays():
+def test_inverse_sqrt_decay_warms_up_then_decays() -> None:
+    """Inverse-square-root scheduling warms up before decaying."""
     schedule = InverseSqrtDecay(peak_learning_rate=1.0, warmup_steps=4)
     values = [float(schedule(step)) for step in range(8)]
     np.testing.assert_allclose(values[:4], [0.25, 0.5, 0.75, 1.0])
@@ -84,7 +87,8 @@ def test_inverse_sqrt_decay_warms_up_then_decays():
     assert values[7] < values[4]
 
 
-def test_inverse_sqrt_decay_serialization_roundtrip():
+def test_inverse_sqrt_decay_serialization_roundtrip() -> None:
+    """Inverse-square-root schedules survive Keras serialization."""
     schedule = InverseSqrtDecay(peak_learning_rate=1e-3, warmup_steps=100)
     restored = keras.optimizers.schedules.deserialize(
         keras.optimizers.schedules.serialize(schedule)
@@ -93,7 +97,8 @@ def test_inverse_sqrt_decay_serialization_roundtrip():
     assert restored.get_config() == schedule.get_config()
 
 
-def test_make_inverse_sqrt_optimizer():
+def test_make_inverse_sqrt_optimizer() -> None:
+    """The inverse-square-root helper constructs an optimizer."""
     opt = _make_inverse_sqrt_optimizer(1e-3, 100)
     assert opt is not None
 

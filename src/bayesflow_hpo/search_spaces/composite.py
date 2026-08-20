@@ -24,6 +24,19 @@ from bayesflow_hpo.search_spaces.base import SearchSpace
 from bayesflow_hpo.search_spaces.training import TrainingSpace
 
 
+def _merge_unique(
+    destination: dict[str, Any], incoming: dict[str, Any], source: str
+) -> None:
+    """Merge parameters while rejecting cross-space name collisions."""
+    duplicates = sorted(destination.keys() & incoming.keys())
+    if duplicates:
+        raise ValueError(
+            f"Duplicate parameter names while merging {source}: "
+            f"{', '.join(duplicates)}"
+        )
+    destination.update(incoming)
+
+
 @dataclass
 class CompositeSearchSpace:
     """Combines inference, summary, and training search spaces.
@@ -49,13 +62,13 @@ class CompositeSearchSpace:
         """Return merged constants from all sub-spaces."""
         result: dict[str, Any] = {}
         if hasattr(self.inference_space, "constants"):
-            result.update(self.inference_space.constants)
+            _merge_unique(result, self.inference_space.constants, "inference constants")
         if self.summary_space is not None and hasattr(
             self.summary_space, "constants"
         ):
-            result.update(self.summary_space.constants)
+            _merge_unique(result, self.summary_space.constants, "summary constants")
         if hasattr(self.training_space, "constants"):
-            result.update(self.training_space.constants)
+            _merge_unique(result, self.training_space.constants, "training constants")
         return result
 
     def sample(self, trial: Any) -> dict[str, Any]:
@@ -73,8 +86,8 @@ class CompositeSearchSpace:
         """
         params = self.inference_space.sample(trial)
         if self.summary_space is not None:
-            params.update(self.summary_space.sample(trial))
-        params.update(self.training_space.sample(trial))
+            _merge_unique(params, self.summary_space.sample(trial), "summary space")
+        _merge_unique(params, self.training_space.sample(trial), "training space")
         return params
 
 

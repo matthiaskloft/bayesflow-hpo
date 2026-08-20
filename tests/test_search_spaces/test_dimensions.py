@@ -1,6 +1,7 @@
 """Tests for dimension dataclass validation."""
 
 from dataclasses import dataclass, field
+from typing import Any
 
 import pytest
 from conftest import FakeTrial
@@ -72,6 +73,8 @@ class TestBoolDimension:
 
 @dataclass
 class _BudgetedSpace(BaseSearchSpace):
+    """Search space with a training budget derived from sampled parameters."""
+
     batch_size: IntDimension = field(
         default_factory=lambda: IntDimension("batch_size", constant=32)
     )
@@ -88,16 +91,19 @@ class _BudgetedSpace(BaseSearchSpace):
         )
     )
 
-    def build(self, params):
+    def build(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Return parameters unchanged for dimension tests."""
         return params
 
 
-def test_derived_dimension_runs_after_sampled_and_constant_dimensions():
+def test_derived_dimension_runs_after_sampled_and_constant_dimensions() -> None:
+    """Derived values are computed after their dependencies."""
     params = _BudgetedSpace().sample(FakeTrial())
     assert params["num_batches"] == 10
 
 
-def test_derived_dimension_is_not_a_constant():
+def test_derived_dimension_is_not_a_constant() -> None:
+    """Derived values are not exposed as static constants."""
     constants = _BudgetedSpace().constants
     assert constants == {
         "batch_size": 32,
@@ -108,6 +114,8 @@ def test_derived_dimension_is_not_a_constant():
 
 @dataclass
 class _DuplicateDimensionSpace(BaseSearchSpace):
+    """Search space containing sampled and derived dimensions with one name."""
+
     sampled: IntDimension = field(
         default_factory=lambda: IntDimension("shared", low=1, high=2)
     )
@@ -115,10 +123,12 @@ class _DuplicateDimensionSpace(BaseSearchSpace):
         default_factory=lambda: DerivedDimension("shared", lambda p: 3)
     )
 
-    def build(self, params):
+    def build(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Return parameters unchanged for dimension tests."""
         return params
 
 
-def test_duplicate_dimension_names_are_rejected_before_sampling():
+def test_duplicate_dimension_names_are_rejected_before_sampling() -> None:
+    """Duplicate sampled and derived names are rejected before sampling."""
     with pytest.raises(ValueError, match="duplicate dimension names: shared"):
         _DuplicateDimensionSpace().sample(FakeTrial())
