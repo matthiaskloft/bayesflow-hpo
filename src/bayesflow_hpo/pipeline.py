@@ -292,7 +292,7 @@ def check_pipeline(
     if train_fn is None and "initial_lr" not in raw_hparams:
         raise PipelineError(
             "Search space does not sample 'initial_lr', which is required "
-            "for the default compile step (Adam + CosineDecay). Either add "
+            "for the default Adam compile step. Either add "
             "'initial_lr' to your search space (e.g. via TrainingSpace) or "
             "provide a custom train_fn that compiles with its own optimizer."
         )

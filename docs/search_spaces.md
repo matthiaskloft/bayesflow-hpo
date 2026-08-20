@@ -11,12 +11,31 @@ All dimensions are defined in `search_spaces/base.py`:
 | `IntDimension` | name, low, high, step, log, constant | `IntDimension("depth", 2, 12)` |
 | `FloatDimension` | name, low, high, log, constant | `FloatDimension("dropout", 0.0, 0.3)` |
 | `CategoricalDimension` | name, choices, constant | `CategoricalDimension("activation", ["relu", "silu"])` |
+| `DerivedDimension` | name, derive | `DerivedDimension("num_batches", lambda p: ...)` |
 
 The `constant` field controls whether a dimension is tuned:
 - `constant` not set (default `_UNSET`) — dimension is tunable, Optuna samples from range/choices
 - `constant=<value>` — dimension is fixed at the given value, not tuned by Optuna
 
 This replaces the previous `enabled`/`include_optional` pattern. Dimensions that default to a BayesFlow default value use `constant=<bf_default>` so they are not tuned unless the user overrides them.
+
+`DerivedDimension` is evaluated after all sampled and constant dimensions in
+the same search space. It supports exact resource couplings without presenting
+redundant coordinates to the sampler. For example, a training-space subclass
+can fix the number of online simulations while tuning batch size:
+
+This supports the workload-aware joint-tuning rationale of Shallue et al.
+(2019); see [References](references.md).
+
+```python
+num_batches = hpo.DerivedDimension(
+    "num_batches",
+    lambda p: p["simulation_budget"] // (p["batch_size"] * p["epochs"]),
+)
+```
+
+Derived values are included in the `hparams` passed to the builder and
+`train_fn`, but are not recorded as independently sampled Optuna parameters.
 
 ## Inference Network Spaces
 
@@ -211,8 +230,8 @@ Cross-attention fusion summary (`FusionTransformer`).
 
 | Dimension | Type | Range | Tuned | Constant |
 |-----------|------|-------|-------|----------|
-| `initial_lr` | float | [1e-4, 5e-3], log | yes | — |
-| `batch_size` | int | [32, 1024], step=32 | no | `256` |
+| `initial_lr` | float | [1e-4, 1e-2], log | yes | — |
+| `batch_size` | int | [32, 256], step=32 | yes | — |
 | `decay_rate` | float | [0.8, 0.99] | no | `0.95` |
 
 When a dimension has `constant` set, the constant value is used directly. To make a constant dimension tunable, set `constant=_UNSET` or create a new dimension without a constant.

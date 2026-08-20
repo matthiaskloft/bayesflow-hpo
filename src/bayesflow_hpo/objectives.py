@@ -154,7 +154,7 @@ def denormalize_param_count(
 
 
 # Metrics where higher is better — the objective value is ``1 - metric``.
-HIGHER_IS_BETTER = {"correlation"}
+HIGHER_IS_BETTER = {"correlation", "contraction"}
 
 
 def _metric_to_minimize(key: str, value: float) -> float:

@@ -1,10 +1,8 @@
 """Approximator construction helpers.
 
 Builds a ``ContinuousApproximator`` for a single HPO trial from the
-sampled hyperparameters.  The optimizer helper uses **Adam with
-CosineDecay**, which decays the learning rate from ``initial_lr`` to
-near-zero over the full training budget (``epochs * num_batches``
-steps).
+sampled hyperparameters.  Optimizer helpers provide a finite-horizon cosine
+schedule and a horizon-free inverse-square-root schedule with warmup.
 """
 
 from __future__ import annotations
@@ -15,30 +13,113 @@ from typing import Any
 
 import bayesflow as bf
 import keras
+from keras import ops
 
 from bayesflow_hpo.search_spaces.composite import CompositeSearchSpace
 
 logger = logging.getLogger(__name__)
 
 
+@keras.saving.register_keras_serializable(package="bayesflow_hpo")
+class InverseSqrtDecay(keras.optimizers.schedules.LearningRateSchedule):
+    """Linear warmup followed by inverse-square-root decay.
+
+    The peak learning rate is reached at ``warmup_steps``; subsequent values
+    are proportional to the inverse square root of the optimizer step.  This
+    is the horizon-free schedule described by Vaswani et al. (2017, Sec. 5.3).
+
+    Parameters
+    ----------
+    peak_learning_rate
+        Learning rate reached at the end of warmup.
+    warmup_steps
+        Number of linear-warmup optimizer steps. Must be at least one.
+
+    See Also
+    --------
+    https://doi.org/10.48550/arXiv.1706.03762
+    https://keras.io/api/optimizers/learning_rate_schedules/learning_rate_schedule/
+    """
+
+    def __init__(self, peak_learning_rate: float, warmup_steps: int = 1) -> None:
+        if warmup_steps < 1:
+            raise ValueError(f"warmup_steps must be >= 1, got {warmup_steps}.")
+        self.peak_learning_rate = float(peak_learning_rate)
+        self.warmup_steps = int(warmup_steps)
+
+    def __call__(self, step: Any) -> Any:
+        dtype = keras.backend.floatx()
+        step_number = ops.cast(step, dtype) + 1.0
+        warmup_steps = ops.cast(self.warmup_steps, dtype)
+        peak = ops.cast(self.peak_learning_rate, dtype)
+        warmup_lr = peak * step_number / warmup_steps
+        decay_lr = peak * ops.sqrt(warmup_steps / step_number)
+        return ops.where(step_number <= warmup_steps, warmup_lr, decay_lr)
+
+    def get_config(self) -> dict[str, Any]:
+        """Return a serializable schedule configuration."""
+        return {
+            "peak_learning_rate": self.peak_learning_rate,
+            "warmup_steps": self.warmup_steps,
+        }
+
+
 def _make_cosine_decay_optimizer(
     initial_lr: float,
     decay_steps: int,
+    warmup_steps: int = 0,
 ) -> keras.optimizers.Optimizer:
-    """Create an Adam optimizer with CosineDecay schedule.
+    """Create an Adam optimizer with optional warmup and cosine decay.
 
     Parameters
     ----------
     initial_lr
         Peak learning rate.
     decay_steps
-        Total steps over which to decay (``epochs * num_batches``).
+        Total optimizer-step budget, including warmup.
+    warmup_steps
+        Linear-warmup steps before cosine decay. Keras implements this with
+        ``warmup_target`` and ``warmup_steps`` as documented by its
+        :class:`~keras.optimizers.schedules.CosineDecay` API.
+
+    See Also
+    --------
+    https://keras.io/api/optimizers/learning_rate_schedules/cosine_decay/
+    https://doi.org/10.48550/arXiv.1706.02677
     """
+    if warmup_steps < 0:
+        raise ValueError(f"warmup_steps must be >= 0, got {warmup_steps}.")
+    if warmup_steps >= decay_steps:
+        raise ValueError(
+            "warmup_steps must be smaller than the total training steps, "
+            f"got {warmup_steps} >= {decay_steps}."
+        )
+    schedule_kwargs: dict[str, Any] = {}
+    schedule_initial_lr = initial_lr
+    cosine_steps = decay_steps
+    if warmup_steps:
+        schedule_initial_lr = 0.0
+        cosine_steps -= warmup_steps
+        schedule_kwargs = {
+            "warmup_target": initial_lr,
+            "warmup_steps": warmup_steps,
+        }
     lr_schedule = keras.optimizers.schedules.CosineDecay(
-        initial_learning_rate=initial_lr,
-        decay_steps=max(1, decay_steps),
+        initial_learning_rate=schedule_initial_lr,
+        decay_steps=cosine_steps,
+        **schedule_kwargs,
     )
     return keras.optimizers.Adam(learning_rate=lr_schedule)
+
+
+def _make_inverse_sqrt_optimizer(
+    initial_lr: float,
+    warmup_steps: int,
+) -> keras.optimizers.Optimizer:
+    """Create an Adam optimizer with horizon-free inverse-sqrt decay."""
+    return keras.optimizers.Adam(
+        learning_rate=InverseSqrtDecay(initial_lr, warmup_steps),
+    )
 
 
 def _compile_for_compat(candidate: Any, optimizer: Any) -> None:

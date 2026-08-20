@@ -23,6 +23,7 @@ def test_metric_to_minimize_lower_is_better():
 
 def test_metric_to_minimize_higher_is_better():
     assert np.isclose(_metric_to_minimize("correlation", 0.8), 0.2)
+    assert np.isclose(_metric_to_minimize("contraction", 0.8), 0.2)
 
 
 def test_extract_multi_mean_mode():

@@ -44,10 +44,16 @@ class _FakeTrial:
     def __init__(self):
         self.number = 0
         self.user_attrs = {}
+        self.params = {}
         self.study = _FakeStudy()
 
     def set_user_attr(self, key, value):
         self.user_attrs[key] = value
+
+    def suggest_categorical(self, name, choices):
+        value = choices[0]
+        self.params[name] = value
+        return value
 
 
 class _FakeInferenceSpace:
@@ -62,6 +68,23 @@ class _FakeSearchSpace:
 
     def sample(self, trial):
         return {"initial_lr": 1e-3}
+
+
+class _PerTrialBudgetSearchSpace(_FakeSearchSpace):
+    def sample(self, trial):
+        return {
+            "initial_lr": 1e-3,
+            "epochs": 3,
+            "num_batches": 7,
+        }
+
+
+class _InvalidPerTrialBudgetSearchSpace(_FakeSearchSpace):
+    """Search space returning an invalid derived training budget."""
+
+    def sample(self, trial):
+        """Return a zero-batch budget that must be rejected."""
+        return {"initial_lr": 1e-3, "epochs": 3, "num_batches": 0}
 
 
 class _FakeApproximator:
@@ -396,7 +419,7 @@ def test_objective_reraises_memory_error_from_probe(monkeypatch):
 
 
 def test_objective_config_early_stopping_defaults():
-    """ObjectiveConfig defaults: early_stopping_patience=5, early_stopping_window=7."""
+    """Fixed-budget mode runs to completion by default."""
     config = ObjectiveConfig(
         simulator=object(),
         adapter=object(),
@@ -405,8 +428,11 @@ def test_objective_config_early_stopping_defaults():
         num_batches=1,
         validation_data=_DUMMY_VALIDATION_DATA,
     )
-    assert config.early_stopping_patience == 5
+    assert config.training_mode == "fixed_budget"
+    assert config.early_stopping_patience is None
     assert config.early_stopping_window == 7
+    assert config.lr_warmup_epochs is None
+    assert config.lr_warmup_fraction == pytest.approx(0.05)
 
 
 def test_objective_config_early_stopping_custom_values():
@@ -418,11 +444,281 @@ def test_objective_config_early_stopping_custom_values():
         epochs=1,
         num_batches=1,
         validation_data=_DUMMY_VALIDATION_DATA,
+        training_mode="open_ended",
         early_stopping_patience=10,
         early_stopping_window=5,
     )
     assert config.early_stopping_patience == 10
     assert config.early_stopping_window == 5
+
+
+def test_objective_config_rejects_unknown_early_stopping_monitor():
+    with pytest.raises(ValueError, match="must be 'objective_mean'"):
+        ObjectiveConfig(
+            simulator=object(),
+            adapter=object(),
+            search_space=_FakeSearchSpace(),
+            validation_data=_DUMMY_VALIDATION_DATA,
+            early_stopping_monitor="recovery",
+        )
+
+
+def test_open_ended_mode_resolves_default_patience():
+    config = ObjectiveConfig(
+        simulator=object(),
+        adapter=object(),
+        search_space=_FakeSearchSpace(),
+        validation_data=_DUMMY_VALIDATION_DATA,
+        training_mode="open_ended",
+    )
+    assert config.early_stopping_patience == 5
+    assert config.lr_warmup_epochs == 1
+
+
+def test_open_ended_mode_rejects_zero_warmup():
+    with pytest.raises(ValueError, match="lr_warmup_epochs must be >= 1"):
+        ObjectiveConfig(
+            simulator=object(),
+            adapter=object(),
+            search_space=_FakeSearchSpace(),
+            validation_data=_DUMMY_VALIDATION_DATA,
+            training_mode="open_ended",
+            lr_warmup_epochs=0,
+        )
+
+
+def test_exact_warmup_steps_take_precedence_over_epoch_setting():
+    config = ObjectiveConfig(
+        simulator=object(),
+        adapter=object(),
+        search_space=_FakeSearchSpace(),
+        validation_data=_DUMMY_VALIDATION_DATA,
+        training_mode="open_ended",
+        lr_warmup_epochs=0,
+        lr_warmup_steps=25,
+    )
+    assert config.lr_warmup_steps == 25
+
+
+def test_warmup_choices_must_be_unique():
+    with pytest.raises(ValueError, match="choices must be unique"):
+        ObjectiveConfig(
+            simulator=object(),
+            adapter=object(),
+            search_space=_FakeSearchSpace(),
+            validation_data=_DUMMY_VALIDATION_DATA,
+            lr_warmup_epochs=[1, 1],
+        )
+
+
+@pytest.mark.parametrize("fraction", [-0.01, 0.1001, float("inf")])
+def test_warmup_fraction_must_be_within_ceiling(fraction):
+    with pytest.raises(ValueError, match="between 0.0 and 0.1"):
+        ObjectiveConfig(
+            simulator=object(),
+            adapter=object(),
+            search_space=_FakeSearchSpace(),
+            validation_data=_DUMMY_VALIDATION_DATA,
+            lr_warmup_fraction=fraction,
+        )
+
+
+def test_open_ended_mode_rejects_warmup_fraction():
+    with pytest.raises(ValueError, match="only valid in 'fixed_budget'"):
+        ObjectiveConfig(
+            simulator=object(),
+            adapter=object(),
+            search_space=_FakeSearchSpace(),
+            validation_data=_DUMMY_VALIDATION_DATA,
+            training_mode="open_ended",
+            lr_warmup_fraction=0.05,
+        )
+
+
+def test_fixed_budget_rejects_static_warmup_at_training_horizon() -> None:
+    """Static warmup is validated before starting an all-invalid study."""
+    with pytest.raises(ValueError, match="shorter than the fixed training budget"):
+        ObjectiveConfig(
+            simulator=object(),
+            adapter=object(),
+            search_space=_FakeSearchSpace(),
+            validation_data=_DUMMY_VALIDATION_DATA,
+            epochs=2,
+            num_batches=10,
+            lr_warmup_steps=20,
+        )
+
+
+def test_objective_config_rejects_early_stopping_with_fixed_budget():
+    """A finite-horizon schedule cannot stop before its horizon."""
+    with pytest.raises(ValueError, match="cannot be set in fixed_budget"):
+        ObjectiveConfig(
+            simulator=object(),
+            adapter=object(),
+            search_space=_FakeSearchSpace(),
+            validation_data=_DUMMY_VALIDATION_DATA,
+            early_stopping_patience=5,
+        )
+
+
+def test_objective_config_rejects_unknown_training_mode():
+    with pytest.raises(ValueError, match="Unknown training_mode"):
+        ObjectiveConfig(
+            simulator=object(),
+            adapter=object(),
+            search_space=_FakeSearchSpace(),
+            validation_data=_DUMMY_VALIDATION_DATA,
+            training_mode="adaptive",
+        )
+
+
+def test_invalid_sampled_training_budget_returns_penalty() -> None:
+    """Invalid derived budgets reject one trial without aborting the study."""
+    objective = GenericObjective(
+        ObjectiveConfig(
+            simulator=object(),
+            adapter=object(),
+            search_space=_InvalidPerTrialBudgetSearchSpace(),
+            validation_data=_DUMMY_VALIDATION_DATA,
+        )
+    )
+    trial = _FakeTrial()
+
+    values = objective(trial)
+
+    assert values == objective._penalty()
+    assert trial.user_attrs["rejected_reason"] == "invalid_training_budget"
+
+
+@pytest.mark.parametrize(
+    ("warmup_kwargs", "expected_steps", "sampled_name"),
+    [
+        ({}, 1, None),
+        ({"lr_warmup_epochs": [1, 2]}, 7, "lr_warmup_epochs"),
+        (
+            {"lr_warmup_epochs": [1, 2], "lr_warmup_steps": [5, 8]},
+            5,
+            "lr_warmup_steps",
+        ),
+    ],
+)
+def test_fixed_budget_schedule_uses_per_trial_training_length(
+    monkeypatch, warmup_kwargs, expected_steps, sampled_name,
+):
+    captured = {}
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective._make_cosine_decay_optimizer",
+        lambda initial_lr, decay_steps, warmup_steps: captured.update(
+            initial_lr=initial_lr,
+            decay_steps=decay_steps,
+            warmup_steps=warmup_steps,
+        )
+        or object(),
+    )
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.estimate_peak_memory_mb",
+        lambda params: 1.0,
+    )
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.cleanup_trial",
+        lambda: None,
+    )
+
+    class _Simulator:
+        def sample(self, shape):
+            return {}
+
+    class _Adapter:
+        def __call__(self, data):
+            return data
+
+    objective = GenericObjective(
+        ObjectiveConfig(
+            simulator=_Simulator(),
+            adapter=_Adapter(),
+            search_space=_PerTrialBudgetSearchSpace(),
+            validation_data=_DUMMY_VALIDATION_DATA_1COND,
+            epochs=200,
+            num_batches=50,
+            build_approximator_fn=lambda params: _FakeApproximator(100),
+            train_fn=lambda approximator, simulator, params, callbacks: None,
+            validate_fn=lambda approximator, data, samples: {
+                "calibration_error": 0.1,
+                "nrmse": 0.2,
+            },
+            **warmup_kwargs,
+        )
+    )
+    trial = _FakeTrial()
+
+    objective(trial)
+
+    assert captured == {
+        "initial_lr": 1e-3,
+        "decay_steps": 21,
+        "warmup_steps": expected_steps,
+    }
+    assert trial.user_attrs["epochs"] == 3
+    assert trial.user_attrs["num_batches"] == 7
+    if sampled_name is not None:
+        assert trial.params[sampled_name] == warmup_kwargs[sampled_name][0]
+    assert trial.user_attrs["lr_warmup_steps"] == expected_steps
+    assert trial.user_attrs["lr_warmup_epochs"] == pytest.approx(
+        expected_steps / 7
+    )
+    assert trial.user_attrs["lr_warmup_fraction"] == pytest.approx(
+        expected_steps / 21
+    )
+    assert trial.user_attrs["peak_learning_rate"] == pytest.approx(1e-3)
+
+
+def test_open_ended_schedule_uses_one_trial_epoch_of_warmup(monkeypatch) -> None:
+    """Open-ended scheduling derives warmup from the sampled batch count."""
+    captured = {}
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective._make_inverse_sqrt_optimizer",
+        lambda initial_lr, warmup_steps: captured.update(
+            initial_lr=initial_lr,
+            warmup_steps=warmup_steps,
+        )
+        or object(),
+    )
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.estimate_peak_memory_mb",
+        lambda params: 1.0,
+    )
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.cleanup_trial",
+        lambda: None,
+    )
+
+    class _Simulator:
+        def sample(self, shape):
+            return {}
+
+    class _Adapter:
+        def __call__(self, data):
+            return data
+
+    objective = GenericObjective(
+        ObjectiveConfig(
+            simulator=_Simulator(),
+            adapter=_Adapter(),
+            search_space=_PerTrialBudgetSearchSpace(),
+            validation_data=_DUMMY_VALIDATION_DATA_1COND,
+            training_mode="open_ended",
+            build_approximator_fn=lambda params: _FakeApproximator(100),
+            train_fn=lambda approximator, simulator, params, callbacks: None,
+            validate_fn=lambda approximator, data, samples: {
+                "calibration_error": 0.1,
+                "nrmse": 0.2,
+            },
+        )
+    )
+
+    objective(_FakeTrial())
+
+    assert captured == {"initial_lr": 1e-3, "warmup_steps": 7}
 
 
 def test_objective_config_rejects_invalid_mode():
@@ -977,7 +1273,7 @@ def test_optimizer_creation_typeerror_not_swallowed(monkeypatch):
         lambda params, adapter, search_space: fake_approx,
     )
 
-    def _raise_type_error(initial_lr, decay_steps):
+    def _raise_type_error(initial_lr, decay_steps, warmup_steps):
         raise TypeError("bad arg type")
 
     monkeypatch.setattr(

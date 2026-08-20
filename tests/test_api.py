@@ -119,21 +119,38 @@ def test_inference_conditions_fallback_for_data_keys():
 # ---------------------------------------------------------------------------
 
 
-def test_optimize_forwards_early_stopping_params_to_objective_config():
+def test_optimize_forwards_early_stopping_params_to_objective_config() -> None:
     """optimize() forwards early_stopping_patience/window to ObjectiveConfig."""
     config = _patched_optimize(
+        training_mode="open_ended",
         early_stopping_patience=10,
         early_stopping_window=5,
+        early_stopping_monitor="nrmse",
     )
     assert config.early_stopping_patience == 10
     assert config.early_stopping_window == 5
+    assert config.early_stopping_monitor == "nrmse"
 
 
-def test_optimize_early_stopping_default_values():
-    """optimize() applies default patience=5, window=7 when not specified."""
+def test_optimize_early_stopping_default_values() -> None:
+    """Fixed-budget mode disables early stopping by default."""
     config = _patched_optimize()
-    assert config.early_stopping_patience == 5
+    assert config.training_mode == "fixed_budget"
+    assert config.early_stopping_patience is None
     assert config.early_stopping_window == 7
+    assert config.early_stopping_monitor == "objective_mean"
+
+
+def test_optimize_forwards_warmup_configuration() -> None:
+    """optimize() forwards warmup configuration to ObjectiveConfig."""
+    config = _patched_optimize(
+        lr_warmup_epochs=[1, 2, 4],
+        lr_warmup_steps=[50, 100],
+        lr_warmup_fraction=[0.01, 0.05, 0.1],
+    )
+    assert config.lr_warmup_epochs == (1, 2, 4)
+    assert config.lr_warmup_steps == (50, 100)
+    assert config.lr_warmup_fraction == (0.01, 0.05, 0.1)
 
 
 # ---------------------------------------------------------------------------
@@ -386,10 +403,15 @@ class TestBuildObjective:
                 adapter=MagicMock(),
                 search_space=MagicMock(),
                 validation_data=MagicMock(),
+                training_mode="fixed_budget",
                 epochs=100,
                 num_batches=50,
-                early_stopping_patience=5,
+                early_stopping_patience=None,
                 early_stopping_window=7,
+                early_stopping_monitor="objective_mean",
+                lr_warmup_epochs=1,
+                lr_warmup_steps=None,
+                lr_warmup_fraction=0.05,
                 max_param_count=1_000_000,
                 max_memory_mb=None,
                 metric_constraints_hard=None,

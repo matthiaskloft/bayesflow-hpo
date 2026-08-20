@@ -34,7 +34,7 @@ src/bayesflow_hpo/
 ├── builders/                # Construct BayesFlow objects from param dicts
 │   ├── adapter.py           # (deprecated since v0.2.0)
 │   ├── registry.py          # Builder function lookup tables
-│   └── workflow.py          # build_continuous_approximator, CosineDecay optimizer
+│   └── workflow.py          # approximator builder and LR schedule helpers
 │
 ├── optimization/            # Optuna integration layer
 │   ├── objective.py         # ObjectiveConfig, GenericObjective, default_train/validate_fn
@@ -100,19 +100,24 @@ A single HPO run follows this pipeline:
                     ┌──────────▼───────────────────┐
                     │   4. build_continuous_        │
                     │      approximator()           │
-                    │   (ContinuousApproximator     │
-                    │    + Adam/CosineDecay)        │
+                    │   (uncompiled                 │
+                    │    ContinuousApproximator)    │
                     └──────────┬───────────────────┘
                                │
                     ┌──────────▼───────────────────┐
-                    │   5. Train (configurable)     │
+                    │   5. Compile with the mode's  │
+                    │      Adam LR schedule         │
+                    └──────────┬───────────────────┘
+                               │
+                    ┌──────────▼───────────────────┐
+                    │   6. Train (configurable)     │
                     │   (default: fit_online with   │
                     │    early stopping & pruning,  │
                     │    or user-provided train_fn) │
                     └──────────┬───────────────────┘
                                │
                     ┌──────────▼───────────────────┐
-                    │   6. run_validation_pipeline  │
+                    │   7. run_validation_pipeline  │
                     │   (per-condition metrics via  │
                     │    registry → ValidationResult│
                     │    with table methods)        │
