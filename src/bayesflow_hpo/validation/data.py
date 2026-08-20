@@ -70,6 +70,21 @@ def generate_validation_dataset(
     Every batch is timed so that ``sim_time_per_sim`` reflects the
     average wall-clock cost of a single simulation across all
     conditions.
+
+    .. note::
+        When *condition_grid* is given, each grid point is sampled via
+        ``simulator.sample(sims_per_condition, conditions=condition,
+        seed=batch_seed)``. This assumes the simulator accepts a
+        ``conditions=`` dict directly. Simulators that instead need a
+        differently-shaped per-condition construction step (e.g.
+        ``bayesflow_irt``'s variable-size IRT simulators, which pin
+        ``n_items``/``n_persons`` via ``clone_with_sizes(...)`` rather than a
+        ``conditions=`` kwarg) cannot use this path today and build their own
+        validation dataset instead (see
+        ``bayesflow_irt.hpo.make_irt_validation_dataset``). A future release
+        may add a generic extension point here (e.g. an optional
+        ``sampler_fn`` override) so such simulators can plug into this
+        shared helper directly.
     """
     rng = np.random.default_rng(seed)
 
