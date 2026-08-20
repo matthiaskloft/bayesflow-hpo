@@ -14,7 +14,58 @@ Suggested execution order: I, then research follow-ups A2/A3.
 3. ~~Run the literature audit to verify metrics and features against references.~~ (done — see Package I below)
 4. Polish documentation and examples around the shipped features.
 5. ~~Add docstring citations and inline literature comments.~~ (done — see Package I below)
-6. Revisit the `correlation` diagnostic: it is currently defined as Pearson correlation between posterior means and true values in `validation/registry.py`. Evaluate whether posterior medians are the more appropriate point summary for skewed posteriors, and if so update the implementation, tests, and docs (`validation.md`, `defaults.md`, docstrings, and any examples mentioning correlation).
+6. ~~Revisit the `correlation` diagnostic: evaluate whether posterior medians are the more appropriate point summary for skewed posteriors.~~ (resolved — **keep the posterior mean**, do not switch to the median.) The posterior mean is the correlation-maximising estimator, not merely a convention: for any estimator `g`, the tower rule gives `Cov(g, t) = Cov(g, m)` with `m = E[t | D]`, so Cauchy-Schwarz bounds `corr(g, t)` by `sd(m) / sd(t)`, with equality iff `g` is affine in `m`. The median minimises L1 loss and has no such property, so substituting it would lower the achievable correlation — including for skewed posteriors, where the intuition that the median is "more representative" does not transfer to this metric. Verified empirically in `bayesflow-irt`'s Stan/NUTS ceiling benchmark, where posterior means satisfy the implied identity `NRMSE = sqrt(1 - r^2)` to within 0.002 at all four evaluation corners (see that repo's `docs/mcmc_ceiling_validation.md`).
+
+   Worth adopting instead: report `nrmse - sqrt(1 - r^2)` alongside correlation. It is zero for a correctly scaled posterior mean, and positive when the ordering is right but the spread is wrong (usually under-shrinkage, i.e. an over-confident posterior) — a failure neither correlation nor NRMSE reveals alone.
+
+---
+
+### Package K: Training Search Space — Batch, Learning Rate, Budget
+
+Motivated by a 3x3 batch x learning-rate grid run in `bayesflow-irt`
+(9 arms x 3 seeds, simulation-matched at 102,400 simulations). Full results
+and discussion: https://github.com/matthiaskloft/bayesflow-hpo/issues/67
+
+1. **`batch_size` is currently `IntDimension("batch_size", constant=256)`** in
+   `search_spaces/training.py`. At a constant batch the batch x learning-rate
+   interaction is invisible by construction, and that interaction was the
+   largest effect measured: the penalty for reusing a learning rate tuned at a
+   smaller batch grows with batch size (5.4x / 4.1x / 3.6x on `b` calibration
+   at batch 32 / 64 / 128).
+
+2. **`initial_lr` is capped at `5e-3`.** Three of the four Pareto-optimal
+   configurations in the grid used `8e-3`, so the cheap end of the front is
+   outside the search space entirely. Widen the range — but note `8e-3` is not
+   a free win: it improves `b` calibration at every batch size while degrading
+   `log(a)` calibration at the five-item corner.
+
+3. **Couple lr to batch by reparametrisation, not a conditional space**:
+   `lr = lr_ref * (batch_size / reference_batch)`. The coupling has a known
+   functional form (Smith et al. 2018, `B` proportional to `epsilon`), so a
+   rectangle in decoupled coordinates is easier for TPE than a conditional
+   space — TPE models parameters marginally, which is the worst case for a
+   ridge.
+
+4. **Derive `num_batches` from a simulation budget.** In online SBI
+   `batch_size` is simultaneously the data-volume knob
+   (`simulations = batch_size * steps`), so at most two of
+   {batch, steps, simulations} can be fixed. Fixing the budget is the
+   meaningful choice since it is proportional to GPU-seconds.
+
+5. **Do not add warmup length as a tunable dimension.** It is currently
+   hardcoded at 5% of total steps and untested, and the temptation to tune it
+   grows once the lr range widens. Shallue et al. (2019, Sec. 5.1) report the
+   opposite lesson from the study that motivates the rest of this package:
+   "We are most confident in our search spaces that tuned the fewest
+   metaparameters... We found it quite difficult to be confident that our
+   tuning was sufficient when we searched over learning rate decay schedules."
+   Sweep warmup factorially outside the HPO and fix it at a known-good value,
+   rather than adding a third correlated axis to `{batch, lr}`.
+
+Depends on: `fix/hpo-review-findings` merging first — it already rewrites
+dimension types (`BoolDimension`) and removes dead dimensions in three search
+spaces, so stacking this on top before that lands would compound an unreviewed
+branch.
 
 ---
 
