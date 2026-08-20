@@ -28,6 +28,7 @@ from bayesflow_hpo.validation.data import (
     ValidationDataset,
     generate_validation_dataset,
 )
+from bayesflow_hpo.validation.registry import _validate_objective_metric_kinds
 
 logger = logging.getLogger(__name__)
 
@@ -233,7 +234,7 @@ def optimize(
         calibration_error Expected Calibration Error (ECE)
         nrmse             Range-normalized RMSE
         rmse              RMSE of posterior means
-        correlation       Pearson correlation (means vs true)
+        correlation       Diagnostic-only linear association
         contraction       Posterior contraction (1=learned)
         z_score           Posterior z-score (bias+calibration)
         log_gamma         Log-gamma calibration diagnostic
@@ -398,6 +399,7 @@ def optimize(
     """
     if objective_metrics is None:
         objective_metrics = ["calibration_error", "nrmse"]
+    _validate_objective_metric_kinds(objective_metrics)
 
     # --- Early validation ---
     if report_frequency < 1:

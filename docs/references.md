@@ -54,6 +54,8 @@ Feature implementations and their backing references.
 | SBC rank-based coverage | `validation/registry.py` | Talts et al. (2018) |
 | Global C2ST | `validation/c2st.py` | Lopez-Paz & Oquab (2017) |
 | L-C2ST (local) | `validation/c2st.py` | Linhart et al. (2023) |
+| Point-summary/loss consistency | `validation/registry.py` | Gneiting (2011) |
+| TARP (possible future extension) | documentation only | Lemos et al. (2023) |
 | SBI benchmarking | overall | Lueckmann et al. (2021) |
 
 ### BayesFlow Diagnostic Wrappers
@@ -189,6 +191,18 @@ https://arxiv.org/abs/1610.06545
 Binary classifier as two-sample test: label P positive, Q negative, test
 whether accuracy exceeds chance. Implementation:
 `bayesflow_hpo.validation.c2st.global_c2st()`.
+
+### Gneiting, T. (2011)
+
+Making and evaluating point forecasts. *Journal of the American Statistical Association*, *106*(494), 746--762. https://doi.org/10.1198/jasa.2011.r10138
+
+Establishes that point summaries must be evaluated with a consistent loss: the mean is optimal for squared error, while the median is optimal for absolute error. OpenAlex work `W2075965721`.
+
+### Lemos, P., Coogan, A., Hezaveh, Y., & Perreault-Levasseur, L. (2023)
+
+Sampling-based accuracy testing of posterior estimators for general inference. In *Proceedings of the 40th International Conference on Machine Learning*. https://doi.org/10.48550/arXiv.2302.03026
+
+Introduces Tests of Accuracy with Random Points (TARP) for joint posterior coverage testing using posterior samples. Tracked as a possible future extension; not currently implemented. OpenAlex work `W4319453761`.
 
 ### Lueckmann, J.-M., Boelts, J., Greenberg, D. S., Goncalves, P. J., & Macke, J. H. (2021)
 

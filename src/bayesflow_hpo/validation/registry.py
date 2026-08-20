@@ -13,6 +13,11 @@ Metric function signature
 
 References
 ----------
+Gneiting, T. (2011). Making and evaluating point forecasts. *Journal of the
+    American Statistical Association*, *106*(494), 746--762.
+    https://doi.org/10.1198/jasa.2011.r10138
+    Point summaries must be matched to their scoring loss: the mean is
+    appropriate for squared error and the median for absolute error.
 Talts, S., Betancourt, M., Simpson, D., Vehtari, A., & Gelman, A. (2018).
     Validating Bayesian inference algorithms with simulation-based
     calibration. *arXiv preprint* arXiv:1804.06788.
@@ -73,8 +78,8 @@ def register_metric(
         ``"objective"`` (default) — returns a single scalar with key
         matching *name*; can be passed directly to ``objective_metrics``
         in :func:`~bayesflow_hpo.optimize`.
-        ``"diagnostic"`` — returns multiple sub-keys; useful for
-        analysis but not directly optimizable.
+        ``"diagnostic"`` — useful for analysis but not directly
+        optimizable. Diagnostic metrics may return one or multiple keys.
     requires
         Extra dependency needed to compute this metric (e.g.
         ``"sklearn"``).  Empty string (default) means no extra
@@ -157,6 +162,26 @@ def resolve_metrics(names: list[str]) -> dict[str, MetricFn]:
         If any name in *names* is unknown.
     """
     return {n: get_metric(n) for n in names}
+
+
+def _validate_objective_metric_kinds(names: list[str]) -> None:
+    """Reject registered diagnostic-only metrics used as objectives.
+
+    Unknown names remain valid because a custom ``validate_fn`` may return
+    objective values that are not registered with the built-in pipeline.
+    """
+    diagnostic_names = []
+    for name in names:
+        canonical = _ALIASES.get(name, name)
+        if _KINDS.get(canonical) == "diagnostic":
+            diagnostic_names.append(name)
+    if diagnostic_names:
+        joined = ", ".join(repr(name) for name in diagnostic_names)
+        raise ValueError(
+            f"Diagnostic metric(s) {joined} cannot be used in "
+            "objective_metrics. Choose objective-ready metrics such as "
+            "'calibration_error' or 'nrmse'."
+        )
 
 
 def list_metrics() -> list[str]:
@@ -254,8 +279,7 @@ def describe_metrics() -> MetricTable:
 
     - ``"name"`` — canonical metric name
     - ``"kind"`` — ``"objective"`` (single scalar, usable in
-      ``objective_metrics``) or ``"diagnostic"`` (multi-key output,
-      informational only)
+      ``objective_metrics``) or ``"diagnostic"`` (informational only)
     - ``"aliases"`` — comma-separated alternative names
     - ``"description"`` — one-line summary
     - ``"requires"`` — extra dependency (e.g. ``"sklearn"``), or
@@ -483,7 +507,13 @@ def _mae_metric(
 def _correlation_metric(
     draws: np.ndarray, true_values: np.ndarray,
 ) -> dict[str, float]:
-    """Pearson correlation between posterior means and true values."""
+    """Pearson association between posterior means and true values.
+
+    This is an exploratory diagnostic, not a recovery-error measure:
+    correlation does not penalize additive or multiplicative bias. The
+    posterior mean is retained for consistency with the squared-error
+    recovery metrics (RMSE and NRMSE; Gneiting, 2011).
+    """
     posterior_mean = np.mean(draws, axis=1)
     if np.std(true_values) < 1e-12 or np.std(posterior_mean) < 1e-12:
         return {"correlation": 0.0}
@@ -670,7 +700,11 @@ register_metric(
 register_metric(
     "correlation", _correlation_metric,
     aliases=["corr"],
-    description="Pearson correlation between posterior means and true values.",
+    description=(
+        "Pearson association of posterior means and truth; does not measure "
+        "agreement or recovery error."
+    ),
+    kind="diagnostic",
 )
 
 

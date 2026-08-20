@@ -160,6 +160,19 @@ def test_correlation_metric_perfect():
     assert abs(result["correlation"] - 1.0) < 1e-6
 
 
+def test_correlation_does_not_measure_agreement():
+    """Affine bias can preserve perfect correlation despite large NRMSE."""
+    true_values = np.linspace(-2, 2, 100)
+    posterior_means = 100.0 + 2.0 * true_values
+    draws = np.tile(posterior_means[:, None], (1, 50))
+
+    correlation = get_metric("correlation")(draws, true_values)["correlation"]
+    nrmse = get_metric("nrmse")(draws, true_values)["nrmse"]
+
+    assert correlation == pytest.approx(1.0)
+    assert nrmse > 20.0
+
+
 def test_correlation_metric_alias():
     assert get_metric("corr") is get_metric("correlation")
 
@@ -267,5 +280,6 @@ def test_describe_metrics_kind_and_requires():
     # Diagnostic metrics return multiple sub-keys
     assert rows["z_score"]["kind"] == "diagnostic"
     assert rows["coverage"]["kind"] == "diagnostic"
+    assert rows["correlation"]["kind"] == "diagnostic"
     # Dependency tracking
     assert rows["nrmse"]["requires"] == ""

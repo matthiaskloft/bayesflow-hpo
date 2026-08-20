@@ -22,6 +22,7 @@ from bayesflow_hpo.optimization.objective import default_train_fn, default_valid
 from bayesflow_hpo.search_spaces.composite import CompositeSearchSpace
 from bayesflow_hpo.types import BuildApproximatorFn, TrainFn, ValidateFn
 from bayesflow_hpo.validation.data import generate_validation_dataset
+from bayesflow_hpo.validation.registry import _validate_objective_metric_kinds
 
 logger = logging.getLogger(__name__)
 
@@ -205,6 +206,7 @@ def check_pipeline(
     """
     if objective_metrics is None:
         objective_metrics = ["calibration_error", "nrmse"]
+    _validate_objective_metric_kinds(objective_metrics)
 
     # --- Step 0: Validate hook signatures ---
     if build_approximator_fn is not None:

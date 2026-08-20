@@ -187,11 +187,14 @@ on individual dimensions or creating the space with overridden fields.
 | Setting | Default | Location |
 |---------|---------|----------|
 | `DEFAULT_METRICS` | calibration_error, nrmse, correlation, coverage, rmse, contraction | `registry.py` |
+
 | Coverage levels | `[0.9, 0.95, 0.975, 0.99]` | `DEFAULT_COVERAGE_LEVELS` |
 | Coverage weights | Uniform | `make_coverage_metric()` |
 | Posterior samples (final) | **500** | `ObjectiveConfig` |
 | Posterior samples (intermediate) | **250** | `ObjectiveConfig` |
 | Validation dataset seed | **42** | `generate_validation_dataset()` |
+
+`correlation` is included in validation output as a diagnostic but is not objective-ready. The default HPO recovery objective remains `nrmse`; correlation measures association and does not penalize location or scale bias.
 
 ---
 

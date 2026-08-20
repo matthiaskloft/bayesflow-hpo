@@ -119,12 +119,12 @@ config = ObjectiveConfig(..., train_fn=my_train_fn)
 def my_validate_fn(approximator, validation_data, n_posterior_samples):
     """Custom validation for per-item (IRT-style) posteriors."""
     # ... sample from approximator, compute metrics ...
-    return {"calibration_error": cal_err, "correlation": corr}
+    return {"calibration_error": cal_err, "nrmse": nrmse}
 
 study = hpo.optimize(
     ...,
     validate_fn=my_validate_fn,
-    objective_metrics=["calibration_error", "correlation"],
+    objective_metrics=["calibration_error", "nrmse"],
 )
 ```
 

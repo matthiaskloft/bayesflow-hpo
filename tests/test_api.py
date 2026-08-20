@@ -191,6 +191,12 @@ def test_optimize_default_objective_metrics():
     assert config.objective_metrics == ["calibration_error", "nrmse"]
 
 
+def test_optimize_rejects_diagnostic_metric_as_objective():
+    """Diagnostic-only metrics fail before validation or study setup."""
+    with pytest.raises(ValueError, match="correlation.*cannot be used"):
+        _patched_optimize(objective_metrics=["correlation"])
+
+
 def test_optimize_default_objective_mode():
     """Default objective_mode is "pareto"."""
     config = _patched_optimize()

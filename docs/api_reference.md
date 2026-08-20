@@ -338,13 +338,15 @@ class ValidationResult:
 ### Metric Registry
 
 ```python
-register_metric(name, fn, aliases=None, overwrite=False) -> None
+register_metric(name, fn, aliases=None, overwrite=False, description=None, kind="objective", requires="") -> None
 get_metric(name) -> MetricFn
 resolve_metrics(names: list[str]) -> dict[str, MetricFn]
 list_metrics() -> list[str]
 make_coverage_metric(levels=None, side="two-sided", weights=None, prefix="") -> MetricFn
 DEFAULT_METRICS: list[str]
 ```
+
+Metrics registered with `kind="diagnostic"` remain available to validation reports but are rejected in `objective_metrics`. In particular, `correlation` is diagnostic-only because it measures linear association rather than recovery agreement.
 
 ### Metrics
 

@@ -118,10 +118,13 @@ These wrap `bf.diagnostics.*` functions, reshaping `(n_sims, n_samples)` to the 
 | `coverage_right` | Right-sided coverage (futility for RCTs) | `right_coverage_50`, ..., `right_mean_cal_error` |
 | `bias` | Mean signed error of posterior mean | `bias` |
 | `mae` | Mean absolute error of posterior mean | `mae` |
+| `correlation` | Pearson association of posterior means and truth; diagnostic only, not recovery error | `correlation` |
 
-Aliases: `cal_error` -> `calibration_error`, `coverage_two_sided` -> `coverage`.
+Aliases: `cal_error` -> `calibration_error`, `corr` -> `correlation`, `coverage_two_sided` -> `coverage`.
 
-Default set: `DEFAULT_METRICS = ["calibration_error", "coverage", "rmse", "contraction", "sbc"]`
+Default set: `DEFAULT_METRICS = ["calibration_error", "nrmse", "correlation", "coverage", "rmse", "contraction"]`
+
+`correlation` is retained in validation reports for exploratory recovery plots, but is registered as diagnostic-only and cannot be used in `objective_metrics`. Pearson correlation measures linear association rather than agreement: additive or multiplicative bias can leave it equal to 1. Its posterior-mean summary is retained to match RMSE/NRMSE and their squared-error loss. Use NRMSE as the point-recovery objective and inspect bias and recovery plots alongside it. A posterior median is appropriate when the intended loss is absolute error, in which case a median-based MAE should be used instead of silently changing correlation (Gneiting, 2011).
 
 ### SBC Rank-Based Coverage
 
@@ -350,6 +353,14 @@ study = hpo.optimize(
     objective_metrics=["calibration_error", "nrmse"],
 )
 ```
+
+## Possible Future Extensions
+
+- **Prior-scale NRMSE:** evaluate replacing validation-sample range normalization with a fixed prior-scale normalization. This could make scores less sensitive to the realized validation sample, but requires a compatibility and aggregation design.
+- **Held-out posterior NLL for density-evaluable NPE:** average `-log q(theta | x)` over a large prior-predictive validation set. Lueckmann et al. (2021) describe this as appropriate when evaluated across many observations; it should not be inferred from a handful of cases.
+- **TARP for sample-only joint validation:** add Tests of Accuracy with Random Points to assess joint posterior coverage when reference posterior samples are unavailable (Lemos et al., 2023).
+
+These are prospective features, not currently available metrics.
 
 ## SBC Tests
 
