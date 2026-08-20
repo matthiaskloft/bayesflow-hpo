@@ -267,6 +267,11 @@ class PeriodicValidationCallback(Callback):
             if self.best_weights is not None:
                 self.approximator.set_weights(self.best_weights)
 
+    def on_train_end(self, logs: Any = None) -> None:
+        """Restore the best validation weights when training reaches its cap."""
+        if self.early_stopping_patience is not None and self.best_weights is not None:
+            self.approximator.set_weights(self.best_weights)
+
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------

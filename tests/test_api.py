@@ -145,9 +145,11 @@ def test_optimize_forwards_warmup_configuration():
     config = _patched_optimize(
         lr_warmup_epochs=[1, 2, 4],
         lr_warmup_steps=[50, 100],
+        lr_warmup_fraction=[0.01, 0.05, 0.1],
     )
     assert config.lr_warmup_epochs == (1, 2, 4)
     assert config.lr_warmup_steps == (50, 100)
+    assert config.lr_warmup_fraction == (0.01, 0.05, 0.1)
 
 
 # ---------------------------------------------------------------------------
@@ -408,6 +410,7 @@ class TestBuildObjective:
                 early_stopping_monitor="objective_mean",
                 lr_warmup_epochs=1,
                 lr_warmup_steps=None,
+                lr_warmup_fraction=0.05,
                 max_param_count=1_000_000,
                 max_memory_mb=None,
                 metric_constraints_hard=None,

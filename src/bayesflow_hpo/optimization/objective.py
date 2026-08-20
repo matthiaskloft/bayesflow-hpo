@@ -212,6 +212,52 @@ def _sample_warmup_spec(
     return spec
 
 
+def _normalize_warmup_fraction_spec(
+    value: float | Sequence[float] | None,
+    *,
+    default: float | None = None,
+) -> float | tuple[float, ...] | None:
+    """Validate a fixed or categorical warmup fraction in [0, 0.1]."""
+    if value is None:
+        return default
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        values = (float(value),)
+        scalar = True
+    elif isinstance(value, (str, bytes)):
+        raise TypeError(
+            "lr_warmup_fraction must be a number, a sequence of numbers, "
+            "or None."
+        )
+    else:
+        try:
+            values = tuple(float(choice) for choice in value)
+        except (TypeError, ValueError) as exc:
+            raise TypeError(
+                "lr_warmup_fraction choices must be a non-empty sequence "
+                "of numbers."
+            ) from exc
+        scalar = False
+    if not values:
+        raise TypeError(
+            "lr_warmup_fraction choices must be a non-empty sequence of numbers."
+        )
+    if any(not math.isfinite(choice) or not 0.0 <= choice <= 0.1 for choice in values):
+        raise ValueError("lr_warmup_fraction must be between 0.0 and 0.1.")
+    if len(set(values)) != len(values):
+        raise ValueError("lr_warmup_fraction choices must be unique.")
+    return values[0] if scalar else values
+
+
+def _sample_warmup_fraction(
+    trial: optuna.Trial,
+    spec: float | tuple[float, ...],
+) -> float:
+    """Resolve a fixed fraction or sample explicitly configured choices."""
+    if isinstance(spec, tuple):
+        return float(trial.suggest_categorical("lr_warmup_fraction", list(spec)))
+    return spec
+
+
 @dataclass
 class ObjectiveConfig:
     """Configuration for one objective function instance.
@@ -251,6 +297,11 @@ class ObjectiveConfig:
     lr_warmup_steps
         Exact warmup-step override. A sequence enables opt-in categorical
         HPO. When provided, this takes precedence over ``lr_warmup_epochs``.
+    lr_warmup_fraction
+        Fraction of the fixed training budget used for linear warmup. ``None``
+        selects 0.05 in ``fixed_budget`` mode. Values must be between 0 and
+        0.1; a sequence enables opt-in categorical HPO. Exact steps or epochs
+        take precedence. Fractions are not valid for ``open_ended`` mode.
     max_param_count
         Trials with actual param count above this are rejected
         before training (default 1 000 000).
@@ -332,6 +383,7 @@ class ObjectiveConfig:
     early_stopping_monitor: str = "objective_mean"
     lr_warmup_epochs: int | Sequence[int] | None = None
     lr_warmup_steps: int | Sequence[int] | None = None
+    lr_warmup_fraction: float | Sequence[float] | None = None
     max_param_count: int = MAX_PARAM_COUNT
     max_memory_mb: float | None = None
     metric_constraints_hard: list[MetricConstraintSpec] | None = None
@@ -386,7 +438,8 @@ class ObjectiveConfig:
                 "early_stopping_monitor must be 'objective_mean' or one of "
                 f"objective_metrics, got {self.early_stopping_monitor!r}."
             )
-        default_warmup_epochs = 0 if self.training_mode == "fixed_budget" else 1
+        requested_warmup_fraction = self.lr_warmup_fraction
+        default_warmup_epochs = None if self.training_mode == "fixed_budget" else 1
         self.lr_warmup_epochs = _normalize_warmup_spec(
             "lr_warmup_epochs",
             self.lr_warmup_epochs,
@@ -396,11 +449,24 @@ class ObjectiveConfig:
             "lr_warmup_steps",
             self.lr_warmup_steps,
         )
+        if self.training_mode == "open_ended" and requested_warmup_fraction is not None:
+            raise ValueError(
+                "lr_warmup_fraction is only valid in 'fixed_budget' mode; "
+                "use lr_warmup_epochs or lr_warmup_steps for open-ended training."
+            )
+        self.lr_warmup_fraction = _normalize_warmup_fraction_spec(
+            self.lr_warmup_fraction,
+            default=0.05 if self.training_mode == "fixed_budget" else None,
+        )
         minimum_warmup = 0 if self.training_mode == "fixed_budget" else 1
         active_specs = (
             (("lr_warmup_steps", self.lr_warmup_steps),)
             if self.lr_warmup_steps is not None
-            else (("lr_warmup_epochs", self.lr_warmup_epochs),)
+            else (
+                (("lr_warmup_epochs", self.lr_warmup_epochs),)
+                if self.lr_warmup_epochs is not None
+                else (("lr_warmup_fraction", self.lr_warmup_fraction),)
+            )
         )
         for name, spec in active_specs:
             if spec is None:
@@ -759,17 +825,29 @@ class GenericObjective:
                 "lr_warmup_steps",
                 config.lr_warmup_steps,
             )
-        else:
-            if "lr_warmup_epochs" in params:
-                warmup_epochs = int(params["lr_warmup_epochs"])
-            else:
-                assert config.lr_warmup_epochs is not None
-                warmup_epochs = _sample_warmup_spec(
-                    trial,
-                    "lr_warmup_epochs",
-                    config.lr_warmup_epochs,
-                )
+        elif "lr_warmup_epochs" in params:
+            warmup_epochs = int(params["lr_warmup_epochs"])
             warmup_steps = warmup_epochs * num_batches
+        elif config.lr_warmup_epochs is not None:
+            warmup_epochs = _sample_warmup_spec(
+                trial,
+                "lr_warmup_epochs",
+                config.lr_warmup_epochs,
+            )
+            warmup_steps = warmup_epochs * num_batches
+        else:
+            if "lr_warmup_fraction" in params:
+                warmup_fraction = float(params["lr_warmup_fraction"])
+                normalized_fraction = _normalize_warmup_fraction_spec(warmup_fraction)
+                assert isinstance(normalized_fraction, float)
+                warmup_fraction = normalized_fraction
+            else:
+                assert config.lr_warmup_fraction is not None
+                warmup_fraction = _sample_warmup_fraction(
+                    trial,
+                    config.lr_warmup_fraction,
+                )
+            warmup_steps = round(warmup_fraction * epochs * num_batches)
         minimum_warmup = 0 if config.training_mode == "fixed_budget" else 1
         if warmup_steps < minimum_warmup:
             raise ValueError(
@@ -778,6 +856,10 @@ class GenericObjective:
             )
         trial.set_user_attr("lr_warmup_steps", warmup_steps)
         trial.set_user_attr("lr_warmup_epochs", warmup_steps / num_batches)
+        trial.set_user_attr(
+            "lr_warmup_fraction",
+            warmup_steps / (epochs * num_batches),
+        )
 
         # --- Step 3: Budget pre-check (memory) ---
         estimated_memory = estimate_peak_memory_mb(params)

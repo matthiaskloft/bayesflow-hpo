@@ -21,7 +21,7 @@ def optimize(
     training_mode="fixed_budget", epochs=200, num_batches=50,
     early_stopping_patience=None, early_stopping_window=7,
     early_stopping_monitor="objective_mean",
-    lr_warmup_epochs=None, lr_warmup_steps=None,
+    lr_warmup_epochs=None, lr_warmup_steps=None, lr_warmup_fraction=None,
     pruning_strategy="dominance",
     # Budget
     max_param_count=1_000_000, max_memory_mb=None,
@@ -58,8 +58,9 @@ def optimize(
 | `early_stopping_patience` | Validation checks without improvement in open-ended mode (`None` selects 5). |
 | `early_stopping_window` | Moving-average window size (default 7). |
 | `early_stopping_monitor` | `"objective_mean"` combines all minimize-oriented objectives; a metric name monitors one objective. |
-| `lr_warmup_epochs` | Warmup in epochs; `None` selects 0 fixed-budget / 1 open-ended. A sequence enables categorical HPO. |
+| `lr_warmup_epochs` | Optional epoch override; `None` selects 1 in open-ended mode. A sequence enables categorical HPO. |
 | `lr_warmup_steps` | Exact step override; a sequence enables categorical HPO. |
+| `lr_warmup_fraction` | Fixed-budget fraction; `None` selects 5%, maximum 10%. A sequence enables categorical HPO. |
 | `pruning_strategy` | Multi-objective pruning: `"dominance"` (default), `"mo-sha"`, `("primary", "metric")`, or `"none"`. |
 | `max_param_count` | Reject trials exceeding this param count pre-training (default 1 000 000). |
 | `max_memory_mb` | Optional peak-memory budget in MB, or `"auto"` for CUDA free-memory auto-detection. |
@@ -212,6 +213,7 @@ Public default implementations used by `optimize()` when no custom hooks are pro
 | `early_stopping_monitor` | `"objective_mean"` | Combined minimize-oriented validation objective or one metric name |
 | `lr_warmup_epochs` | `None` | Mode-specific warmup default or categorical choices |
 | `lr_warmup_steps` | `None` | Exact warmup-step override |
+| `lr_warmup_fraction` | `None` | Fixed-budget 5% default, capped at 10% |
 | `max_param_count` | `1_000_000` | Pre-training param budget |
 | `max_memory_mb` | `None` | Peak-memory budget (disabled) |
 | `metric_constraints_hard` | `None` | Hard metric constraints (post-validation rejection) |

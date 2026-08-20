@@ -18,8 +18,9 @@ objects (e.g. `ObjectiveConfig`, `create_study`) directly.
 | `num_batches` | **50** | Online simulation batches per epoch. |
 | `early_stopping_patience` | **None** | Disabled in fixed-budget mode; selects 5 validation checks in open-ended mode. |
 | `early_stopping_window` | **7** | Moving-average window over validation checks in open-ended mode. |
-| `lr_warmup_epochs` | **None** | Resolves to 0 in fixed-budget mode and 1 in open-ended mode. |
+| `lr_warmup_epochs` | **None** | Optional epoch override; resolves to 1 in open-ended mode. |
 | `lr_warmup_steps` | **None** | Optional exact override of the epoch-derived warmup. |
+| `lr_warmup_fraction` | **None** | Resolves to a fixed 5% warmup in fixed-budget mode; maximum 10%. |
 | `max_param_count` | **1 000 000** | Trials exceeding this estimated param count are rejected. |
 | `max_memory_mb` | **None** (disabled) | Peak-memory budget in MB, or `"auto"` for CUDA free-memory auto-detection. |
 | `metric_constraints_hard` | **None** | Hard metric constraints (post-validation rejection). |

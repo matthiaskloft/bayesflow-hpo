@@ -104,3 +104,21 @@ def test_derived_dimension_is_not_a_constant():
         "epochs": 10,
         "simulation_budget": 3200,
     }
+
+
+@dataclass
+class _DuplicateDimensionSpace(BaseSearchSpace):
+    sampled: IntDimension = field(
+        default_factory=lambda: IntDimension("shared", low=1, high=2)
+    )
+    derived: DerivedDimension = field(
+        default_factory=lambda: DerivedDimension("shared", lambda p: 3)
+    )
+
+    def build(self, params):
+        return params
+
+
+def test_duplicate_dimension_names_are_rejected_before_sampling():
+    with pytest.raises(ValueError, match="duplicate dimension names: shared"):
+        _DuplicateDimensionSpace().sample(FakeTrial())

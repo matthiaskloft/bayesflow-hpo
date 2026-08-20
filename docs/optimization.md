@@ -21,6 +21,7 @@ class ObjectiveConfig:
     early_stopping_monitor: str = "objective_mean"
     lr_warmup_epochs: int | Sequence[int] | None = None
     lr_warmup_steps: int | Sequence[int] | None = None
+    lr_warmup_fraction: float | Sequence[float] | None = None
     max_param_count: int = 1_000_000
     max_memory_mb: float | None = None
     metric_constraints_hard: list[MetricConstraintSpec] | None = None
@@ -58,14 +59,16 @@ Sampled or derived `epochs` and `num_batches` values take precedence over the
 configuration fallbacks. The same values are passed to `train_fn` and used to
 construct the learning-rate schedule.
 
-`lr_warmup_epochs=None` resolves to zero epochs in fixed-budget mode and one
-epoch in open-ended mode. `lr_warmup_steps` provides an exact override. Passing
-a sequence to either option makes Optuna sample from those categorical choices;
-for example, `lr_warmup_epochs=[0, 1, 2, 4]` in fixed-budget mode. Every trial
-records `lr_warmup_steps`, its epoch equivalent, and `peak_learning_rate` as
-user attributes. Warmup must leave at least one cosine-decay step in a
-fixed-budget trial, while open-ended inverse-square-root decay requires at least
-one warmup step.
+Fixed-budget cosine decay uses a 5% linear warmup by default. The fraction is
+capped at 10% and is normally fixed; passing
+`lr_warmup_fraction=[0.0, 0.01, 0.025, 0.05, 0.1]` enables opt-in categorical
+HPO. `lr_warmup_epochs` overrides the fraction, and `lr_warmup_steps` provides
+the highest-priority exact override. Open-ended mode retains its one-epoch
+default because it has no finite horizon and rejects fraction-based warmup.
+Every trial records the effective steps, epoch equivalent, fraction, and peak
+learning rate as user attributes. Warmup must leave at least one cosine-decay
+step in a fixed-budget trial, while open-ended inverse-square-root decay
+requires at least one warmup step.
 
 `early_stopping_monitor="objective_mean"` combines every configured objective metric
 after converting higher-is-better metrics to minimize-is-better values, matching

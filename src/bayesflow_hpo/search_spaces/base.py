@@ -263,11 +263,19 @@ class BaseSearchSpace:
                 f"{type(self).__name__} must be decorated with @dataclass "
                 f"to use BaseSearchSpace's automatic dimension discovery."
             ) from None
-        return [
+        dimensions = [
             getattr(self, f.name)
             for f in all_fields
             if isinstance(getattr(self, f.name), _DIMENSION_TYPES)
         ]
+        names = [dimension.name for dimension in dimensions]
+        duplicates = sorted({name for name in names if names.count(name) > 1})
+        if duplicates:
+            raise ValueError(
+                f"{type(self).__name__} has duplicate dimension names: "
+                f"{', '.join(duplicates)}"
+            )
+        return dimensions
 
     @property
     def constants(self) -> dict[str, Any]:

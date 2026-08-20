@@ -423,7 +423,8 @@ def test_objective_config_early_stopping_defaults():
     assert config.training_mode == "fixed_budget"
     assert config.early_stopping_patience is None
     assert config.early_stopping_window == 7
-    assert config.lr_warmup_epochs == 0
+    assert config.lr_warmup_epochs is None
+    assert config.lr_warmup_fraction == pytest.approx(0.05)
 
 
 def test_objective_config_early_stopping_custom_values():
@@ -502,6 +503,30 @@ def test_warmup_choices_must_be_unique():
         )
 
 
+@pytest.mark.parametrize("fraction", [-0.01, 0.1001, float("inf")])
+def test_warmup_fraction_must_be_within_ceiling(fraction):
+    with pytest.raises(ValueError, match="between 0.0 and 0.1"):
+        ObjectiveConfig(
+            simulator=object(),
+            adapter=object(),
+            search_space=_FakeSearchSpace(),
+            validation_data=_DUMMY_VALIDATION_DATA,
+            lr_warmup_fraction=fraction,
+        )
+
+
+def test_open_ended_mode_rejects_warmup_fraction():
+    with pytest.raises(ValueError, match="only valid in 'fixed_budget'"):
+        ObjectiveConfig(
+            simulator=object(),
+            adapter=object(),
+            search_space=_FakeSearchSpace(),
+            validation_data=_DUMMY_VALIDATION_DATA,
+            training_mode="open_ended",
+            lr_warmup_fraction=0.05,
+        )
+
+
 def test_objective_config_rejects_early_stopping_with_fixed_budget():
     """A finite-horizon schedule cannot stop before its horizon."""
     with pytest.raises(ValueError, match="cannot be set in fixed_budget"):
@@ -528,6 +553,7 @@ def test_objective_config_rejects_unknown_training_mode():
 @pytest.mark.parametrize(
     ("warmup_kwargs", "expected_steps", "sampled_name"),
     [
+        ({}, 1, None),
         ({"lr_warmup_epochs": [1, 2]}, 7, "lr_warmup_epochs"),
         (
             {"lr_warmup_epochs": [1, 2], "lr_warmup_steps": [5, 8]},
@@ -594,10 +620,14 @@ def test_fixed_budget_schedule_uses_per_trial_training_length(
     }
     assert trial.user_attrs["epochs"] == 3
     assert trial.user_attrs["num_batches"] == 7
-    assert trial.params[sampled_name] == warmup_kwargs[sampled_name][0]
+    if sampled_name is not None:
+        assert trial.params[sampled_name] == warmup_kwargs[sampled_name][0]
     assert trial.user_attrs["lr_warmup_steps"] == expected_steps
     assert trial.user_attrs["lr_warmup_epochs"] == pytest.approx(
         expected_steps / 7
+    )
+    assert trial.user_attrs["lr_warmup_fraction"] == pytest.approx(
+        expected_steps / 21
     )
     assert trial.user_attrs["peak_learning_rate"] == pytest.approx(1e-3)
 

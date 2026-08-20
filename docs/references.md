@@ -18,7 +18,7 @@ Feature implementations and their backing references.
 | NSGA-II sampler preset | `optimization/study.py` | Deb et al. (2002) |
 | NSGA-III sampler preset | `optimization/study.py` | Deb & Jain (2014) |
 | HPO foundations and best practices | overall | Bischl et al. (2023) |
-| Batch-size / learning-rate search ranges and coupling | `search_spaces/training.py`, `search_spaces/base.py` | Smith et al. (2018); Shallue et al. (2019) |
+| Joint batch-size / learning-rate tuning and coupling | `search_spaces/training.py`, `search_spaces/base.py` | Smith et al. (2018); Shallue et al. (2019) |
 | Linear learning-rate warmup | `builders/workflow.py` | Goyal et al. (2017) |
 | Inverse-square-root schedule with warmup | `builders/workflow.py` | Vaswani et al. (2017) |
 

@@ -161,6 +161,41 @@ def test_open_ended_early_stopping_defaults_to_mean_objective():
     assert callback.best_validation_score == pytest.approx(0.2)
 
 
+def test_open_ended_restores_best_weights_at_epoch_cap():
+    study = _make_study()
+    approximator = _WeightTrackingApproximator()
+    callback = PeriodicValidationCallback(
+        trial=study.ask(),
+        approximator=approximator,
+        validation_data=_DUMMY_VALIDATION_DATA,
+        objective_metrics=["calibration_error"],
+        early_stopping_patience=3,
+    )
+    approximator.weights = [1]
+    callback._update_early_stopping({"calibration_error": 0.2})
+    approximator.weights = [2]
+    callback._update_early_stopping({"calibration_error": 0.3})
+
+    callback.on_train_end()
+
+    assert approximator.weights == [1]
+
+
+def test_objective_mean_maximizes_contraction():
+    study = _make_study()
+    callback = PeriodicValidationCallback(
+        trial=study.ask(),
+        approximator=_WeightTrackingApproximator(),
+        validation_data=_DUMMY_VALIDATION_DATA,
+        objective_metrics=["contraction"],
+        early_stopping_patience=2,
+    )
+
+    callback._update_early_stopping({"contraction": 0.8})
+
+    assert callback.best_validation_score == pytest.approx(0.2)
+
+
 def test_early_stopping_rejects_unknown_monitor():
     study = _make_study()
     with pytest.raises(ValueError, match="must be 'objective_mean'"):

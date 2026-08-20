@@ -129,6 +129,7 @@ def optimize(
     early_stopping_monitor: str = "objective_mean",
     lr_warmup_epochs: int | Sequence[int] | None = None,
     lr_warmup_steps: int | Sequence[int] | None = None,
+    lr_warmup_fraction: float | Sequence[float] | None = None,
     # Logging
     report_frequency: int = 10,
     # Budget
@@ -264,8 +265,8 @@ def optimize(
         (default), ``"mo-sha"``, ``"primary"``, or ``"none"``.
         For ``"primary"``, pass a tuple ``("primary", metric_name)``
         to specify which metric to prune on (defaults to
-        ``objective_metrics[0]``).  ``"none"`` disables intermediate
-        validation entirely.
+        ``objective_metrics[0]``). ``"none"`` disables pruning, but
+        ``open_ended`` mode still runs intermediate validation for stopping.
 
         Strategies are backed by literature — see
         :mod:`~bayesflow_hpo.optimization.pruning_strategies` for
@@ -300,6 +301,10 @@ def optimize(
     lr_warmup_steps
         Exact optimizer-step warmup override. A sequence enables opt-in
         categorical HPO. Takes precedence over ``lr_warmup_epochs``.
+    lr_warmup_fraction
+        Fixed-budget warmup fraction, capped at 0.1. ``None`` selects 0.05.
+        A sequence enables opt-in categorical HPO. Exact steps and epochs take
+        precedence. Not valid in ``open_ended`` mode.
     report_frequency
         How often (in epochs) the ``OptunaReportCallback`` stores
         ``epoch_{N}_loss`` user attributes on each trial.  Higher
@@ -453,6 +458,7 @@ def optimize(
         early_stopping_monitor=early_stopping_monitor,
         lr_warmup_epochs=lr_warmup_epochs,
         lr_warmup_steps=lr_warmup_steps,
+        lr_warmup_fraction=lr_warmup_fraction,
         max_param_count=max_param_count,
         max_memory_mb=resolved_max_memory_mb,
         metric_constraints_hard=metric_constraints_hard,
@@ -578,6 +584,7 @@ def _build_objective(
     early_stopping_monitor: str,
     lr_warmup_epochs: int | Sequence[int] | None,
     lr_warmup_steps: int | Sequence[int] | None,
+    lr_warmup_fraction: float | Sequence[float] | None,
     max_param_count: int,
     max_memory_mb: float | None,
     metric_constraints_hard: list[MetricConstraintSpec] | None,
@@ -607,6 +614,7 @@ def _build_objective(
             early_stopping_monitor=early_stopping_monitor,
             lr_warmup_epochs=lr_warmup_epochs,
             lr_warmup_steps=lr_warmup_steps,
+            lr_warmup_fraction=lr_warmup_fraction,
             max_param_count=max_param_count,
             max_memory_mb=max_memory_mb,
             metric_constraints_hard=metric_constraints_hard,
