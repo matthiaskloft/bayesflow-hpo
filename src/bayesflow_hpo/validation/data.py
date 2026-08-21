@@ -70,6 +70,13 @@ def generate_validation_dataset(
     Every batch is timed so that ``sim_time_per_sim`` reflects the
     average wall-clock cost of a single simulation across all
     conditions.
+
+    .. note::
+        When *condition_grid* is provided, each grid point is passed to
+        ``simulator.sample(..., conditions=condition)``. Simulators that use
+        a different mechanism to construct condition-specific samples cannot
+        use this path and must construct a :class:`ValidationDataset`
+        directly.
     """
     rng = np.random.default_rng(seed)
 
