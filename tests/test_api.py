@@ -468,17 +468,40 @@ class TestDeriveDirections:
         assert directions == ["minimize", "minimize", "minimize"]
         assert metric_names == ["calibration_error", "nrmse", "inference_time"]
 
-    def test_explicit_directions_passthrough(self):
+    def test_explicit_all_minimize_directions_passthrough(self):
         obj = MagicMock()
         obj.n_objectives = 3
         directions, _ = _derive_directions(
             objective=obj,
-            directions=["minimize", "minimize", "maximize"],
+            directions=["minimize", "minimize", "minimize"],
             objective_metrics=["calibration_error", "nrmse"],
             objective_mode="pareto",
             cost_metric="inference_time",
         )
-        assert directions == ["minimize", "minimize", "maximize"]
+        assert directions == ["minimize", "minimize", "minimize"]
+
+    def test_maximize_direction_is_rejected(self):
+        """This previously passed through, and now inverts the ranking.
+
+        Every value the objective returns is already minimize-space --
+        higher-is-better metrics are converted through METRIC_DIRECTIONS and
+        the failure penalties are minimize-space too. A "maximize" entry flips
+        it a second time, so a good raw log_gamma of 1.5 (objective -1.5)
+        would rank below a bad -25.5 (objective 25.5), and the +inf failure
+        penalty would become the most attractive value in the study. Accepting
+        the override silently would make the search optimize for the worst
+        model with nothing in the output looking wrong.
+        """
+        obj = MagicMock()
+        obj.n_objectives = 3
+        with pytest.raises(ValueError, match="must be all 'minimize'"):
+            _derive_directions(
+                objective=obj,
+                directions=["minimize", "minimize", "maximize"],
+                objective_metrics=["log_gamma", "nrmse"],
+                objective_mode="pareto",
+                cost_metric="inference_time",
+            )
 
     def test_wrong_direction_count_raises(self):
         obj = MagicMock()

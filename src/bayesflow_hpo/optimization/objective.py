@@ -43,7 +43,7 @@ from bayesflow_hpo.objectives import (
     FAILED_TRIAL_CAL_ERROR,
     FAILED_TRIAL_COST,
     MAX_PARAM_COUNT,
-    METRIC_DIRECTIONS,
+    _direction_for,
     compute_inference_time_per_dataset,
     extract_multi_objective_values,
     get_param_count,
@@ -65,7 +65,10 @@ from bayesflow_hpo.optimization.constraints import (
 from bayesflow_hpo.search_spaces.composite import CompositeSearchSpace
 from bayesflow_hpo.types import BuildApproximatorFn, TrainFn, ValidateFn
 from bayesflow_hpo.validation.data import ValidationDataset
-from bayesflow_hpo.validation.registry import validate_objective_metric_kinds
+from bayesflow_hpo.validation.registry import (
+    canonical_metric_name,
+    validate_objective_metric_kinds,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -420,6 +423,15 @@ class ObjectiveConfig:
 
     def __post_init__(self):
         validate_objective_metric_kinds(self.objective_metrics)
+        # Canonicalize aliases HERE, once, so every downstream consumer agrees
+        # on the key. They did not: `list_metrics()` returns canonical names,
+        # so `cal_error` was excluded from the pipeline's metric list; the
+        # pipeline emitted `calibration_error`; and `_validate_metric_keys`
+        # then looked for `cal_error`, found it missing, and inserted the
+        # penalty. Every trial using a supported alias tied at the penalty.
+        self.objective_metrics = [
+            canonical_metric_name(m) for m in self.objective_metrics
+        ]
         if self.training_mode not in ("fixed_budget", "open_ended"):
             raise ValueError(
                 f"Unknown training_mode: {self.training_mode!r}. "
@@ -582,9 +594,12 @@ def _accepts_training_loss_proxy(metric: str) -> bool:
     higher-is-better or unbounded, where substituting a small number claims a
     good result rather than a failed one.
     """
-    direction = METRIC_DIRECTIONS.get(metric)
+    direction = _direction_for(metric)
     if direction is None:
-        return True
+        # No recorded direction or scale. A custom metric could be
+        # higher-is-better or unbounded, and substituting a small loss would
+        # claim a good result for a trial whose validation failed.
+        return False
     return not direction.higher_is_better and direction.worst_objective == 1.0
 
 

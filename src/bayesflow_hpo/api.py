@@ -653,6 +653,24 @@ def _derive_directions(
     n_obj = objective.n_objectives
     if directions is None:
         directions = ["minimize"] * n_obj
+    elif any(d != "minimize" for d in directions):
+        # Every value the objective returns is already in minimize space:
+        # higher-is-better metrics are converted through METRIC_DIRECTIONS,
+        # and the failure penalties are minimize-space too. Applying
+        # "maximize" on top inverts that a second time, so a good raw
+        # log_gamma of 1.5 (objective -1.5) would rank below a bad -25.5
+        # (objective 25.5) -- and the +inf failure penalty would become the
+        # single most attractive value in the study. Silently accepting the
+        # override would make the search optimize for the worst model with
+        # nothing in the output looking wrong.
+        raise ValueError(
+            "directions must be all 'minimize': the objective already "
+            "converts every metric to minimize-is-better via "
+            "bayesflow_hpo.objectives.METRIC_DIRECTIONS, so a 'maximize' "
+            f"entry inverts it a second time. Got {directions!r}. To optimize "
+            "a higher-is-better metric, register its direction with "
+            "register_metric_direction() and leave directions=None."
+        )
     elif len(directions) != n_obj:
         raise ValueError(
             f"directions has {len(directions)} entries but the "

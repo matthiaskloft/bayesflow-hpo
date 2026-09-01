@@ -153,6 +153,15 @@ def get_metric(name: str) -> MetricFn:
     return _REGISTRY[canonical]
 
 
+def canonical_metric_name(name: str) -> str:
+    """Resolve an alias to its canonical registered name.
+
+    Names that are not registered aliases pass through unchanged, so this is
+    safe to apply to custom metric names a caller supplies.
+    """
+    return _ALIASES.get(name, name)
+
+
 def resolve_metrics(names: list[str]) -> dict[str, MetricFn]:
     """Resolve a list of metric names to a ``{name: fn}`` dict.
 

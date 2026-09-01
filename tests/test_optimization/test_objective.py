@@ -9,6 +9,7 @@ import pytest
 from bayesflow_hpo.objectives import (
     FAILED_TRIAL_CAL_ERROR,
     FAILED_TRIAL_COST,
+    HIGHER_IS_BETTER,
     _metric_to_minimize,
     extract_multi_objective_values,
     worst_objective_value,
@@ -17,7 +18,7 @@ from bayesflow_hpo.objectives import (
 from bayesflow_hpo.optimization.objective import (
     GenericObjective,
     ObjectiveConfig,
-    _accepts_training_loss_proxy,  # noqa: F401
+    _accepts_training_loss_proxy,
     _extract_best_training_loss,
     _pipeline_metrics,
     _training_loss_fallback,
@@ -1855,3 +1856,70 @@ class TestLogGammaPenaltiesEndToEnd:
         """The pipeline resolves through the registry and would raise."""
         names = _pipeline_metrics(["not_a_registered_metric"])
         assert "not_a_registered_metric" not in names
+
+
+class TestMetricAliasHandling:
+    """A supported alias made every trial tie at the penalty.
+
+    `list_metrics()` returns canonical names, so `cal_error` was excluded from
+    the pipeline's metric list; the pipeline emitted `calibration_error`; and
+    `_validate_metric_keys` then looked for `cal_error`, found it missing, and
+    inserted the penalty. Nothing errored -- every trial simply scored 1.0.
+    """
+
+    def _config(self, metrics: list[str]) -> ObjectiveConfig:
+        return ObjectiveConfig(
+            simulator=object(),
+            adapter=object(),
+            search_space=_FakeSearchSpace(),
+            epochs=1,
+            num_batches=1,
+            validation_data=_DUMMY_VALIDATION_DATA,
+            objective_metrics=metrics,
+            objective_mode="pareto",
+        )
+
+    def test_aliases_are_canonicalized_at_the_config_boundary(self) -> None:
+        config = self._config(["cal_error", "nrmse"])
+        assert config.objective_metrics == ["calibration_error", "nrmse"]
+
+    def test_alias_objective_reaches_the_pipeline_and_survives_lookup(
+        self,
+    ) -> None:
+        config = self._config(["cal_error"])
+        names = _pipeline_metrics(config.objective_metrics)
+        assert "calibration_error" in names
+        # The pipeline emits canonical names; the lookup must agree.
+        emitted = {"calibration_error": 0.05, "nrmse": 0.2}
+        cleaned = _validate_metric_keys(emitted, config.objective_metrics)
+        assert cleaned["calibration_error"] == pytest.approx(0.05)
+        assert cleaned["calibration_error"] != FAILED_TRIAL_CAL_ERROR
+
+    def test_unknown_names_pass_through_unchanged(self) -> None:
+        config = self._config(["my_custom_metric"])
+        assert config.objective_metrics == ["my_custom_metric"]
+
+
+class TestTrainingLossProxyEligibility:
+    """The proxy must not be handed to a metric of unknown direction/scale."""
+
+    def test_error_style_metrics_accept_it(self) -> None:
+        assert _accepts_training_loss_proxy("calibration_error")
+        assert _accepts_training_loss_proxy("nrmse")
+        assert _accepts_training_loss_proxy("rmse")
+
+    def test_higher_is_better_and_unbounded_metrics_do_not(self) -> None:
+        assert not _accepts_training_loss_proxy("log_gamma")
+        assert not _accepts_training_loss_proxy("correlation")
+        assert not _accepts_training_loss_proxy("sbc_chi2")
+
+    def test_a_legacy_set_addition_does_not(self) -> None:
+        """Added to HIGHER_IS_BETTER only -- direction known, scale is not."""
+        HIGHER_IS_BETTER.add("my_hib_metric")
+        try:
+            assert not _accepts_training_loss_proxy("my_hib_metric")
+        finally:
+            HIGHER_IS_BETTER.discard("my_hib_metric")
+
+    def test_an_unregistered_metric_does_not(self) -> None:
+        assert not _accepts_training_loss_proxy("totally_unknown_metric")

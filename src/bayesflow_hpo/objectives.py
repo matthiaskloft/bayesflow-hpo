@@ -258,6 +258,32 @@ METRIC_DIRECTIONS: dict[str, MetricDirection] = {
         # a log_gamma objective it means log_gamma = -1, an ordinary value.
         worst_raw=-math.inf,
     ),
+    # The error-style metrics. Lower is better and they pass through
+    # unchanged, so registering them changes no conversion -- but it records
+    # the unit scale explicitly, which is what lets the training-loss fallback
+    # tell "this metric is on a [0, 1] lower-is-better scale, so a clamped
+    # loss is a sensible proxy" apart from "nothing is known about this
+    # metric". Without the distinction an unregistered custom metric silently
+    # inherited the proxy and a failed trial could outrank a valid one.
+    "calibration_error": MetricDirection(
+        higher_is_better=False,
+        to_minimize=lambda v: v,
+        # ECE is a mean absolute deviation between two probabilities.
+        worst_raw=1.0,
+    ),
+    "nrmse": MetricDirection(
+        higher_is_better=False,
+        to_minimize=lambda v: v,
+        # Range-normalized, so 1.0 is the historical penalty and the scale the
+        # training-loss proxy assumes. It can exceed 1 in principle; the value
+        # is kept for continuity with FAILED_TRIAL_CAL_ERROR.
+        worst_raw=1.0,
+    ),
+    "rmse": MetricDirection(
+        higher_is_better=False,
+        to_minimize=lambda v: v,
+        worst_raw=1.0,
+    ),
     # The SBC tests are lower-is-better and pass through unchanged, but they
     # are listed explicitly so a missing value takes a defined penalty rather
     # than silently borrowing calibration_error's.
