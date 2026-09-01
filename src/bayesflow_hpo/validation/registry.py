@@ -673,17 +673,28 @@ register_metric(
 )
 register_metric(
     "log_gamma", _bf_log_gamma,
-    description="Log-gamma calibration diagnostic from BayesFlow.",
+    description=(
+        "Log-gamma calibration statistic from BayesFlow. HIGHER IS BETTER -- "
+        "log_gamma < 0 rejects uniform ranks at the 5% level. More sensitive "
+        "than sbc_ks/sbc_chi2. Ranks marginal parameters only unless given "
+        "data-dependent test_quantities, which this wrapper does not."
+    ),
 )
 
 # Native metrics — SBC rank uniformity
 register_metric(
     "sbc_ks", _sbc_ks_metric,
-    description="SBC KS statistic (minimize -> 0 = uniform ranks).",
+    description=(
+        "SBC KS statistic (minimize -> 0 = uniform ranks). BayesFlow "
+        "documents log_gamma as typically more sensitive than this test."
+    ),
 )
 register_metric(
     "sbc_chi2", _sbc_chi2_metric,
-    description="SBC chi-squared statistic (minimize -> 0 = uniform ranks).",
+    description=(
+        "SBC chi-squared statistic (minimize -> 0 = uniform ranks). BayesFlow "
+        "documents log_gamma as typically more sensitive than this test."
+    ),
 )
 register_metric(
     "coverage", _coverage_two_sided,

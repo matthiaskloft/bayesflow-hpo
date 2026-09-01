@@ -4,7 +4,9 @@ import numpy as np
 import pytest
 
 from bayesflow_hpo.objectives import (
+    HIGHER_IS_BETTER,
     MAX_PARAM_COUNT,
+    METRIC_DIRECTIONS,
     MIN_PARAM_COUNT,
     _metric_to_minimize,
     compute_inference_time_per_dataset,
@@ -13,6 +15,7 @@ from bayesflow_hpo.objectives import (
     extract_objective_values,
     mean_objective_score,
     normalize_param_count,
+    worst_objective_value,
 )
 
 
@@ -270,3 +273,79 @@ def test_inference_time_per_dataset_zero_datasets():
     """n_datasets=0 uses max(0, 1)=1 to avoid division by zero."""
     result = compute_inference_time_per_dataset(5.0, n_datasets=0)
     assert np.isclose(result, 5.0)
+
+
+class TestLogGammaDirection:
+    """`log_gamma` runs opposite to every other calibration metric.
+
+    BayesFlow's `calibration_log_gamma` returns log(gamma/gamma_null) and
+    documents `log_gamma < 0` as rejecting the hypothesis of uniform ranks at
+    the 5% level. Larger is better. Before this was recorded, `log_gamma`
+    passed through `_metric_to_minimize` unchanged, so Optuna minimized it and
+    would have selected the most miscalibrated model in the study -- silently,
+    since nothing in the output looks wrong.
+    """
+
+    def test_a_well_calibrated_model_beats_a_miscalibrated_one(self):
+        good = _metric_to_minimize("log_gamma", 1.5)
+        bad = _metric_to_minimize("log_gamma", -25.5)
+        assert good < bad, (
+            "Optuna minimizes, so the better-calibrated model must map to the "
+            "SMALLER objective value"
+        )
+
+    def test_conversion_is_negation_not_one_minus(self):
+        """`1 - v` is meaningless for an unbounded log-ratio."""
+        assert _metric_to_minimize("log_gamma", -25.5) == 25.5
+        assert _metric_to_minimize("log_gamma", 1.5) == -1.5
+
+    def test_bounded_metrics_keep_the_one_minus_conversion(self):
+        """The scales differ; correlation must not change behaviour."""
+        assert np.isclose(_metric_to_minimize("correlation", 0.8), 0.2)
+        assert np.isclose(_metric_to_minimize("contraction", 0.8), 0.2)
+
+    def test_log_gamma_is_reported_as_higher_is_better(self):
+        assert "log_gamma" in HIGHER_IS_BETTER
+        assert METRIC_DIRECTIONS["log_gamma"].higher_is_better is True
+
+    def test_unknown_metrics_pass_through_unchanged(self):
+        """Error-style metrics have no entry and must stay as they are."""
+        assert _metric_to_minimize("some_custom_error", 0.3) == 0.3
+
+
+class TestMissingMetricDefaults:
+    def test_a_missing_log_gamma_does_not_look_excellent(self):
+        """The old cross-metric fallback made a missing metric a winner.
+
+        `extract_objective_values` used to substitute `calibration_error` for
+        any missing objective. For `log_gamma` that is catastrophic: a good
+        calibration_error of 0.05 becomes an objective of -0.05, which under
+        minimization beats every real log_gamma a trial could report. A trial
+        that failed to produce the metric would outrank every trial that did.
+        """
+        metrics = {"summary": {"calibration_error": 0.05, "nrmse": 0.2}}
+        value, _ = extract_objective_values(metrics, 1.0, "log_gamma")
+        assert value == worst_objective_value("log_gamma")
+        assert value > _metric_to_minimize("log_gamma", -50.0)
+
+    def test_the_fallback_survives_for_same_direction_metrics(self):
+        """An unknown lower-is-better metric keeps the historical behaviour."""
+        metrics = {"summary": {"calibration_error": 0.05}}
+        value, _ = extract_objective_values(metrics, 1.0, "some_custom_error")
+        assert value == pytest.approx(0.05)
+
+    def test_missing_worst_case_is_not_converted_twice(self):
+        """`worst_objective_value` is already in minimize space."""
+        metrics = {"summary": {"nrmse": 0.2}}
+        values = extract_multi_objective_values(
+            metrics, 1.0, ["log_gamma", "nrmse"], objective_mode="pareto"
+        )
+        assert values[0] == worst_objective_value("log_gamma")
+        assert values[0] > 0, "a double negation would flip this negative"
+
+    def test_missing_correlation_still_maps_to_its_worst(self):
+        metrics = {"summary": {"nrmse": 0.2}}
+        values = extract_multi_objective_values(
+            metrics, 1.0, ["correlation", "nrmse"], objective_mode="pareto"
+        )
+        assert values[0] == pytest.approx(1.0)

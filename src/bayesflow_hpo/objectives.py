@@ -11,14 +11,20 @@ Key concepts:
 - **Inference time per dataset**: Reports inference cost as seconds per
   dataset (averaged over conditions), giving an interpretable measure of
   how long one inference call takes.
-- **Higher-is-better inversion**: Metrics like ``correlation`` are
-  inverted to ``1 - value`` so all objectives can be minimized.
+- **Direction conversion**: every objective is mapped to minimize-is-better
+  through :data:`METRIC_DIRECTIONS`. The conversion is per-metric because the
+  scales differ -- ``correlation`` is bounded on [0, 1] and inverts as
+  ``1 - value``, while ``log_gamma`` is an unbounded log-ratio and must be
+  negated. Getting this wrong is silent: an un-flipped ``log_gamma`` makes the
+  search prefer the most miscalibrated model it can find.
 """
 
 from __future__ import annotations
 
 import importlib.util
 import logging
+from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -153,15 +159,93 @@ def denormalize_param_count(
     return int(min_count * 10 ** (normalized * log_range))
 
 
-# Metrics where higher is better — the objective value is ``1 - metric``.
-HIGHER_IS_BETTER = {"correlation", "contraction"}
+@dataclass(frozen=True)
+class MetricDirection:
+    """How one metric maps onto Optuna's minimize-is-better convention.
+
+    A membership set cannot express this. ``correlation`` and ``contraction``
+    live on [0, 1], so ``1 - value`` is both a direction flip and a sensible
+    scale. ``log_gamma`` is an unbounded log-ratio where ``1 - value`` is
+    meaningless -- the flip has to be a negation. Pairing the conversion with
+    the metric, rather than deriving it from set membership, is what lets the
+    two coexist.
+
+    Attributes
+    ----------
+    higher_is_better
+        Direction of the raw metric.
+    to_minimize
+        Raw value -> minimize-is-better objective value.
+    worst_objective
+        Objective value standing in for a metric missing from a validation
+        summary. Already in minimize space, so it is *large*.
+    """
+
+    higher_is_better: bool
+    to_minimize: Callable[[float], float]
+    worst_objective: float
+
+
+#: Direction and minimize-conversion for every metric with a known direction.
+#:
+#: A metric absent from this table is treated as lower-is-better and passed
+#: through unchanged. That is correct for the error-style metrics
+#: (``calibration_error``, ``nrmse``, ``rmse``, ``sbc_ks``, ``sbc_chi2``) and
+#: is the historical behaviour.
+#:
+#: ``log_gamma`` is the entry that motivated replacing the old
+#: ``HIGHER_IS_BETTER`` set. BayesFlow's ``calibration_log_gamma`` returns
+#: log(gamma/gamma_null) and documents ``log_gamma < 0`` as rejecting the
+#: hypothesis of uniform ranks at the 5% level -- so larger is better, and
+#: minimizing it searches for the *most* miscalibrated model available. The
+#: failure is silent: the study output looks entirely normal.
+METRIC_DIRECTIONS: dict[str, MetricDirection] = {
+    "correlation": MetricDirection(
+        higher_is_better=True,
+        to_minimize=lambda v: 1.0 - v,
+        worst_objective=1.0,
+    ),
+    "contraction": MetricDirection(
+        higher_is_better=True,
+        to_minimize=lambda v: 1.0 - v,
+        worst_objective=1.0,
+    ),
+    "log_gamma": MetricDirection(
+        higher_is_better=True,
+        # Negation, not ``1 - v``: log_gamma is unbounded in both directions.
+        to_minimize=lambda v: -v,
+        # A missing log_gamma must look terrible, and terrible here is a large
+        # POSITIVE objective. FAILED_TRIAL_CAL_ERROR = 1.0 would correspond to
+        # log_gamma = -1, an ordinary value that would not deter the sampler.
+        worst_objective=1e3,
+    ),
+}
+
+#: Backwards-compatible view of :data:`METRIC_DIRECTIONS`, kept because it was
+#: public. Prefer the table, which also carries the conversion.
+HIGHER_IS_BETTER = frozenset(
+    name for name, d in METRIC_DIRECTIONS.items() if d.higher_is_better
+)
 
 
 def _metric_to_minimize(key: str, value: float) -> float:
     """Convert a raw metric value to a minimize-is-better scalar."""
-    if key in HIGHER_IS_BETTER:
-        return 1.0 - value
-    return value
+    direction = METRIC_DIRECTIONS.get(key)
+    if direction is None:
+        return value
+    return direction.to_minimize(value)
+
+
+def worst_objective_value(key: str) -> float:
+    """Minimize-space value standing in for a metric missing from a summary.
+
+    Returned already converted, so callers must not pass it through
+    :func:`_metric_to_minimize` again.
+    """
+    direction = METRIC_DIRECTIONS.get(key)
+    if direction is None:
+        return FAILED_TRIAL_CAL_ERROR
+    return direction.worst_objective
 
 
 def compute_inference_time_per_dataset(
@@ -210,14 +294,25 @@ def extract_objective_values(
             "Available keys: %s. Falling back to 'calibration_error' or 1.0.",
             objective_metric, list(summary.keys()),
         )
-    default = 0.0 if objective_metric in HIGHER_IS_BETTER else 1.0
-    raw_value = float(
-        summary.get(
-            objective_metric,
-            summary.get("calibration_error", default),
+    if objective_metric in summary:
+        objective_value = _metric_to_minimize(
+            objective_metric, float(summary[objective_metric])
         )
-    )
-    objective_value = _metric_to_minimize(objective_metric, raw_value)
+    elif (
+        objective_metric not in METRIC_DIRECTIONS
+        and "calibration_error" in summary
+    ):
+        # Historical fallback, now restricted to metrics that share
+        # calibration_error's direction and scale. Substituting it for a
+        # missing `log_gamma` would be actively harmful: a good
+        # calibration_error of 0.05 becomes an objective of -0.05, which under
+        # minimization looks *better* than any real log_gamma, so a trial that
+        # failed to report the metric would outrank every trial that did.
+        objective_value = _metric_to_minimize(
+            objective_metric, float(summary["calibration_error"])
+        )
+    else:
+        objective_value = worst_objective_value(objective_metric)
     return objective_value, cost_score
 
 
@@ -260,11 +355,11 @@ def extract_multi_objective_values(
                 "Available keys: %s. Using worst-case default.",
                 key, list(summary.keys()),
             )
-        # For higher-is-better metrics, default to 0.0 so that
-        # _metric_to_minimize inverts it to 1.0 (worst).
-        default = 0.0 if key in HIGHER_IS_BETTER else 1.0
-        val = float(summary.get(key, default))
-        raw_values.append(_metric_to_minimize(key, val))
+        if key in summary:
+            raw_values.append(_metric_to_minimize(key, float(summary[key])))
+        else:
+            # Already in minimize space -- do not convert it again.
+            raw_values.append(worst_objective_value(key))
 
     if objective_mode == "pareto":
         return tuple(raw_values) + (cost_score,)
