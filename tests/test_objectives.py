@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from bayesflow_hpo.objectives import (
+    FAILED_TRIAL_CAL_ERROR,
     HIGHER_IS_BETTER,
     MAX_PARAM_COUNT,
     METRIC_DIRECTIONS,
@@ -17,6 +18,7 @@ from bayesflow_hpo.objectives import (
     extract_objective_values,
     mean_objective_score,
     normalize_param_count,
+    register_metric_direction,
     worst_objective_value,
 )
 
@@ -336,11 +338,49 @@ class TestMissingMetricDefaults:
         assert value == worst_objective_value("log_gamma")
         assert value > _metric_to_minimize("log_gamma", -50.0)
 
-    def test_the_fallback_survives_for_same_direction_metrics(self):
-        """An unknown lower-is-better metric keeps the historical behaviour."""
+    def test_an_unknown_metric_does_not_borrow_calibration_error(self) -> None:
+        """Absence from the table establishes neither direction nor scale.
+
+        This previously substituted `calibration_error` for any unregistered
+        objective. A missing `custom_rmse` would take calibration_error's
+        0.05, while a genuinely reported custom RMSE can be 100 -- so the
+        missing metric wins. An earlier version of this test asserted the
+        substitution, which enshrined the assumption rather than checking it.
+        """
         metrics = {"summary": {"calibration_error": 0.05}}
-        value, _ = extract_objective_values(metrics, 1.0, "some_custom_error")
-        assert value == pytest.approx(0.05)
+        value, _ = extract_objective_values(metrics, 1.0, "custom_rmse")
+        assert value == worst_objective_value("custom_rmse")
+        assert value != pytest.approx(0.05)
+
+    def test_legacy_higher_is_better_removal_is_honoured(self) -> None:
+        """The old set controlled conversion by content, both ways.
+
+        Supporting only additions would silently ignore a consumer that
+        removed a built-in to make it pass through.
+        """
+        assert _metric_to_minimize("contraction", 0.8) == pytest.approx(0.2)
+        HIGHER_IS_BETTER.discard("contraction")
+        try:
+            assert _metric_to_minimize("contraction", 0.8) == pytest.approx(0.8)
+            assert worst_objective_value("contraction") == FAILED_TRIAL_CAL_ERROR
+        finally:
+            HIGHER_IS_BETTER.add("contraction")
+        assert _metric_to_minimize("contraction", 0.8) == pytest.approx(0.2)
+
+    def test_register_metric_direction_round_trips(self) -> None:
+        register_metric_direction(
+            "my_unbounded_score",
+            higher_is_better=True,
+            worst_raw=-math.inf,
+            to_minimize=lambda v: -v,
+        )
+        try:
+            assert _metric_to_minimize("my_unbounded_score", 3.0) == -3.0
+            assert math.isinf(worst_objective_value("my_unbounded_score"))
+            assert "my_unbounded_score" in HIGHER_IS_BETTER
+        finally:
+            METRIC_DIRECTIONS.pop("my_unbounded_score", None)
+            HIGHER_IS_BETTER.discard("my_unbounded_score")
 
     def test_missing_worst_case_is_not_converted_twice(self):
         """`worst_objective_value` is already in minimize space."""

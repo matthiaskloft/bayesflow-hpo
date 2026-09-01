@@ -1,6 +1,7 @@
 """Tests for objective training failure handling and budget enforcement."""
 
 import logging
+import math
 
 import numpy as np
 import pytest
@@ -16,11 +17,14 @@ from bayesflow_hpo.objectives import (
 from bayesflow_hpo.optimization.objective import (
     GenericObjective,
     ObjectiveConfig,
+    _accepts_training_loss_proxy,  # noqa: F401
     _extract_best_training_loss,
+    _pipeline_metrics,
     _training_loss_fallback,
     _validate_metric_keys,
 )
 from bayesflow_hpo.validation.data import ValidationDataset
+from bayesflow_hpo.validation.registry import DEFAULT_METRICS
 
 _DUMMY_VALIDATION_DATA = ValidationDataset(
     simulations=[],
@@ -1739,7 +1743,9 @@ class TestLogGammaPenaltiesEndToEnd:
     missing key.
     """
 
-    def _objective(self, metrics, mode="pareto"):
+    def _objective(
+        self, metrics: list[str], mode: str = "pareto"
+    ) -> GenericObjective:
         return GenericObjective(
             ObjectiveConfig(
                 simulator=object(),
@@ -1753,7 +1759,7 @@ class TestLogGammaPenaltiesEndToEnd:
             )
         )
 
-    def test_missing_log_gamma_does_not_beat_a_reported_one(self):
+    def test_missing_log_gamma_does_not_beat_a_reported_one(self) -> None:
         obj = self._objective(["log_gamma", "nrmse"])
         cleaned = _validate_metric_keys(
             {"nrmse": 0.2},
@@ -1769,7 +1775,7 @@ class TestLogGammaPenaltiesEndToEnd:
         assert values[0] > reported_good
         assert values[0] > reported_awful
 
-    def test_non_finite_log_gamma_is_penalised_in_the_right_direction(self):
+    def test_non_finite_log_gamma_is_penalised_in_the_right_direction(self) -> None:
         obj = self._objective(["log_gamma", "nrmse"])
         cleaned = _validate_metric_keys(
             {"log_gamma": float("nan"), "nrmse": 0.2},
@@ -1780,7 +1786,7 @@ class TestLogGammaPenaltiesEndToEnd:
             "log_gamma", cleaned["log_gamma"]
         ) > _metric_to_minimize("log_gamma", 0.5)
 
-    def test_metric_penalty_map_is_raw_space(self):
+    def test_metric_penalty_map_is_raw_space(self) -> None:
         """It must not be derived from `_penalty()`, which is minimize space.
 
         Feeding a minimize-space value into the pre-conversion substitution
@@ -1791,7 +1797,7 @@ class TestLogGammaPenaltiesEndToEnd:
             "log_gamma"
         )
 
-    def test_failure_penalty_is_per_metric_and_minimize_space(self):
+    def test_failure_penalty_is_per_metric_and_minimize_space(self) -> None:
         """A flat 1.0 means log_gamma = -1, an unremarkable value."""
         obj = self._objective(["log_gamma", "nrmse"])
         penalty = obj._penalty()
@@ -1799,10 +1805,53 @@ class TestLogGammaPenaltiesEndToEnd:
         assert penalty[0] > _metric_to_minimize("log_gamma", -50.0)
         assert penalty[-1] == FAILED_TRIAL_COST
 
-    def test_lower_is_better_metrics_keep_their_historical_penalty(self):
+    def test_lower_is_better_metrics_keep_their_historical_penalty(self) -> None:
         obj = self._objective(["calibration_error", "nrmse"])
         assert obj._penalty() == (
             FAILED_TRIAL_CAL_ERROR,
             FAILED_TRIAL_CAL_ERROR,
             FAILED_TRIAL_COST,
         )
+
+
+    def test_a_failed_validation_does_not_beat_a_valid_trial(self) -> None:
+        """The training-loss proxy is a [0, 1] LOWER-is-better scale.
+
+        Substituting it for `log_gamma` inverts the ranking rather than merely
+        approximating it: a trial whose validation FAILED scored 0.1, while a
+        valid trial reporting log_gamma = -50 scores 50, so the failure
+        dominated the real result on that objective.
+        """
+        values = _training_loss_fallback(
+            0.1, ["log_gamma"], "pareto", 50_000, 1_000_000,
+            "param_count", (math.inf, FAILED_TRIAL_COST),
+        )
+        assert values[0] >= _metric_to_minimize("log_gamma", -50.0)
+        assert values[0] == worst_objective_value("log_gamma")
+
+    def test_error_style_metrics_keep_the_training_loss_proxy(self) -> None:
+        """The proxy is on-scale for these, and must not regress."""
+        values = _training_loss_fallback(
+            0.1, ["calibration_error", "nrmse"], "pareto", 50_000, 1_000_000,
+            "param_count", (1.0, 1.0, FAILED_TRIAL_COST),
+        )
+        assert values[0] == pytest.approx(0.1)
+        assert values[1] == pytest.approx(0.1)
+
+    def test_constraint_metrics_survive_the_pipeline_metric_list(self) -> None:
+        """Restricting validation to the objectives disables constraints.
+
+        `coverage_90` comes from `coverage`, which is registered
+        diagnostic-only and so can never be an objective. A hard constraint
+        silently skips a missing key and a soft one reads it as zero
+        violation, so narrowing the computed set would quietly disable them.
+        """
+        names = _pipeline_metrics(["log_gamma", "nrmse"])
+        assert "coverage" in names, "constraint producer must still be computed"
+        assert "log_gamma" in names, "configured objective must be computed"
+        assert set(DEFAULT_METRICS) <= set(names)
+
+    def test_unregistered_objectives_are_left_out_of_the_pipeline(self) -> None:
+        """The pipeline resolves through the registry and would raise."""
+        names = _pipeline_metrics(["not_a_registered_metric"])
+        assert "not_a_registered_metric" not in names

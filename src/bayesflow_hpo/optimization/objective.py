@@ -43,6 +43,7 @@ from bayesflow_hpo.objectives import (
     FAILED_TRIAL_CAL_ERROR,
     FAILED_TRIAL_COST,
     MAX_PARAM_COUNT,
+    METRIC_DIRECTIONS,
     compute_inference_time_per_dataset,
     extract_multi_objective_values,
     get_param_count,
@@ -572,6 +573,38 @@ def _extract_best_training_loss(callbacks: list[Any]) -> float | None:
     return None
 
 
+def _accepts_training_loss_proxy(metric: str) -> bool:
+    """Is a clamped [0, 1] lower-is-better loss on scale for this metric?
+
+    True for the error-style metrics the proxy was written for
+    (``calibration_error``, ``nrmse``, ``rmse``, and any unregistered metric,
+    which is assumed lower-is-better exactly as elsewhere). False for anything
+    higher-is-better or unbounded, where substituting a small number claims a
+    good result rather than a failed one.
+    """
+    direction = METRIC_DIRECTIONS.get(metric)
+    if direction is None:
+        return True
+    return not direction.higher_is_better and direction.worst_objective == 1.0
+
+
+def _pipeline_metrics(objective_metrics: list[str]) -> list[str]:
+    """DEFAULT_METRICS plus any registered objective, order-stable.
+
+    Unregistered objectives are left out because the pipeline resolves names
+    through the registry and would raise; they behave as before, falling to a
+    penalty.
+    """
+    from bayesflow_hpo.validation.registry import DEFAULT_METRICS, list_metrics
+
+    known = set(list_metrics())
+    names = list(DEFAULT_METRICS)
+    for metric in objective_metrics:
+        if metric in known and metric not in names:
+            names.append(metric)
+    return names
+
+
 def _training_loss_fallback(
     best_training_loss: float | None,
     objective_metrics: list[str],
@@ -622,10 +655,23 @@ def _training_loss_fallback(
         # No inference was performed, so use the penalty cost value.
         cost_score = FAILED_TRIAL_COST
 
+    # The clamped loss is a [0, 1] lower-is-better proxy, so it is only on
+    # scale for a metric that is itself [0, 1] and lower-is-better. Applying
+    # it to `log_gamma` is not merely imprecise, it inverts the ranking: a
+    # trial whose validation FAILED scores 0.1, while a valid trial reporting
+    # log_gamma = -50 scores 50, so the failure dominates the real result.
+    # Metrics off that scale get their worst objective instead.
+    per_metric = [
+        clamped_loss
+        if _accepts_training_loss_proxy(metric)
+        else worst_objective_value(metric)
+        for metric in objective_metrics
+    ]
     if objective_mode == "pareto":
-        return tuple([clamped_loss] * len(objective_metrics)) + (cost_score,)
-    # "mean" mode
-    return (clamped_loss, cost_score)
+        return tuple(per_metric) + (cost_score,)
+    # "mean" mode collapses the metrics, so the proxy must too.
+    mean_val = math.fsum(per_metric) / len(per_metric) if per_metric else clamped_loss
+    return (mean_val, cost_score)
 
 
 def _log_trial_summary(
@@ -1105,10 +1151,17 @@ class GenericObjective:
                     approximator=approximator,
                     validation_data=config.validation_data,
                     n_posterior_samples=config.n_posterior_samples,
-                    # Without this the pipeline computes DEFAULT_METRICS, which
-                    # need not contain the configured objectives -- every
-                    # missing one would then fall through to a penalty.
-                    metrics=list(config.objective_metrics),
+                    # UNION, not restriction. Without the objectives the
+                    # pipeline computes only DEFAULT_METRICS, so a configured
+                    # objective missing from that list falls through to a
+                    # penalty. But restricting it to the objectives is worse:
+                    # constraints may reference metrics that cannot be
+                    # objectives at all -- `coverage_90` comes from
+                    # `coverage`, which is registered diagnostic-only -- and a
+                    # hard constraint silently skips a missing key while a
+                    # soft one reads it as zero violation. Computing both sets
+                    # keeps constraints working and the objectives present.
+                    metrics=_pipeline_metrics(config.objective_metrics),
                 )
                 inference_time = result.timing.get("inference", 0.0)
                 metrics_summary = _validate_metric_keys(

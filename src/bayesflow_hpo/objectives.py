@@ -13,7 +13,7 @@ Key concepts:
   how long one inference call takes.
 - **Direction conversion**: every objective is mapped to minimize-is-better
   through :data:`METRIC_DIRECTIONS`. The conversion is per-metric because the
-  scales differ -- ``correlation`` is bounded on [0, 1] and inverts as
+  scales differ -- ``correlation`` is bounded on [-1, 1] and inverts as
   ``1 - value``, while ``log_gamma`` is an unbounded log-ratio and must be
   negated. Getting this wrong is silent: an un-flipped ``log_gamma`` makes the
   search prefer the most miscalibrated model it can find.
@@ -164,12 +164,13 @@ def denormalize_param_count(
 class MetricDirection:
     """How one metric maps onto Optuna's minimize-is-better convention.
 
-    A membership set cannot express this. ``correlation`` and ``contraction``
-    live on [0, 1], so ``1 - value`` is both a direction flip and a sensible
-    scale. ``log_gamma`` is an unbounded log-ratio where ``1 - value`` is
-    meaningless -- the flip has to be a negation. Pairing the conversion with
-    the metric, rather than deriving it from set membership, is what lets the
-    two coexist.
+    A membership set cannot express this. ``contraction`` lives on [0, 1] and
+    ``correlation`` on [-1, 1], so ``1 - value`` is a direction flip that
+    lands on a sensible scale for both -- but their *worst* values differ
+    (1.0 and 2.0), which a single shared rule cannot record. ``log_gamma`` is
+    an unbounded log-ratio where ``1 - value`` is meaningless -- the flip has
+    to be a negation. Pairing the conversion with the metric, rather than
+    deriving it from set membership, is what lets all three coexist.
 
     Attributes
     ----------
@@ -317,16 +318,38 @@ def register_metric_direction(
         HIGHER_IS_BETTER.discard(name)
 
 
-def _metric_to_minimize(key: str, value: float) -> float:
-    """Convert a raw metric value to a minimize-is-better scalar."""
+def _direction_for(key: str) -> MetricDirection | None:
+    """Resolve a metric's direction, honouring both compatibility mutations.
+
+    :data:`HIGHER_IS_BETTER` used to control conversion by its contents, so a
+    consumer could both *add* a custom higher-is-better metric and *remove* a
+    built-in to make it pass through. Consulting :data:`METRIC_DIRECTIONS`
+    unconditionally would have supported only the first: after
+    ``HIGHER_IS_BETTER.discard("contraction")`` the conversion would still
+    invert. A discarded higher-is-better entry is therefore treated as
+    removed.
+    """
     direction = METRIC_DIRECTIONS.get(key)
     if direction is not None:
-        return direction.to_minimize(value)
-    # Historical extension point: a name added to HIGHER_IS_BETTER but not to
-    # METRIC_DIRECTIONS keeps the old `1 - value` behaviour.
+        if direction.higher_is_better and key not in HIGHER_IS_BETTER:
+            return None
+        return direction
     if key in HIGHER_IS_BETTER:
-        return 1.0 - value
-    return value
+        # Added to the legacy set only: historical `1 - value` behaviour.
+        return MetricDirection(
+            higher_is_better=True,
+            to_minimize=lambda v: 1.0 - v,
+            worst_raw=0.0,
+        )
+    return None
+
+
+def _metric_to_minimize(key: str, value: float) -> float:
+    """Convert a raw metric value to a minimize-is-better scalar."""
+    direction = _direction_for(key)
+    if direction is None:
+        return value
+    return direction.to_minimize(value)
 
 
 def worst_raw_value(key: str) -> float:
@@ -337,11 +360,9 @@ def worst_raw_value(key: str) -> float:
     flat raw penalty of 1.0 for ``log_gamma`` converts to ``-1.0``, which
     beats a genuinely reported ``log_gamma`` of 0.5.
     """
-    direction = METRIC_DIRECTIONS.get(key)
+    direction = _direction_for(key)
     if direction is not None:
         return direction.worst_raw
-    if key in HIGHER_IS_BETTER:
-        return 0.0
     return FAILED_TRIAL_CAL_ERROR
 
 
@@ -404,20 +425,14 @@ def extract_objective_values(
         objective_value = _metric_to_minimize(
             objective_metric, float(summary[objective_metric])
         )
-    elif (
-        objective_metric not in METRIC_DIRECTIONS
-        and "calibration_error" in summary
-    ):
-        # Historical fallback, now restricted to metrics that share
-        # calibration_error's direction and scale. Substituting it for a
-        # missing `log_gamma` would be actively harmful: a good
-        # calibration_error of 0.05 becomes an objective of -0.05, which under
-        # minimization looks *better* than any real log_gamma, so a trial that
-        # failed to report the metric would outrank every trial that did.
-        objective_value = _metric_to_minimize(
-            objective_metric, float(summary["calibration_error"])
-        )
     else:
+        # No cross-metric substitution. This used to fall back to
+        # `calibration_error`, which assumes the missing metric shares its
+        # direction AND its scale -- and absence from METRIC_DIRECTIONS
+        # establishes neither. A missing `custom_rmse` would take
+        # calibration_error's 0.05 while a genuinely reported custom RMSE can
+        # be 100, so the missing metric wins. For `log_gamma` it was worse
+        # still: 0.05 negates to -0.05, beating every real value.
         objective_value = worst_objective_value(objective_metric)
     return objective_value, cost_score
 
