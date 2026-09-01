@@ -1923,3 +1923,46 @@ class TestTrainingLossProxyEligibility:
 
     def test_an_unregistered_metric_does_not(self) -> None:
         assert not _accepts_training_loss_proxy("totally_unknown_metric")
+
+
+def test_early_stopping_monitor_alias_is_canonicalized() -> None:
+    """Canonicalizing the metric list alone broke a valid pairing.
+
+    `early_stopping_monitor` names one of `objective_metrics`, and the
+    membership check compares them directly. Canonicalizing only the list
+    turned `objective_metrics=["cal_error"]` with
+    `early_stopping_monitor="cal_error"` -- valid before -- into a ValueError.
+    """
+    config = ObjectiveConfig(
+        simulator=object(),
+        adapter=object(),
+        search_space=_FakeSearchSpace(),
+        epochs=1,
+        num_batches=1,
+        validation_data=_DUMMY_VALIDATION_DATA,
+        objective_metrics=["cal_error", "nrmse"],
+        objective_mode="pareto",
+        training_mode="open_ended",
+        early_stopping_patience=5,
+        early_stopping_monitor="cal_error",
+    )
+    assert config.early_stopping_monitor == "calibration_error"
+    assert config.early_stopping_monitor in config.objective_metrics
+
+
+def test_objective_mean_monitor_is_not_canonicalized() -> None:
+    """`objective_mean` is a sentinel, not a metric name."""
+    config = ObjectiveConfig(
+        simulator=object(),
+        adapter=object(),
+        search_space=_FakeSearchSpace(),
+        epochs=1,
+        num_batches=1,
+        validation_data=_DUMMY_VALIDATION_DATA,
+        objective_metrics=["cal_error"],
+        objective_mode="pareto",
+        training_mode="open_ended",
+        early_stopping_patience=5,
+        early_stopping_monitor="objective_mean",
+    )
+    assert config.early_stopping_monitor == "objective_mean"

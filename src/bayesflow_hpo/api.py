@@ -349,6 +349,17 @@ def optimize(
     directions
         Optimization directions.  Default ``None`` (auto-derived as
         ``["minimize"] * n_objectives``).
+
+        Every entry must be ``"minimize"``; anything else raises. The
+        objective already converts each metric to minimize-is-better through
+        :data:`bayesflow_hpo.objectives.METRIC_DIRECTIONS`, and the failure
+        penalties are in minimize space too, so a ``"maximize"`` entry inverts
+        that a second time -- the search would then prefer the *worst* model
+        and the failure penalty would become its most attractive value, with
+        nothing in the study output looking wrong. To optimize a
+        higher-is-better metric, register its direction with
+        :func:`bayesflow_hpo.objectives.register_metric_direction` and leave
+        this ``None``.
     warm_start_from
         Optional source ``optuna.Study`` to seed initial trials from.
     warm_start_top_k

@@ -468,7 +468,7 @@ class TestDeriveDirections:
         assert directions == ["minimize", "minimize", "minimize"]
         assert metric_names == ["calibration_error", "nrmse", "inference_time"]
 
-    def test_explicit_all_minimize_directions_passthrough(self):
+    def test_explicit_all_minimize_directions_passthrough(self) -> None:
         obj = MagicMock()
         obj.n_objectives = 3
         directions, _ = _derive_directions(
@@ -480,7 +480,7 @@ class TestDeriveDirections:
         )
         assert directions == ["minimize", "minimize", "minimize"]
 
-    def test_maximize_direction_is_rejected(self):
+    def test_maximize_direction_is_rejected(self) -> None:
         """This previously passed through, and now inverts the ranking.
 
         Every value the objective returns is already minimize-space --

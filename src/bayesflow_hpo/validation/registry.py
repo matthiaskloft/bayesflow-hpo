@@ -154,10 +154,30 @@ def get_metric(name: str) -> MetricFn:
 
 
 def canonical_metric_name(name: str) -> str:
-    """Resolve an alias to its canonical registered name.
+    """Resolve a metric alias to its canonical registered name.
 
-    Names that are not registered aliases pass through unchanged, so this is
-    safe to apply to custom metric names a caller supplies.
+    Callers must agree on one spelling of a metric, because the validation
+    pipeline emits canonical names while a configuration may request an
+    alias. Where the two disagreed the lookup missed and inserted a penalty,
+    so every trial using a supported alias scored identically with no error
+    raised.
+
+    Parameters
+    ----------
+    name
+        Metric name as supplied by a caller: a canonical name, a registered
+        alias (e.g. ``"cal_error"``), or a custom name.
+
+    Returns
+    -------
+    str
+        The canonical name for a registered alias, otherwise *name*
+        unchanged. Passing through unknown names keeps this safe to apply to
+        custom metrics resolved by a caller's own ``validate_fn``.
+
+    See Also
+    --------
+    resolve_metrics : Resolve names to metric callables.
     """
     return _ALIASES.get(name, name)
 

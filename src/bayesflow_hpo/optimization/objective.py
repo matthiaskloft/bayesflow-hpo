@@ -432,6 +432,16 @@ class ObjectiveConfig:
         self.objective_metrics = [
             canonical_metric_name(m) for m in self.objective_metrics
         ]
+        # `early_stopping_monitor` names one of those metrics, so it has to be
+        # canonicalized with them. Otherwise canonicalizing only the list turns
+        # a previously-valid pairing -- objective_metrics=["cal_error"] with
+        # early_stopping_monitor="cal_error" -- into a ValueError, because the
+        # membership check below compares the still-aliased monitor against
+        # the now-canonical list.
+        if self.early_stopping_monitor != "objective_mean":
+            self.early_stopping_monitor = canonical_metric_name(
+                self.early_stopping_monitor
+            )
         if self.training_mode not in ("fixed_budget", "open_ended"):
             raise ValueError(
                 f"Unknown training_mode: {self.training_mode!r}. "
@@ -588,11 +598,34 @@ def _extract_best_training_loss(callbacks: list[Any]) -> float | None:
 def _accepts_training_loss_proxy(metric: str) -> bool:
     """Is a clamped [0, 1] lower-is-better loss on scale for this metric?
 
-    True for the error-style metrics the proxy was written for
-    (``calibration_error``, ``nrmse``, ``rmse``, and any unregistered metric,
-    which is assumed lower-is-better exactly as elsewhere). False for anything
-    higher-is-better or unbounded, where substituting a small number claims a
-    good result rather than a failed one.
+    When final validation raises, :func:`_training_loss_fallback` substitutes
+    the best clamped training loss for each objective. That substitution is a
+    [0, 1] lower-is-better number, so it is only meaningful for a metric on
+    the same scale and in the same direction. Applied to a higher-is-better
+    metric it does not merely approximate badly, it inverts the ranking: a
+    trial whose validation failed would score better than one that reported a
+    real value.
+
+    Parameters
+    ----------
+    metric
+        Objective metric name, canonical or custom.
+
+    Returns
+    -------
+    bool
+        ``True`` only when the metric has a recorded direction that is
+        lower-is-better with a unit worst case. A metric with no recorded
+        direction returns ``False``: absence establishes neither direction nor
+        scale, and guessing in the permissive direction is what lets a failed
+        trial win.
+
+    References
+    ----------
+    The asymmetry this guards against is documented for ``log_gamma`` in
+    ``docs/references.md`` (Modrák et al., 2025): ``log_gamma < 0`` rejects
+    rank uniformity, so larger is better and a small substituted loss reads as
+    a *good* result.
     """
     direction = _direction_for(metric)
     if direction is None:
