@@ -675,9 +675,10 @@ register_metric(
     "log_gamma", _bf_log_gamma,
     description=(
         "Log-gamma calibration statistic from BayesFlow. HIGHER IS BETTER -- "
-        "log_gamma < 0 rejects uniform ranks at the 5% level. More sensitive "
-        "than sbc_ks/sbc_chi2. Ranks marginal parameters only unless given "
-        "data-dependent test_quantities, which this wrapper does not."
+        "log_gamma < 0 rejects uniform ranks at the 5% level. BayesFlow "
+        "documents it as typically more sensitive than the KS or ChiSq tests. "
+        "Ranks marginal parameters only unless given data-dependent "
+        "test_quantities, which this wrapper does not."
     ),
 )
 

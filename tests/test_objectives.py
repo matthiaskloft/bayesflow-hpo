@@ -1,5 +1,7 @@
 """Tests for objective extraction and param normalization."""
 
+import math
+
 import numpy as np
 import pytest
 
@@ -349,3 +351,45 @@ class TestMissingMetricDefaults:
             metrics, 1.0, ["correlation", "nrmse"], objective_mode="pareto"
         )
         assert values[0] == pytest.approx(1.0)
+
+    def test_a_catastrophic_value_still_ranks_better_than_a_missing_one(self):
+        """A finite penalty can be beaten, which inverts the intent.
+
+        log_gamma is unbounded below, so no finite constant is provably its
+        worst value. With a penalty of 1e3, a real log_gamma of -5000 would
+        score worse than a missing one -- i.e. failing to report the metric
+        would look better than reporting a catastrophic value.
+        """
+        assert _metric_to_minimize("log_gamma", -5000.0) < worst_objective_value(
+            "log_gamma"
+        )
+
+    @pytest.mark.parametrize("metric", ["sbc_ks", "sbc_chi2"])
+    def test_sbc_tests_take_their_own_penalty_not_calibration_errors(
+        self, metric
+    ):
+        """Built-in metrics must not silently borrow another's value."""
+        metrics = {"summary": {"calibration_error": 0.05, "nrmse": 0.2}}
+        value, _ = extract_objective_values(metrics, 1.0, metric)
+        assert value == worst_objective_value(metric)
+        assert value != pytest.approx(0.05)
+
+    @pytest.mark.parametrize("metric", ["sbc_ks", "sbc_chi2"])
+    def test_sbc_tests_pass_through_unchanged_when_present(self, metric):
+        """They are lower-is-better; the entry must not flip them."""
+        assert _metric_to_minimize(metric, 0.3) == 0.3
+
+    @pytest.mark.parametrize("metric", ["sbc_ks", "sbc_chi2"])
+    def test_sbc_tests_missing_in_multi_objective(self, metric):
+        metrics = {"summary": {"nrmse": 0.2}}
+        values = extract_multi_objective_values(
+            metrics, 1.0, [metric, "nrmse"], objective_mode="pareto"
+        )
+        assert values[0] == worst_objective_value(metric)
+
+    def test_only_the_bounded_metrics_get_a_finite_worst_case(self):
+        """KS is a sup of a CDF difference; chi-squared is unbounded above."""
+        assert worst_objective_value("sbc_ks") == 1.0
+        assert math.isinf(worst_objective_value("sbc_chi2"))
+        assert math.isinf(worst_objective_value("log_gamma"))
+        assert worst_objective_value("correlation") == 1.0

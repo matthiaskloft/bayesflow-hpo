@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import importlib.util
 import logging
+import math
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -178,7 +179,14 @@ class MetricDirection:
         Raw value -> minimize-is-better objective value.
     worst_objective
         Objective value standing in for a metric missing from a validation
-        summary. Already in minimize space, so it is *large*.
+        summary. Already in minimize space, so it is *large*, and ``math.inf``
+        for any metric that is unbounded in the losing direction -- only a
+        bounded metric has a finite worst case.
+
+        Note this makes a missing metric worse than any reported value *on
+        that objective*. In multi-objective mode it does not by itself keep
+        such a trial off the Pareto front, since a trial can stay
+        non-dominated by excelling on a different objective.
     """
 
     higher_is_better: bool
@@ -189,16 +197,25 @@ class MetricDirection:
 #: Direction and minimize-conversion for every metric with a known direction.
 #:
 #: A metric absent from this table is treated as lower-is-better and passed
-#: through unchanged. That is correct for the error-style metrics
-#: (``calibration_error``, ``nrmse``, ``rmse``, ``sbc_ks``, ``sbc_chi2``) and
-#: is the historical behaviour.
+#: through unchanged, which is correct for the remaining error-style metrics
+#: (``calibration_error``, ``nrmse``, ``rmse``) and is the historical
+#: behaviour. Custom metrics registered by a caller land here too.
 #:
 #: ``log_gamma`` is the entry that motivated replacing the old
-#: ``HIGHER_IS_BETTER`` set. BayesFlow's ``calibration_log_gamma`` returns
-#: log(gamma/gamma_null) and documents ``log_gamma < 0`` as rejecting the
-#: hypothesis of uniform ranks at the 5% level -- so larger is better, and
-#: minimizing it searches for the *most* miscalibrated model available. The
-#: failure is silent: the study output looks entirely normal.
+#: ``HIGHER_IS_BETTER`` set. Its direction is not inferred: BayesFlow's
+#: ``bayesflow.diagnostics.metrics.calibration_log_gamma`` documents the
+#: statistic as log(gamma/gamma_null), where gamma_null is the 5th percentile
+#: of the null distribution under uniformity of ranks, and states that
+#: "log_gamma < 0 implies a rejection of the hypothesis of uniform ranks at
+#: the 5% level". Larger is therefore better, and minimizing it searches for
+#: the *most* miscalibrated model available. The failure is silent: the study
+#: output looks entirely normal.
+#:
+#: The statistic is from Modrak, M., Moon, A. H., Kim, S., Buerkner, P.,
+#: Huurre, N., Faltejskova, K., Gelman, A., & Vehtari, A. (2025).
+#: Simulation-based calibration checking for Bayesian computation: The choice
+#: of test quantities shapes sensitivity. *Bayesian Analysis, 20*(2),
+#: 461-488. https://doi.org/10.1214/23-BA1404
 METRIC_DIRECTIONS: dict[str, MetricDirection] = {
     "correlation": MetricDirection(
         higher_is_better=True,
@@ -214,10 +231,29 @@ METRIC_DIRECTIONS: dict[str, MetricDirection] = {
         higher_is_better=True,
         # Negation, not ``1 - v``: log_gamma is unbounded in both directions.
         to_minimize=lambda v: -v,
-        # A missing log_gamma must look terrible, and terrible here is a large
-        # POSITIVE objective. FAILED_TRIAL_CAL_ERROR = 1.0 would correspond to
-        # log_gamma = -1, an ordinary value that would not deter the sampler.
-        worst_objective=1e3,
+        # Infinite, because log_gamma is unbounded below and therefore no
+        # finite constant is provably the worst value. A finite penalty can be
+        # *beaten* by a genuinely terrible trial -- with a penalty of 1e3, a
+        # real log_gamma of -5000 would score worse than a missing one, so
+        # failing to report the metric would look better than reporting a
+        # catastrophic value. FAILED_TRIAL_CAL_ERROR = 1.0 is worse still: as
+        # a log_gamma objective it means log_gamma = -1, an ordinary value.
+        worst_objective=math.inf,
+    ),
+    # The SBC tests are lower-is-better and pass through unchanged, but they
+    # are listed explicitly so a missing value takes a defined penalty rather
+    # than silently borrowing calibration_error's.
+    "sbc_ks": MetricDirection(
+        higher_is_better=False,
+        to_minimize=lambda v: v,
+        # A KS statistic is a sup of a CDF difference, so it is bounded by 1.
+        worst_objective=1.0,
+    ),
+    "sbc_chi2": MetricDirection(
+        higher_is_better=False,
+        to_minimize=lambda v: v,
+        # Unlike KS, the raw chi-squared statistic is unbounded above.
+        worst_objective=math.inf,
     ),
 }
 
