@@ -5,7 +5,14 @@ import logging
 import numpy as np
 import pytest
 
-from bayesflow_hpo.objectives import FAILED_TRIAL_CAL_ERROR, FAILED_TRIAL_COST
+from bayesflow_hpo.objectives import (
+    FAILED_TRIAL_CAL_ERROR,
+    FAILED_TRIAL_COST,
+    _metric_to_minimize,
+    extract_multi_objective_values,
+    worst_objective_value,
+    worst_raw_value,
+)
 from bayesflow_hpo.optimization.objective import (
     GenericObjective,
     ObjectiveConfig,
@@ -1713,3 +1720,89 @@ def test_hard_metric_constraints_multiple_partial_violation(monkeypatch):
     values = objective(trial)
     assert trial.user_attrs["rejected_reason"] == "metric_constraint"
     assert values[-1] == FAILED_TRIAL_COST
+
+
+# ---------------------------------------------------------------------------
+# Direction-aware penalties in the production objective path
+# ---------------------------------------------------------------------------
+
+
+class TestLogGammaPenaltiesEndToEnd:
+    """The extractor-only tests did not exercise this path, and it was broken.
+
+    `_validate_metric_keys` substitutes a penalty *before* direction
+    conversion, so the penalty has to be a raw-space value. It was a flat 1.0
+    for every metric, which for `log_gamma` converts to -1.0 -- beating a
+    genuinely reported log_gamma of 0.5 (objective -0.5). A trial that failed
+    to report the metric outranked one that reported a good value, and no
+    extractor-level test could see it because the extractor never received a
+    missing key.
+    """
+
+    def _objective(self, metrics, mode="pareto"):
+        return GenericObjective(
+            ObjectiveConfig(
+                simulator=object(),
+                adapter=object(),
+                search_space=_FakeSearchSpace(),
+                epochs=1,
+                num_batches=1,
+                validation_data=_DUMMY_VALIDATION_DATA,
+                objective_metrics=metrics,
+                objective_mode=mode,
+            )
+        )
+
+    def test_missing_log_gamma_does_not_beat_a_reported_one(self):
+        obj = self._objective(["log_gamma", "nrmse"])
+        cleaned = _validate_metric_keys(
+            {"nrmse": 0.2},
+            ["log_gamma", "nrmse"],
+            penalty_values=obj._metric_penalty_map(),
+        )
+        values = extract_multi_objective_values(
+            {"summary": cleaned}, 1.0, ["log_gamma", "nrmse"],
+            objective_mode="pareto",
+        )
+        reported_good = _metric_to_minimize("log_gamma", 0.5)
+        reported_awful = _metric_to_minimize("log_gamma", -50.0)
+        assert values[0] > reported_good
+        assert values[0] > reported_awful
+
+    def test_non_finite_log_gamma_is_penalised_in_the_right_direction(self):
+        obj = self._objective(["log_gamma", "nrmse"])
+        cleaned = _validate_metric_keys(
+            {"log_gamma": float("nan"), "nrmse": 0.2},
+            ["log_gamma", "nrmse"],
+            penalty_values=obj._metric_penalty_map(),
+        )
+        assert _metric_to_minimize(
+            "log_gamma", cleaned["log_gamma"]
+        ) > _metric_to_minimize("log_gamma", 0.5)
+
+    def test_metric_penalty_map_is_raw_space(self):
+        """It must not be derived from `_penalty()`, which is minimize space.
+
+        Feeding a minimize-space value into the pre-conversion substitution
+        double-converts it.
+        """
+        obj = self._objective(["log_gamma", "nrmse"])
+        assert obj._metric_penalty_map()["log_gamma"] == worst_raw_value(
+            "log_gamma"
+        )
+
+    def test_failure_penalty_is_per_metric_and_minimize_space(self):
+        """A flat 1.0 means log_gamma = -1, an unremarkable value."""
+        obj = self._objective(["log_gamma", "nrmse"])
+        penalty = obj._penalty()
+        assert penalty[0] == worst_objective_value("log_gamma")
+        assert penalty[0] > _metric_to_minimize("log_gamma", -50.0)
+        assert penalty[-1] == FAILED_TRIAL_COST
+
+    def test_lower_is_better_metrics_keep_their_historical_penalty(self):
+        obj = self._objective(["calibration_error", "nrmse"])
+        assert obj._penalty() == (
+            FAILED_TRIAL_CAL_ERROR,
+            FAILED_TRIAL_CAL_ERROR,
+            FAILED_TRIAL_COST,
+        )

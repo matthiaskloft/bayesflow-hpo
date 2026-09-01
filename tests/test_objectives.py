@@ -102,7 +102,13 @@ def test_extract_multi_missing_metric_returns_worst():
 
 
 def test_extract_multi_missing_correlation_returns_worst():
-    """Missing higher-is-better metric should default to worst (1.0 after inversion)."""
+    """A missing correlation must be worse than any value it could report.
+
+    This previously asserted 1.0, from a default raw correlation of 0.0. That
+    was wrong: Pearson correlation runs [-1, 1], so a reported -0.5 maps to
+    1.5 -- worse than the penalty. A missing value beat a genuinely negative
+    one. The worst raw correlation is -1.0, giving 2.0.
+    """
     metrics = {"summary": {"calibration_error": 0.05}}
     values = extract_multi_objective_values(
         metrics,
@@ -110,8 +116,8 @@ def test_extract_multi_missing_correlation_returns_worst():
         objective_metrics=["calibration_error", "correlation"],
         objective_mode="pareto",
     )
-    # correlation missing -> default 0.0 -> _metric_to_minimize: 1.0 - 0.0 = 1.0
-    assert values[1] == 1.0
+    assert values[1] == 2.0
+    assert values[1] > _metric_to_minimize("correlation", -0.99)
 
 
 def test_extract_legacy_applies_metric_to_minimize():
@@ -350,7 +356,7 @@ class TestMissingMetricDefaults:
         values = extract_multi_objective_values(
             metrics, 1.0, ["correlation", "nrmse"], objective_mode="pareto"
         )
-        assert values[0] == pytest.approx(1.0)
+        assert values[0] == pytest.approx(2.0)
 
     def test_a_catastrophic_value_still_ranks_better_than_a_missing_one(self):
         """A finite penalty can be beaten, which inverts the intent.
@@ -392,4 +398,6 @@ class TestMissingMetricDefaults:
         assert worst_objective_value("sbc_ks") == 1.0
         assert math.isinf(worst_objective_value("sbc_chi2"))
         assert math.isinf(worst_objective_value("log_gamma"))
-        assert worst_objective_value("correlation") == 1.0
+        # Pearson runs [-1, 1], so its worst minimize-space value is 2.0.
+        assert worst_objective_value("correlation") == 2.0
+        assert worst_objective_value("contraction") == 1.0

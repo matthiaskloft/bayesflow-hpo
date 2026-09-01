@@ -48,6 +48,8 @@ from bayesflow_hpo.objectives import (
     get_param_count,
     mean_objective_score,
     normalize_param_count,
+    worst_objective_value,
+    worst_raw_value,
 )
 from bayesflow_hpo.optimization.callbacks import (
     MovingAverageEarlyStopping,
@@ -159,10 +161,15 @@ def _validate_metric_keys(
     """
     cleaned = dict(raw)
     for key in objective_metrics:
+        # The penalty is inserted BEFORE direction conversion, so it must be a
+        # raw-space value. A flat 1.0 is not: for `log_gamma` it converts to
+        # -1.0, which beats a genuinely reported log_gamma of 0.5 -- a trial
+        # that failed to report the metric would outrank one that reported a
+        # good value. `worst_raw_value` is the raw-space worst case.
         penalty = (
-            penalty_values.get(key, FAILED_TRIAL_CAL_ERROR)
+            penalty_values.get(key, worst_raw_value(key))
             if penalty_values is not None
-            else FAILED_TRIAL_CAL_ERROR
+            else worst_raw_value(key)
         )
         if key not in cleaned:
             logger.warning(
@@ -731,21 +738,39 @@ class GenericObjective:
         return 2  # mean + cost
 
     def _penalty(self) -> tuple[float, ...]:
-        """Return penalty values matching the expected objective shape."""
+        """Return penalty values matching the expected objective shape.
+
+        These are returned directly as Optuna objective values, so they are in
+        MINIMIZE space and must be per-metric: a flat ``FAILED_TRIAL_CAL_ERROR``
+        of 1.0 means ``log_gamma = -1``, an ordinary value that would not deter
+        the sampler from a region where trials keep failing.
+        """
         n = self.n_objectives
+        metrics = self.config.objective_metrics
+        if self.config.objective_mode == "pareto":
+            worst = [worst_objective_value(m) for m in metrics]
+            return tuple(worst) + (FAILED_TRIAL_COST,)
+        # "mean" mode collapses the metrics into one value, so the penalty is
+        # the mean of their individual worst cases.
         if n == 2:
-            return (FAILED_TRIAL_CAL_ERROR, FAILED_TRIAL_COST)
+            worst = [worst_objective_value(m) for m in metrics]
+            mean_worst = (
+                math.fsum(worst) / len(worst)
+                if worst
+                else FAILED_TRIAL_CAL_ERROR
+            )
+            return (mean_worst, FAILED_TRIAL_COST)
         return tuple([FAILED_TRIAL_CAL_ERROR] * (n - 1)) + (FAILED_TRIAL_COST,)
 
     def _metric_penalty_map(self) -> dict[str, float]:
-        """Per-metric penalty values for :func:`_validate_metric_keys`."""
-        penalties = self._penalty()
-        metrics = self.config.objective_metrics
-        # In pareto mode penalties[:-1] map 1:1 to objective_metrics;
-        # in mean mode there is only one metric penalty slot.
-        if self.config.objective_mode == "pareto":
-            return dict(zip(metrics, penalties))
-        return {m: penalties[0] for m in metrics}
+        """Per-metric RAW-space penalties for :func:`_validate_metric_keys`.
+
+        Deliberately *not* derived from :meth:`_penalty`, which is in minimize
+        space. Feeding a minimize-space value into the pre-conversion
+        substitution double-converts it -- the bug that let a missing
+        ``log_gamma`` outrank a reported one.
+        """
+        return {m: worst_raw_value(m) for m in self.config.objective_metrics}
 
     def _reject_compile(
         self, trial: optuna.Trial, exc: Exception,
@@ -1080,6 +1105,10 @@ class GenericObjective:
                     approximator=approximator,
                     validation_data=config.validation_data,
                     n_posterior_samples=config.n_posterior_samples,
+                    # Without this the pipeline computes DEFAULT_METRICS, which
+                    # need not contain the configured objectives -- every
+                    # missing one would then fall through to a penalty.
+                    metrics=list(config.objective_metrics),
                 )
                 inference_time = result.timing.get("inference", 0.0)
                 metrics_summary = _validate_metric_keys(

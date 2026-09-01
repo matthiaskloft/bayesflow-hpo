@@ -191,7 +191,20 @@ class MetricDirection:
 
     higher_is_better: bool
     to_minimize: Callable[[float], float]
-    worst_objective: float
+    worst_raw: float
+
+    @property
+    def worst_objective(self) -> float:
+        """The worst value in minimize space, derived from :attr:`worst_raw`.
+
+        Derived rather than stored so the two spaces cannot drift apart. They
+        did: the penalty injected for a missing metric is a *raw* value, and
+        it was a hardcoded 1.0 for every metric, so a missing ``log_gamma``
+        became the objective ``-1.0`` -- which beats a genuinely reported
+        ``log_gamma`` of 0.5 (objective ``-0.5``). A trial that failed to
+        report the metric outranked one that reported a good value.
+        """
+        return self.to_minimize(self.worst_raw)
 
 
 #: Direction and minimize-conversion for every metric with a known direction.
@@ -220,12 +233,16 @@ METRIC_DIRECTIONS: dict[str, MetricDirection] = {
     "correlation": MetricDirection(
         higher_is_better=True,
         to_minimize=lambda v: 1.0 - v,
-        worst_objective=1.0,
+        # Pearson correlation runs [-1, 1], not [0, 1]. Using 0.0 here would
+        # let a missing value tie a reported correlation of 0 and *beat* every
+        # negative one -- a reported -0.5 maps to 1.5, worse than the penalty.
+        worst_raw=-1.0,
     ),
     "contraction": MetricDirection(
         higher_is_better=True,
         to_minimize=lambda v: 1.0 - v,
-        worst_objective=1.0,
+        # Contraction is a variance ratio: 0 = no narrowing, its true worst.
+        worst_raw=0.0,
     ),
     "log_gamma": MetricDirection(
         higher_is_better=True,
@@ -238,7 +255,7 @@ METRIC_DIRECTIONS: dict[str, MetricDirection] = {
         # failing to report the metric would look better than reporting a
         # catastrophic value. FAILED_TRIAL_CAL_ERROR = 1.0 is worse still: as
         # a log_gamma objective it means log_gamma = -1, an ordinary value.
-        worst_objective=math.inf,
+        worst_raw=-math.inf,
     ),
     # The SBC tests are lower-is-better and pass through unchanged, but they
     # are listed explicitly so a missing value takes a defined penalty rather
@@ -247,29 +264,85 @@ METRIC_DIRECTIONS: dict[str, MetricDirection] = {
         higher_is_better=False,
         to_minimize=lambda v: v,
         # A KS statistic is a sup of a CDF difference, so it is bounded by 1.
-        worst_objective=1.0,
+        worst_raw=1.0,
     ),
     "sbc_chi2": MetricDirection(
         higher_is_better=False,
         to_minimize=lambda v: v,
         # Unlike KS, the raw chi-squared statistic is unbounded above.
-        worst_objective=math.inf,
+        worst_raw=math.inf,
     ),
 }
 
-#: Backwards-compatible view of :data:`METRIC_DIRECTIONS`, kept because it was
-#: public. Prefer the table, which also carries the conversion.
-HIGHER_IS_BETTER = frozenset(
+#: Mutable set of higher-is-better metric names, kept as a live extension
+#: point rather than a derived view.
+#:
+#: This was public API whose *contents* drove :func:`_metric_to_minimize`, so
+#: a consumer could register a custom higher-is-better metric with
+#: ``HIGHER_IS_BETTER.add("my_metric")``. Making it a derived frozenset would
+#: have silently removed that, so names added here still take the historical
+#: ``1 - value`` conversion. :data:`METRIC_DIRECTIONS` takes precedence, and
+#: is the right place to register anything whose scale is not [0, 1] --
+#: see :func:`register_metric_direction`.
+HIGHER_IS_BETTER: set[str] = {
     name for name, d in METRIC_DIRECTIONS.items() if d.higher_is_better
-)
+}
+
+
+def register_metric_direction(
+    name: str,
+    *,
+    higher_is_better: bool,
+    worst_raw: float,
+    to_minimize: Callable[[float], float] | None = None,
+) -> None:
+    """Register the direction of a custom metric.
+
+    Preferred over mutating :data:`HIGHER_IS_BETTER`, because it also fixes
+    the conversion and the worst-case value. ``to_minimize`` defaults to
+    ``1 - value`` for higher-is-better metrics and the identity otherwise,
+    which is only right for a metric bounded on [0, 1]; pass an explicit
+    conversion (typically negation) for an unbounded one.
+    """
+    if to_minimize is None:
+        to_minimize = (lambda v: 1.0 - v) if higher_is_better else (lambda v: v)
+    METRIC_DIRECTIONS[name] = MetricDirection(
+        higher_is_better=higher_is_better,
+        to_minimize=to_minimize,
+        worst_raw=worst_raw,
+    )
+    if higher_is_better:
+        HIGHER_IS_BETTER.add(name)
+    else:
+        HIGHER_IS_BETTER.discard(name)
 
 
 def _metric_to_minimize(key: str, value: float) -> float:
     """Convert a raw metric value to a minimize-is-better scalar."""
     direction = METRIC_DIRECTIONS.get(key)
-    if direction is None:
-        return value
-    return direction.to_minimize(value)
+    if direction is not None:
+        return direction.to_minimize(value)
+    # Historical extension point: a name added to HIGHER_IS_BETTER but not to
+    # METRIC_DIRECTIONS keeps the old `1 - value` behaviour.
+    if key in HIGHER_IS_BETTER:
+        return 1.0 - value
+    return value
+
+
+def worst_raw_value(key: str) -> float:
+    """Raw-space value representing the worst case for *key*.
+
+    This is what a *penalty injected before conversion* must use. Injecting a
+    minimize-space value there is the bug this function exists to prevent: a
+    flat raw penalty of 1.0 for ``log_gamma`` converts to ``-1.0``, which
+    beats a genuinely reported ``log_gamma`` of 0.5.
+    """
+    direction = METRIC_DIRECTIONS.get(key)
+    if direction is not None:
+        return direction.worst_raw
+    if key in HIGHER_IS_BETTER:
+        return 0.0
+    return FAILED_TRIAL_CAL_ERROR
 
 
 def worst_objective_value(key: str) -> float:
@@ -278,10 +351,7 @@ def worst_objective_value(key: str) -> float:
     Returned already converted, so callers must not pass it through
     :func:`_metric_to_minimize` again.
     """
-    direction = METRIC_DIRECTIONS.get(key)
-    if direction is None:
-        return FAILED_TRIAL_CAL_ERROR
-    return direction.worst_objective
+    return _metric_to_minimize(key, worst_raw_value(key))
 
 
 def compute_inference_time_per_dataset(
