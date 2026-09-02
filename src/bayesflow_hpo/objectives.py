@@ -663,7 +663,9 @@ def normalize_schema_entry(entry: str) -> str:
     order that run requested them.
 
     Pareto columns are returned unchanged -- there order IS meaning, because
-    Optuna addresses objectives by position.
+    Optuna addresses objectives by position: ``directions`` is a sequence, and
+    ``FrozenTrial.values`` is indexed positionally against it (Optuna docs,
+    ``optuna.study.create_study`` and ``optuna.trial.FrozenTrial``).
     """
     if not (entry.startswith("mean(") and entry.endswith(")")):
         return entry
@@ -672,8 +674,16 @@ def normalize_schema_entry(entry: str) -> str:
 
 
 def schema_matches(stored: list[str], current: list[str]) -> bool:
-    """Compare two objective schemas, tolerating mean-mode member order."""
+    """Compare two objective schemas, tolerating mean-mode member order.
+
+    A stored schema arrives from ``user_attrs``, which is caller-writable and
+    round-trips through JSON, so its members are checked rather than assumed
+    to be strings: a non-string member would otherwise raise ``AttributeError``
+    out of the normalizer instead of producing a clean refusal.
+    """
     if len(stored) != len(current):
+        return False
+    if not all(isinstance(e, str) for e in (*stored, *current)):
         return False
     return [normalize_schema_entry(e) for e in stored] == [
         normalize_schema_entry(e) for e in current

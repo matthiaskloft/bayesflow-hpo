@@ -430,6 +430,20 @@ class TestRoundEightFindings:
             ["mean(log_gamma+nrmse)", "inference_time"],
         )
 
+    def test_a_non_string_schema_member_refuses_rather_than_raising(self):
+        """`user_attrs` is caller-writable and round-trips through JSON.
+
+        Both callers type-check the outer container but not its members, so a
+        schema holding a number or a null reached the normalizer and raised
+        `AttributeError` instead of producing the guard's refusal.
+        """
+        from bayesflow_hpo.objectives import schema_matches
+
+        stored: list[str] = [1, "nrmse"]  # type: ignore[list-item]
+        assert not schema_matches(stored, ["log_gamma", "nrmse"])
+        current: list[str] = [None, "nrmse"]  # type: ignore[list-item]
+        assert not schema_matches(["log_gamma", "nrmse"], current)
+
     def test_a_populated_unstamped_study_without_schema_is_refused(self):
         """The refusal must not depend on the encoding stamp.
 

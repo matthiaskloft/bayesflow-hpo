@@ -658,18 +658,33 @@ def create_study(
             source_schema = list(source_schema)
         else:
             source_schema = None
-        if (
-            source_schema is not None
-            and metric_names is not None
-            and not schema_matches(source_schema, list(metric_names))
-        ):
-            raise ValueError(
-                f"Cannot warm-start from study "
-                f"{warm_start_from.study_name!r}: it stores objectives "
-                f"{source_schema!r}, but this run produces "
-                f"{list(metric_names)!r}. Its trials would be copied into "
-                "columns that mean something else."
-            )
+        # Scoped to `metric_names is not None` on purpose, mirroring
+        # `_guard_resumed_study`: a caller that declares no names is never
+        # checked against a schema, so a schema-less copy strands nothing.
+        if metric_names is not None:
+            if source_schema is None:
+                # Reaching here means the source HAS completed trials to copy
+                # (`will_copy`). Copying them leaves the target populated and
+                # unstamped -- the one state that guard refuses outright -- so
+                # accepting silently mutates a persistent target into
+                # something that can never be resumed.
+                raise ValueError(
+                    f"Cannot warm-start from study "
+                    f"{warm_start_from.study_name!r}: it holds completed "
+                    "trials but records no objective schema, so the metric "
+                    "behind each of its columns cannot be verified. Set that "
+                    "study's 'bayesflow_hpo_objective_schema' user attribute "
+                    "to the names it was actually run with, or start without "
+                    "a warm start."
+                )
+            if not schema_matches(source_schema, list(metric_names)):
+                raise ValueError(
+                    f"Cannot warm-start from study "
+                    f"{warm_start_from.study_name!r}: it stores objectives "
+                    f"{source_schema!r}, but this run produces "
+                    f"{list(metric_names)!r}. Its trials would be copied into "
+                    "columns that mean something else."
+                )
 
         warm_start_study(
             target_study=study,

@@ -640,3 +640,30 @@ class TestUnverifiableProvenance:
                 warm_start_from=source,
                 warm_start_top_k=1,
             )
+
+    def test_a_warm_start_source_with_no_schema_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        """A schema-less source must be rejected before its trials are copied.
+
+        The conflict check only fired when the source HAD a schema, so a
+        source with none fell through and its trials were copied. That leaves
+        the target populated and unstamped -- exactly the state
+        `_guard_resumed_study` refuses -- so a persistent target was mutated
+        into something that could never be resumed.
+        """
+        from bayesflow_hpo.optimization.study import create_study
+
+        source = self._study(tmp_path, with_trial=True)
+        source.set_user_attr(
+            "bayesflow_hpo_objective_encoding", OBJECTIVE_ENCODING_VERSION
+        )
+        with pytest.raises(ValueError, match="records no objective schema"):
+            create_study(
+                study_name="ws_no_schema",
+                directions=["minimize"] * 3,
+                metric_names=["log_gamma", "nrmse", "inference_time"],
+                storage=None,
+                warm_start_from=source,
+                warm_start_top_k=1,
+            )
