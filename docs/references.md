@@ -344,7 +344,14 @@ of the claim.
 
 **Optuna developers. (2025). `optuna.study.create_study` and
 `optuna.trial.FrozenTrial`.** Optuna 4.9.0 API reference.
-https://optuna.readthedocs.io/
+https://optuna.readthedocs.io/en/v4.9.0/reference/generated/optuna.study.create_study.html
+and
+https://optuna.readthedocs.io/en/v4.9.0/reference/generated/optuna.trial.FrozenTrial.html
+
+Version-pinned deliberately: the documentation root serves whichever release
+is current, so a claim checked against 4.9.0 would silently come to point at
+pages that may no longer say it. 4.9.0 is the version installed and verified
+against here.
 
 `directions` is a sequence and `FrozenTrial.values` is indexed positionally
 against it, so objective columns are matched by position and never by name.
