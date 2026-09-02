@@ -310,6 +310,19 @@ METRIC_DIRECTIONS: dict[str, MetricDirection] = {
 #: assumed compatible -- see :func:`bayesflow_hpo.api.optimize`.
 OBJECTIVE_ENCODING_VERSION = 2
 
+#: Metrics whose stored objective values actually changed at version 2.
+#:
+#: Recorded explicitly rather than derived from ``higher_is_better``, because
+#: that predicate is wrong here. Before this change the conversion was
+#: ``1 - value`` for the two names in the old ``HIGHER_IS_BETTER`` set and
+#: pass-through for everything else, so ``correlation`` and ``contraction``
+#: convert exactly as they always did and their stored values are unchanged.
+#: Only ``log_gamma`` moved -- from pass-through to negation. Using
+#: ``higher_is_better`` would refuse a resumable ``contraction`` study, which
+#: is a real objective metric, on the strength of a property that says nothing
+#: about whether its numbers moved.
+ENCODING_CHANGED_AT_V2: frozenset[str] = frozenset({"log_gamma"})
+
 #: Mutable set of higher-is-better metric names, kept as a live extension
 #: point rather than a derived view.
 #:

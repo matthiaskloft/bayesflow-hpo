@@ -10,8 +10,8 @@ import bayesflow as bf
 import optuna
 
 from bayesflow_hpo.objectives import (
+    ENCODING_CHANGED_AT_V2,
     OBJECTIVE_ENCODING_VERSION,
-    _direction_for,
 )
 from bayesflow_hpo.optimization.checkpoint_pool import CheckpointPool
 from bayesflow_hpo.optimization.constraints import (
@@ -714,11 +714,11 @@ def _guard_resumed_study(
         t.state == optuna.trial.TrialState.COMPLETE for t in study.trials
     )
     # Only metrics whose stored numbers changed make old trials incomparable.
-    sensitive = [
-        m for m in objective_metrics
-        if (_direction_for(m) or None) is not None
-        and _direction_for(m).higher_is_better
-    ]
+    # Read from an explicit record, not inferred from `higher_is_better`:
+    # `contraction` is higher-is-better AND a usable objective, but its
+    # conversion is identical to before this change, so inferring would refuse
+    # a study that is perfectly comparable.
+    sensitive = [m for m in objective_metrics if m in ENCODING_CHANGED_AT_V2]
     if has_trials and encoding is None and sensitive:
         raise ValueError(
             f"Study {study.study_name!r} holds trials written before objective "
@@ -728,9 +728,18 @@ def _guard_resumed_study(
             "Start a new study, or drop the affected metric from "
             "objective_metrics."
         )
-    study.set_user_attr(
-        "bayesflow_hpo_objective_encoding", OBJECTIVE_ENCODING_VERSION
-    )
+    if not has_trials:
+        # Stamp ONLY a study with nothing in it yet. The stamp asserts "every
+        # trial here was written by this encoding", and stamping a study that
+        # already holds pre-encoding trials would make that assertion false --
+        # a legacy study resumed once with an unaffected metric would be
+        # marked compatible, and a later resume with `log_gamma` would then
+        # sail past this guard and mix encodings after all. Leaving it
+        # unstamped costs nothing: the check below re-evaluates against
+        # whichever metrics are actually in use each time.
+        study.set_user_attr(
+            "bayesflow_hpo_objective_encoding", OBJECTIVE_ENCODING_VERSION
+        )
 
 
 def _derive_directions(

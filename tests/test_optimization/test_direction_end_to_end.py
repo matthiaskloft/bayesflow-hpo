@@ -332,3 +332,37 @@ def test_a_legacy_set_addition_still_flips_a_registered_lower_metric() -> None:
     finally:
         HIGHER_IS_BETTER.discard("rmse")
     assert _metric_to_minimize("rmse", 0.8) == pytest.approx(0.8)
+
+
+def test_contraction_studies_still_resume(tmp_path) -> None:
+    """A false refusal is a real cost, not a safe default.
+
+    `contraction` is higher-is-better AND a usable objective, but its
+    conversion (`1 - value`) is identical to before this change, so its stored
+    values never moved. Inferring encoding-sensitivity from `higher_is_better`
+    would refuse a study that is perfectly comparable and force the user to
+    throw away completed trials for nothing. Only `log_gamma` actually
+    changed.
+    """
+    url = "sqlite:///" + str(tmp_path / "c.db").replace("\\", "/")
+    study = optuna.create_study(
+        study_name="c", storage=url, directions=["minimize"] * 3
+    )
+    study.add_trial(
+        optuna.trial.create_trial(
+            params={}, distributions={}, values=[0.2, 0.3, 0.5]
+        )
+    )
+    resumed = optuna.create_study(
+        study_name="c", storage=url,
+        directions=["minimize"] * 3, load_if_exists=True,
+    )
+    _guard_resumed_study(resumed, ["contraction", "nrmse"])
+
+    # And passing it must NOT have stamped the study. The stamp asserts every
+    # trial was written by this encoding; these were not. Stamping here would
+    # let a later `log_gamma` resume sail past the guard -- which is exactly
+    # what this assertion caught the first time it was written.
+    assert "bayesflow_hpo_objective_encoding" not in resumed.user_attrs
+    with pytest.raises(ValueError, match="opposite scales"):
+        _guard_resumed_study(resumed, ["log_gamma", "nrmse"])
