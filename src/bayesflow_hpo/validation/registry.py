@@ -41,8 +41,9 @@ MetricFn = Callable[[np.ndarray, np.ndarray], dict[str, float]]
 
 #: A metric name that has been through :func:`canonical_metric_name`.
 #:
-#: Distinct from ``str`` at type-check time only -- at runtime it IS a plain
-#: string, with no wrapper and no cost. Its purpose is to make one specific
+#: Distinct from ``str`` at type-check time only: the constructor returns its
+#: argument unchanged, so the value is a plain ``str`` with no wrapper class
+#: (PEP 484 "NewType"; `typing.NewType`). Its purpose is to make one specific
 #: mistake unrepresentable: a name normalized at one site and read
 #: un-normalized at another. That mistake is silent every time, because the
 #: lookup simply misses and a worst-case penalty stands in for the real

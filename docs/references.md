@@ -12,6 +12,9 @@ Feature implementations and their backing references.
 | Feature | Module | Reference |
 |---------|--------|-----------|
 | Optuna framework | `optimization/study.py` | Akiba et al. (2019) |
+| Objective column ordering | `objectives.py` | Optuna 4.9.0 docs |
+| `CanonicalMetricName` type | `validation/registry.py` | PEP 484 |
+| `RawScore` / `MinimizeScore` types | `objectives.py` | PEP 484 |
 | TPE sampler preset | `optimization/study.py` | Bergstra et al. (2011) |
 | BoTorch / GP sampler preset | `optimization/study.py` | Balandat et al. (2020) |
 | qEHVI acquisition | `optimization/study.py` | Daulton et al. (2020) |
@@ -322,3 +325,29 @@ schedule used by `open_ended` training mode. OpenAlex candidate
 therefore not used as the bibliographic record. The cited 2017 arXiv DOI,
 authors, and Section 5.3 were verified directly against the full text because
 OpenAlex did not return a correctly mapped work for that DOI.
+
+### Specification and library documentation
+
+Not research works, so these carry no OpenAlex record and are cited by
+specification rather than DOI.
+
+**van Rossum, G., Lehtosalo, J., & Langa, Ł. (2014). PEP 484 -- Type hints.**
+Python Enhancement Proposals. https://peps.python.org/pep-0484/
+
+The "NewType" section defines a helper that a type checker treats as a
+distinct subtype while, at runtime, the callable returns its argument
+unchanged. This backs the claim in `validation/registry.py` and `objectives.py`
+that `CanonicalMetricName`, `RawScore` and `MinimizeScore` cost no wrapper
+object: the stored values are a plain `str` and plain `float`s. Verified
+directly by construction, since the runtime behaviour is the load-bearing part
+of the claim.
+
+**Optuna developers. (2025). `optuna.study.create_study` and
+`optuna.trial.FrozenTrial`.** Optuna 4.9.0 API reference.
+https://optuna.readthedocs.io/
+
+`directions` is a sequence and `FrozenTrial.values` is indexed positionally
+against it, so objective columns are matched by position and never by name.
+This backs the resume-guard schema comparison in `objectives.py`
+(`normalize_schema_entry`, `schema_matches`) and the ordering claim recorded
+with `MinimizeScore`.

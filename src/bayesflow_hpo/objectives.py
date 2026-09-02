@@ -35,7 +35,8 @@ import numpy as np
 #: metric.
 #:
 #: Distinct from :data:`MinimizeScore` at type-check time only; both are plain
-#: floats at runtime. The pair exists because the two spaces are
+#: floats at runtime, since a `NewType` constructor returns its argument
+#: unchanged (PEP 484 "NewType"). The pair exists because the two spaces are
 #: indistinguishable by inspection and mixing them is silent: the round-2 P1
 #: on PR #72 fed a minimize-space penalty into a slot consumed BEFORE
 #: conversion, so a flat 1.0 for `log_gamma` became -1.0 and a trial that
@@ -44,8 +45,11 @@ import numpy as np
 RawScore = NewType("RawScore", float)
 
 #: A metric value already converted so that lower is better, ready to hand to
-#: Optuna. Must never be passed through :func:`_metric_to_minimize` again --
-#: double conversion re-inverts every higher-is-better metric.
+#: Optuna, which minimizes every objective declared ``minimize`` and compares
+#: them positionally (Optuna 4.9.0, `optuna.study.create_study`).
+#:
+#: Must never be passed through :func:`_metric_to_minimize` again -- double
+#: conversion re-inverts every higher-is-better metric.
 MinimizeScore = NewType("MinimizeScore", float)
 
 _V = TypeVar("_V")
