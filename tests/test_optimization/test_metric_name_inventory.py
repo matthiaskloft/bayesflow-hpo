@@ -382,16 +382,30 @@ class TestRoundEightFindings:
         Only the frozen audited list can exempt a metric.
         """
         from bayesflow_hpo.api import _encoding_sensitive
-        from bayesflow_hpo.validation.registry import register_metric
+        from bayesflow_hpo.validation import registry
 
-        register_metric(
-            "custom_for_encoding_test",
-            lambda draws, true_values: {"custom_for_encoding_test": 0.0},
+        name = "custom_for_encoding_test"
+        registry.register_metric(
+            name,
+            lambda draws, true_values: {name: 0.0},
+            description="Test-only metric.",
             overwrite=True,
         )
-        assert _encoding_sensitive("custom_for_encoding_test")
-        assert _encoding_sensitive("log_gamma")
-        assert not _encoding_sensitive("nrmse")
+        try:
+            assert _encoding_sensitive(name)
+            assert _encoding_sensitive("log_gamma")
+            assert not _encoding_sensitive("nrmse")
+        finally:
+            # The registry is process-global and exposes no removal API, so
+            # the private tables are the only way to undo this. Leaving the
+            # entry behind broke an unrelated test that asserts every
+            # registered metric is a documented built-in.
+            for table in (
+                registry._REGISTRY,
+                registry._DESCRIPTIONS,
+                registry._KINDS,
+            ):
+                table.pop(name, None)
 
     def test_the_audited_sets_partition_the_builtins(self):
         """Neither set may drift from the registry without someone noticing."""
