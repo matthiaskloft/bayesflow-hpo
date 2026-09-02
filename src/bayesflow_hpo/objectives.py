@@ -381,6 +381,15 @@ def register_metric_direction(
     """
     if to_minimize is None:
         to_minimize = (lambda v: 1.0 - v) if higher_is_better else (lambda v: v)
+    # Register under the canonical spelling. `optimize()` canonicalizes the
+    # objective name, so a direction stored under an alias was never found:
+    # `register_metric_direction("cal_error", higher_is_better=True)` left
+    # `_direction_for("calibration_error")` returning the built-in
+    # lower-is-better conversion, with nothing raised. The import is local
+    # because the registry imports this module.
+    from bayesflow_hpo.validation.registry import canonical_metric_name
+
+    name = canonical_metric_name(name)
     METRIC_DIRECTIONS[name] = MetricDirection(
         higher_is_better=higher_is_better,
         to_minimize=to_minimize,

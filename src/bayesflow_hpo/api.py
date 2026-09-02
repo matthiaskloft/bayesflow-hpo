@@ -480,6 +480,12 @@ def optimize(
             "instance. Soft constraints are only auto-wired for sampler presets; "
             "skipping soft constraints."
         )
+        # The warning said "skipping", but the specs still reached
+        # ObjectiveConfig, so `_constraint_metric_names()` made final
+        # validation compute every metric behind them -- work no sampler
+        # consumes, and a failure path for an optional or custom metric that
+        # should have been irrelevant here.
+        metric_constraints_soft = None
 
     # Step 4: Build objective
     objective = _build_objective(
@@ -672,6 +678,55 @@ def _build_objective(
     )
 
 
+def _normalize_schema_entry(entry: str) -> str:
+    """Put a ``mean(...)`` column into a canonical, order-independent form.
+
+    Mean mode stores a single arithmetic mean, so the order of the metrics
+    inside the name carries no meaning and two spellings of the same objective
+    must compare equal. Sorting only at construction would not be enough: a
+    study stamped by an earlier build holds the members in whatever order that
+    run requested them, and would then be refused on resume.
+
+    Pareto columns are returned unchanged -- there order IS meaning, because
+    Optuna addresses objectives by position.
+    """
+    if not (entry.startswith("mean(") and entry.endswith(")")):
+        return entry
+    members = entry[len("mean(") : -1].split("+")
+    return "mean(" + "+".join(sorted(members)) + ")"
+
+
+def _schema_matches(stored: list[str], current: list[str]) -> bool:
+    """Compare two objective schemas, tolerating mean-mode member order."""
+    if len(stored) != len(current):
+        return False
+    return [_normalize_schema_entry(e) for e in stored] == [
+        _normalize_schema_entry(e) for e in current
+    ]
+
+
+def _encoding_sensitive(metric: str) -> bool:
+    """Did *metric*'s stored numbers change at objective encoding 2?
+
+    ``ENCODING_CHANGED_AT_V2`` lists the registered metrics whose values moved.
+    It cannot list a custom metric supplied through a caller's ``validate_fn``,
+    and those moved too: an unregistered name's failure and missing-value
+    penalty went from a finite ``1.0`` to ``+inf``. Resuming an unstamped study
+    with such a metric therefore leaves old failures able to dominate valid new
+    values above 1, which is the inversion this guard exists to prevent.
+
+    So membership of the set is not the question -- provable *absence* of
+    change is. A registered metric outside the set is known unchanged, because
+    ``TestEncodingChangeSetIsDerived`` recomputes that set from the pre-change
+    rule. Anything else is treated as changed.
+    """
+    from bayesflow_hpo.validation.registry import list_metrics
+
+    if metric in ENCODING_CHANGED_AT_V2:
+        return True
+    return metric not in set(list_metrics())
+
+
 def _guard_resumed_study(
     study: optuna.Study,
     objective_metrics: list[str],
@@ -751,7 +806,7 @@ def _guard_resumed_study(
     if (
         metric_names is not None
         and stored_schema is not None
-        and list(stored_schema) != list(metric_names)
+        and not _schema_matches(list(stored_schema), list(metric_names))
     ):
         raise ValueError(
             f"Study {study.study_name!r} stores objectives "
@@ -788,23 +843,37 @@ def _guard_resumed_study(
     # `contraction` is higher-is-better AND a usable objective, but its
     # conversion is identical to before this change, so inferring would refuse
     # a study that is perfectly comparable.
-    sensitive = [m for m in objective_metrics if m in ENCODING_CHANGED_AT_V2]
+    sensitive = [m for m in objective_metrics if _encoding_sensitive(m)]
     # ANY encoding that is not the current one, not merely a missing one. An
     # older version, a future version written by a newer build, and a
     # malformed caller-written value are all "provenance I cannot verify",
     # and checking `encoding is None` waved the latter two straight through.
-    if has_trials and encoding != OBJECTIVE_ENCODING_VERSION and sensitive:
+    # `ENCODING_CHANGED_AT_V2` establishes compatibility between the legacy
+    # encoding and version 2, and says nothing about any other version. An
+    # unrecognized encoding -- a future build's, or a malformed caller-written
+    # value -- therefore cannot exempt any metric, however unaffected it was
+    # by the v2 change.
+    unverifiable = encoding is not None and encoding != OBJECTIVE_ENCODING_VERSION
+    if has_trials and encoding != OBJECTIVE_ENCODING_VERSION and (
+        sensitive or unverifiable
+    ):
         described = (
             "before objective values were normalized to minimize-is-better"
             if encoding is None
             else f"under objective encoding {encoding!r}"
         )
+        reason = (
+            f"this run optimizes {sensitive!r}, whose stored values changed "
+            f"at encoding {OBJECTIVE_ENCODING_VERSION}"
+            if sensitive
+            else "that encoding is not one this version can reason about, so "
+            "no metric can be assumed comparable"
+        )
         raise ValueError(
             f"Study {study.study_name!r} holds trials written {described}, "
-            f"and this run optimizes {sensitive!r}, whose stored values "
-            f"changed at encoding {OBJECTIVE_ENCODING_VERSION}. Old and new "
-            "trials would sit on different scales in one Pareto front. Start "
-            "a new study, or drop the affected metric from objective_metrics."
+            f"and {reason}. Old and new trials would sit on different scales "
+            "in one Pareto front. Start a new study, or drop the affected "
+            "metric from objective_metrics."
         )
     if encoding == OBJECTIVE_ENCODING_VERSION:
         if has_trials and metric_names is not None and stored_schema is None:
@@ -893,7 +962,13 @@ def _derive_directions(
     if objective_mode == "pareto":
         metric_names = list(objective_metrics) + [cost_metric]
     else:
-        metric_names = ["mean(" + "+".join(objective_metrics) + ")", cost_metric]
+        # Sorted because the mean is commutative: the column holds one
+        # arithmetic mean, so `mean(nrmse+log_gamma)` and
+        # `mean(log_gamma+nrmse)` are the same objective and must compare
+        # equal on resume. Order stays significant for pareto mode, where
+        # each metric owns a column.
+        joined = "+".join(sorted(objective_metrics))
+        metric_names = [f"mean({joined})", cost_metric]
 
     return directions, metric_names
 

@@ -234,3 +234,88 @@ def test_soft_constraint_specs_are_canonicalized():
     """Soft constraints reach ObjectiveConfig now, so they join the inventory."""
     cfg = _config(metric_constraints_soft=[(_ALIAS, 0.1, "below")])
     assert cfg.metric_constraints_soft == [(_CANONICAL, 0.1, "below")]
+
+
+class TestRoundSevenFindings:
+    """Regressions for the round-7 review findings, each reproduced first."""
+
+    def test_a_direction_registered_under_an_alias_is_found(self):
+        """The seventh instance of the canonicalization defect.
+
+        `optimize()` canonicalizes the objective name, so a direction stored
+        under the alias was never consulted: the built-in lower-is-better
+        conversion applied instead, silently, inverting the search for a
+        metric the caller had just declared higher-is-better.
+        """
+        from bayesflow_hpo.objectives import (
+            HIGHER_IS_BETTER,
+            METRIC_DIRECTIONS,
+            _direction_for,
+            register_metric_direction,
+        )
+
+        saved = METRIC_DIRECTIONS.get(_CANONICAL), _CANONICAL in HIGHER_IS_BETTER
+        try:
+            register_metric_direction(_ALIAS, higher_is_better=True, worst_raw=0.0)
+            assert _ALIAS not in METRIC_DIRECTIONS
+            assert METRIC_DIRECTIONS[_CANONICAL].higher_is_better
+            direction = _direction_for(_CANONICAL)
+            assert direction is not None and direction.higher_is_better
+        finally:
+            if saved[0] is not None:
+                METRIC_DIRECTIONS[_CANONICAL] = saved[0]
+            else:
+                METRIC_DIRECTIONS.pop(_CANONICAL, None)
+            if saved[1]:
+                HIGHER_IS_BETTER.add(_CANONICAL)
+            else:
+                HIGHER_IS_BETTER.discard(_CANONICAL)
+
+    def test_a_constraint_on_an_output_key_computes_its_producer(self):
+        """A constraint names an output key, not the metric behind it.
+
+        `coverage_left` emits `left_coverage_90`; that key is not itself
+        registered, so filtering the pipeline list on registered names dropped
+        the producer. Nothing computed the key, and neither constraint path
+        complains -- the hard path skips a missing key, the soft path reads it
+        as zero violation.
+        """
+        from bayesflow_hpo.optimization.objective import _pipeline_metrics
+        from bayesflow_hpo.validation.registry import producer_for_key
+
+        assert producer_for_key("left_coverage_90") == "coverage_left"
+        assert producer_for_key("mean_abs_z_score") == "z_score"
+        assert producer_for_key("nrmse") == "nrmse"
+        assert producer_for_key("not_a_metric_key") is None
+
+        computed = _pipeline_metrics([_CANONICAL, "nrmse"], ["left_coverage_90"])
+        assert "coverage_left" in computed
+
+    def test_a_custom_objective_counts_as_encoding_sensitive(self):
+        """`ENCODING_CHANGED_AT_V2` cannot list a caller's own metric.
+
+        An unregistered name's penalty moved from a finite 1.0 to +inf, so a
+        legacy custom objective is exactly as incomparable as `log_gamma` --
+        but membership of a fixed set can never say so. The question is
+        provable absence of change, not presence in the list.
+        """
+        from bayesflow_hpo.api import _encoding_sensitive
+
+        assert _encoding_sensitive("log_gamma")
+        assert _encoding_sensitive("my_custom_metric")
+        assert not _encoding_sensitive("nrmse")
+        assert not _encoding_sensitive(_CANONICAL)
+
+    def test_mean_mode_schemas_ignore_member_order(self):
+        """Mean mode stores one average, so the member order is not meaning."""
+        from bayesflow_hpo.api import _schema_matches
+
+        assert _schema_matches(
+            ["mean(nrmse+log_gamma)", "inference_time"],
+            ["mean(log_gamma+nrmse)", "inference_time"],
+        )
+        # Pareto columns keep their order: Optuna addresses them by position.
+        assert not _schema_matches(
+            ["log_gamma", "nrmse", "t"], ["nrmse", "log_gamma", "t"]
+        )
+        assert not _schema_matches(["mean(a+b)", "t"], ["mean(a+c)", "t"])

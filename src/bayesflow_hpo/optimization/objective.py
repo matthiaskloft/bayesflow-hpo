@@ -708,13 +708,23 @@ def _pipeline_metrics(
     through the registry and would raise; they behave as before, falling to a
     penalty.
     """
-    from bayesflow_hpo.validation.registry import DEFAULT_METRICS, list_metrics
+    from bayesflow_hpo.validation.registry import (
+        DEFAULT_METRICS,
+        producer_for_key,
+    )
 
-    known = set(list_metrics())
     names = list(DEFAULT_METRICS)
     for metric in list(objective_metrics) + list(constraint_metrics):
-        if metric in known and metric not in names:
-            names.append(metric)
+        # A constraint names an output KEY, which for a multi-output
+        # diagnostic is not the metric that produces it: constraining
+        # `left_coverage_90` needs `coverage_left` in the pipeline. Filtering
+        # on registered names alone dropped the producer, so nothing computed
+        # the key -- and neither constraint path complains, because the hard
+        # path skips a missing key and the soft path reads it as zero
+        # violation.
+        producer = producer_for_key(metric)
+        if producer is not None and producer not in names:
+            names.append(producer)
     return names
 
 
