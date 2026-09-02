@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import logging
 import warnings
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any
 
 import optuna
@@ -244,7 +244,7 @@ def _resolve_sampler(
 
     def _make_auto() -> optuna.samplers.BaseSampler:
         try:
-            from optuna.samplers import AutoSampler
+            from optuna.samplers import AutoSampler  # type: ignore[attr-defined]
         except ImportError:
             raise ImportError(
                 'Sampler preset "auto" requires a newer version of Optuna '
@@ -425,7 +425,9 @@ class QMCWarmupSampler(optuna.samplers.BaseSampler):
         study: optuna.Study,
         trial: optuna.trial.FrozenTrial,
         state: optuna.trial.TrialState,
-        values: list[float] | None,
+        # BaseSampler promises Sequence[float]; narrowing to list would break
+        # on any sequence Optuna chooses to pass.
+        values: Sequence[float] | None,
     ) -> None:
         was_qmc_trial = trial.number in self._pending_qmc_trials
         if was_qmc_trial:
@@ -614,11 +616,11 @@ def create_study(
     # so neither the check nor the encoding propagation below applies:
     # `warm_start_top_k=0` is explicitly supported by `max(0, int(top_k))`,
     # and a source with no COMPLETE trials has nothing to give either.
-    will_copy = warm_start_from is not None and warm_start_top_k > 0 and any(
+    will_copy = warm_start_top_k > 0 and warm_start_from is not None and any(
         t.state == TrialState.COMPLETE and t.values is not None
         for t in warm_start_from.trials
     )
-    if will_copy and len(study.trials) == 0:
+    if warm_start_from is not None and will_copy and len(study.trials) == 0:
         # Provenance is validated BEFORE any trial is copied. Copied values
         # carry both their encoding and the metric behind each column, so a
         # target that inherits the encoding alone looks verified while its

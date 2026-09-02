@@ -28,7 +28,7 @@ import numbers
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import bayesflow as bf
 import optuna
@@ -212,7 +212,9 @@ def _normalize_warmup_spec(
     """Validate a fixed or categorical warmup configuration."""
     if value is None:
         return default
-    if isinstance(value, numbers.Integral) and not isinstance(value, bool):
+    if isinstance(value, bool):
+        raise TypeError(f"{name} must be an int, a sequence of ints, or None.")
+    if isinstance(value, (int, numbers.Integral)):
         return int(value)
     if isinstance(value, (str, bytes)):
         raise TypeError(f"{name} must be an int, a sequence of ints, or None.")
@@ -252,7 +254,13 @@ def _normalize_warmup_fraction_spec(
     """Validate a fixed or categorical warmup fraction in [0, 0.1]."""
     if value is None:
         return default
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
+    values: tuple[float, ...]
+    if isinstance(value, bool):
+        raise TypeError(
+            "lr_warmup_fraction must be a number, a sequence of numbers, "
+            "or None."
+        )
+    if isinstance(value, (int, float)):
         values = (float(value),)
         scalar = True
     elif isinstance(value, (str, bytes)):
@@ -441,7 +449,7 @@ class ObjectiveConfig:
     train_fn: TrainFn | None = None
     validate_fn: ValidateFn | None = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         validate_objective_metric_kinds(self.objective_metrics)
         # Canonicalize aliases HERE, once, so every downstream consumer agrees
         # on the key. They did not: `list_metrics()` returns canonical names,
@@ -1041,7 +1049,7 @@ class GenericObjective:
             warmup_steps = _sample_warmup_spec(
                 trial,
                 "lr_warmup_steps",
-                config.lr_warmup_steps,
+                cast(int | tuple[int, ...], config.lr_warmup_steps),
             )
         elif "lr_warmup_epochs" in params:
             warmup_epochs = int(params["lr_warmup_epochs"])
@@ -1050,7 +1058,7 @@ class GenericObjective:
             warmup_epochs = _sample_warmup_spec(
                 trial,
                 "lr_warmup_epochs",
-                config.lr_warmup_epochs,
+                cast(int | tuple[int, ...], config.lr_warmup_epochs),
             )
             warmup_steps = warmup_epochs * num_batches
         else:
@@ -1065,7 +1073,7 @@ class GenericObjective:
                     raise TypeError("Fixed-budget training requires a warmup fraction.")
                 warmup_fraction = _sample_warmup_fraction(
                     trial,
-                    config.lr_warmup_fraction,
+                    cast(float | tuple[float, ...], config.lr_warmup_fraction),
                 )
             warmup_steps = round(warmup_fraction * epochs * num_batches)
         minimum_warmup = 0 if config.training_mode == "fixed_budget" else 1
