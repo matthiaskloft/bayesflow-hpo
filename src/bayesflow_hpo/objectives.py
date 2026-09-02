@@ -366,6 +366,17 @@ def register_metric_direction(
         HIGHER_IS_BETTER.discard(name)
 
 
+# Worst raw value for a metric known only through the legacy
+# `HIGHER_IS_BETTER` set. Set membership says the direction and nothing about
+# the scale, so no finite constant is safe: with `worst_raw=0.0` a missing
+# metric scored 1.0 while a reported -0.5 scored 1.5, and failing to report
+# outranked reporting a bad value. That is the same inversion fixed for
+# `correlation` by giving it `worst_raw=-1.0`; a registered metric can state
+# its range, an unregistered one cannot, so this stays unbounded. Converts to
+# +inf under `1 - value`, which is worst for any real reported value.
+_LEGACY_WORST_RAW = -math.inf
+
+
 def _direction_for(key: str) -> MetricDirection | None:
     """Resolve a metric's direction, honouring both compatibility mutations.
 
@@ -391,7 +402,7 @@ def _direction_for(key: str) -> MetricDirection | None:
             return MetricDirection(
                 higher_is_better=True,
                 to_minimize=lambda v: 1.0 - v,
-                worst_raw=0.0,
+                worst_raw=_LEGACY_WORST_RAW,
             )
         return direction
     if key in HIGHER_IS_BETTER:
@@ -399,7 +410,7 @@ def _direction_for(key: str) -> MetricDirection | None:
         return MetricDirection(
             higher_is_better=True,
             to_minimize=lambda v: 1.0 - v,
-            worst_raw=0.0,
+            worst_raw=_LEGACY_WORST_RAW,
         )
     return None
 

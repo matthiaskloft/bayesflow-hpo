@@ -670,15 +670,23 @@ def _build_objective(
 
 
 def _guard_resumed_study(
-    study: optuna.Study, objective_metrics: list[str]
+    study: optuna.Study,
+    objective_metrics: list[str],
+    metric_names: list[str] | None = None,
 ) -> None:
-    """Refuse to continue a study whose stored values use another encoding.
+    """Refuse to continue a study whose stored values mean something else.
 
-    Two hazards, both silent, and both specific to *resuming*.
+    Three hazards, all silent, and all specific to *resuming*.
 
     Optuna's ``create_study(load_if_exists=True)`` returns the stored study and
-    keeps ITS directions, ignoring the ones requested here -- verified, not
-    assumed. So a study created before objective values became minimize-space
+    keeps ITS directions, ignoring the ones requested here. This is documented,
+    not inferred: ``optuna.create_study`` says of ``load_if_exists`` that where
+    a study of that name already exists in the storage, "the creation of the
+    study is skipped, and the existing one is returned" (Optuna 4.9.0
+    docstring; https://optuna.readthedocs.io/en/stable/reference/generated/
+    optuna.create_study.html). Nothing reconciles the requested ``directions``
+    with the stored ones. So a study created before objective values became
+    minimize-space
     retains its ``maximize`` direction, never reaches
     :func:`_derive_directions` (the caller passes ``directions=None``), and
     then maximizes the newly negated values: the search would prefer the worst
@@ -689,7 +697,15 @@ def _guard_resumed_study(
     opposite scales. The sampler and the Pareto computation would compare them
     directly.
 
-    Neither is repairable in place, so both refuse rather than warn.
+    Thirdly, the encoding stamp says *how* values were encoded but nothing
+    about *which* metric produced each column. Two runs with the same number
+    of objectives but a different metric list -- or the same list in a
+    different order -- write into the same columns, and the Pareto front then
+    compares one metric against another. Both reviewers raised this
+    independently, and ``metric_names`` already carries the whole schema:
+    metric order, the ``objective_mode`` wrapper, and the cost metric.
+
+    None of the three is repairable in place, so all refuse rather than warn.
 
     Parameters
     ----------
@@ -697,13 +713,18 @@ def _guard_resumed_study(
         The study just created or loaded.
     objective_metrics
         Canonical objective metric names for this run.
+    metric_names
+        Ordered names of the study's objective columns, as built by
+        :func:`_derive_directions`. Recorded on a fresh study and compared on
+        a resumed one. ``None`` skips the schema check, for callers that have
+        not derived them.
 
     Raises
     ------
     ValueError
-        If the study carries a non-minimize direction, or holds trials written
+        If the study carries a non-minimize direction, holds trials written
         under an older objective encoding while an encoding-sensitive metric
-        is in use.
+        is in use, or was built for a different objective schema.
     """
     if any(d != optuna.study.StudyDirection.MINIMIZE for d in study.directions):
         raise ValueError(
@@ -715,8 +736,38 @@ def _guard_resumed_study(
             "model. Start a new study."
         )
 
+    # The schema check runs BEFORE the encoding early-return: a study can be
+    # correctly encoded and still have its columns mean different metrics.
+    # `user_attrs` is caller-writable and round-trips through JSON, so the
+    # stored value is checked for type rather than assumed to be a name list.
+    # Anything else is treated as absent: refusing on an unrecognized value
+    # would block a study over something this guard cannot interpret.
+    stored_schema = study.user_attrs.get("bayesflow_hpo_objective_schema")
+    if not isinstance(stored_schema, (list, tuple)):
+        stored_schema = None
+    if (
+        metric_names is not None
+        and stored_schema is not None
+        and list(stored_schema) != list(metric_names)
+    ):
+        raise ValueError(
+            f"Study {study.study_name!r} stores objectives "
+            f"{list(stored_schema)!r}, but this run produces "
+            f"{list(metric_names)!r}. Optuna addresses objectives by position, "
+            "so continuing would compare one metric against another in the "
+            "same column. Start a new study, or restore the original "
+            "objective_metrics, objective_mode and cost_metric."
+        )
+
     encoding = study.user_attrs.get("bayesflow_hpo_objective_encoding")
     if encoding == OBJECTIVE_ENCODING_VERSION:
+        if metric_names is not None and stored_schema is None:
+            # Stamped before schemas were recorded. Nothing to compare
+            # against, so record it now rather than leaving the next resume
+            # equally blind.
+            study.set_user_attr(
+                "bayesflow_hpo_objective_schema", list(metric_names)
+            )
         return
 
     # COMPLETE trials hold stored objective values. RUNNING and WAITING ones
@@ -762,6 +813,10 @@ def _guard_resumed_study(
         # sail past this guard and mix encodings after all. Leaving it
         # unstamped costs nothing: the check below re-evaluates against
         # whichever metrics are actually in use each time.
+        if metric_names is not None:
+            study.set_user_attr(
+                "bayesflow_hpo_objective_schema", list(metric_names)
+            )
         study.set_user_attr(
             "bayesflow_hpo_objective_encoding", OBJECTIVE_ENCODING_VERSION
         )
@@ -862,7 +917,9 @@ def _create_and_run_study(
         warm_start_top_k=warm_start_top_k,
         qmc_startup_trials=qmc_startup_trials,
     )
-    _guard_resumed_study(study, objective.config.objective_metrics)
+    _guard_resumed_study(
+        study, objective.config.objective_metrics, metric_names
+    )
 
     # Auto-detect n_startup_trials from sampler if not set explicitly.
     cfg = objective.config

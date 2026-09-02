@@ -13,6 +13,16 @@ better calibrated than another, and assert the study selects it. Any remaining
 inversion anywhere in that chain fails them, whether or not anyone thought of
 the path.
 
+Sources for the claims asserted here. The `log_gamma` direction is
+BayesFlow's: `calibration_log_gamma` documents the statistic as
+`log(gamma/gamma_null)` with `log_gamma < 0` rejecting rank uniformity at the
+5% level, so larger is better -- see Modrak et al. (2025), *Bayesian Analysis*
+20(2), 461-488, recorded in `docs/references.md`. The ranking claims are
+Optuna's: it minimizes every objective whose direction is `minimize`, and
+`create_study(load_if_exists=True)` returns the stored study rather than
+adopting the directions passed to it (Optuna 4.9.0 docstring), which is why
+`TestResumeGuards` exists at all.
+
 They deliberately do **not** assert intermediate values. A test that checks
 ``_metric_to_minimize`` returns ``-1.5`` passes even when a later stage flips
 the sign back; only the selected trial answers the question the user actually
@@ -23,6 +33,7 @@ from __future__ import annotations
 
 import math
 import os
+from pathlib import Path
 
 os.environ.setdefault("KERAS_BACKEND", "torch")
 
@@ -244,7 +255,9 @@ def test_infinite_penalties_do_not_break_the_sampler() -> None:
 class TestResumeGuards:
     """Resuming is where the encoding change bites, and it bites silently."""
 
-    def _study(self, tmp_path, directions: list[str], *, with_trial: bool):
+    def _study(
+        self, tmp_path: Path, directions: list[str], *, with_trial: bool
+    ) -> optuna.Study:
         import optuna as _optuna
 
         url = "sqlite:///" + str(tmp_path / "s.db").replace("\\", "/")
@@ -262,7 +275,7 @@ class TestResumeGuards:
             directions=["minimize"] * 3, load_if_exists=True,
         )
 
-    def test_optuna_keeps_the_stored_directions_on_load(self, tmp_path) -> None:
+    def test_optuna_keeps_the_stored_directions_on_load(self, tmp_path: Path) -> None:
         """The premise of the guard, asserted rather than assumed.
 
         `create_study(load_if_exists=True)` does not adopt the directions
@@ -274,7 +287,7 @@ class TestResumeGuards:
         )
         assert study.directions[0] == optuna.study.StudyDirection.MAXIMIZE
 
-    def test_a_maximize_study_is_refused(self, tmp_path) -> None:
+    def test_a_maximize_study_is_refused(self, tmp_path: Path) -> None:
         study = self._study(
             tmp_path, ["maximize", "minimize", "minimize"], with_trial=False
         )
@@ -282,7 +295,7 @@ class TestResumeGuards:
             _guard_resumed_study(study, ["log_gamma", "nrmse"])
 
     def test_pre_encoding_trials_are_refused_for_a_flipped_metric(
-        self, tmp_path
+        self, tmp_path: Path
     ) -> None:
         """Old raw log_gamma and new negated log_gamma cannot share a front."""
         study = self._study(
@@ -292,21 +305,21 @@ class TestResumeGuards:
             _guard_resumed_study(study, ["log_gamma", "nrmse"])
 
     def test_pre_encoding_trials_are_fine_when_no_metric_flipped(
-        self, tmp_path
+        self, tmp_path: Path
     ) -> None:
         """`calibration_error` and `nrmse` store the same numbers as before,
         so an old study stays comparable and must not be refused."""
         study = self._study(tmp_path, ["minimize"] * 3, with_trial=True)
         _guard_resumed_study(study, ["calibration_error", "nrmse"])
 
-    def test_a_stamped_study_resumes(self, tmp_path) -> None:
+    def test_a_stamped_study_resumes(self, tmp_path: Path) -> None:
         study = self._study(tmp_path, ["minimize"] * 3, with_trial=True)
         study.set_user_attr(
             "bayesflow_hpo_objective_encoding", OBJECTIVE_ENCODING_VERSION
         )
         _guard_resumed_study(study, ["log_gamma", "nrmse"])
 
-    def test_a_fresh_study_is_stamped(self, tmp_path) -> None:
+    def test_a_fresh_study_is_stamped(self, tmp_path: Path) -> None:
         study = self._study(tmp_path, ["minimize"] * 3, with_trial=False)
         _guard_resumed_study(study, ["log_gamma", "nrmse"])
         assert (
@@ -314,7 +327,7 @@ class TestResumeGuards:
             == OBJECTIVE_ENCODING_VERSION
         )
 
-    def test_an_in_flight_trial_blocks_the_stamp(self, tmp_path) -> None:
+    def test_an_in_flight_trial_blocks_the_stamp(self, tmp_path: Path) -> None:
         """Shared storage: another worker may be mid-trial on the old version.
 
         Counting only COMPLETE trials let a new worker declare the study
@@ -338,7 +351,7 @@ class TestResumeGuards:
         assert "bayesflow_hpo_objective_encoding" not in reloaded.user_attrs
 
     def test_a_warm_started_study_inherits_the_source_encoding(
-        self, tmp_path
+        self, tmp_path: Path
     ) -> None:
         """Copied trials carry their encoding, so provenance must copy too.
 
@@ -363,7 +376,7 @@ class TestResumeGuards:
         _guard_resumed_study(target, ["log_gamma", "nrmse"])
 
     def test_a_warm_start_from_a_legacy_source_is_still_refused(
-        self, tmp_path
+        self, tmp_path: Path
     ) -> None:
         """Inheriting provenance must not degrade into inheriting nothing.
 
@@ -403,7 +416,7 @@ def test_a_legacy_set_addition_still_flips_a_registered_lower_metric() -> None:
     assert _metric_to_minimize("rmse", 0.8) == pytest.approx(0.8)
 
 
-def test_contraction_studies_still_resume(tmp_path) -> None:
+def test_contraction_studies_still_resume(tmp_path: Path) -> None:
     """A false refusal is a real cost, not a safe default.
 
     `contraction` is higher-is-better AND a usable objective, but its
@@ -435,3 +448,93 @@ def test_contraction_studies_still_resume(tmp_path) -> None:
     assert "bayesflow_hpo_objective_encoding" not in resumed.user_attrs
     with pytest.raises(ValueError, match="opposite scales"):
         _guard_resumed_study(resumed, ["log_gamma", "nrmse"])
+
+
+def test_a_legacy_set_metric_ranks_missing_strictly_worst() -> None:
+    """Set membership gives a direction, never a scale.
+
+    With a finite `worst_raw` of 0.0 a missing metric scored 1.0 while a
+    reported -0.5 scored 1.5, so failing to report outranked reporting a bad
+    value. This is the same inversion fixed for `correlation` in round 2,
+    surviving in the fallback path that serves unregistered metrics -- where
+    the range is unknowable, so no finite constant is defensible.
+    """
+    from bayesflow_hpo.objectives import (
+        HIGHER_IS_BETTER,
+        _metric_to_minimize,
+        worst_objective_value,
+    )
+
+    HIGHER_IS_BETTER.add("custom_corr")
+    try:
+        missing = worst_objective_value("custom_corr")
+        for reported in (0.9, 0.5, 0.0, -0.5, -50.0):
+            assert _metric_to_minimize("custom_corr", reported) < missing, (
+                f"reported {reported} must beat a missing value"
+            )
+    finally:
+        HIGHER_IS_BETTER.discard("custom_corr")
+
+
+class TestObjectiveSchema:
+    """The encoding says how values were written, not what they mean."""
+
+    def _study(self, tmp_path: Path, name: str = "s") -> optuna.Study:
+        import optuna as _optuna
+
+        url = "sqlite:///" + str(tmp_path / "s.db").replace("\\", "/")
+        return _optuna.create_study(
+            study_name=name, storage=url,
+            directions=["minimize"] * 3, load_if_exists=True,
+        )
+
+    def test_a_fresh_study_records_its_schema(self, tmp_path: Path) -> None:
+        study = self._study(tmp_path)
+        names = ["log_gamma", "nrmse", "inference_time"]
+        _guard_resumed_study(study, ["log_gamma", "nrmse"], names)
+        assert study.user_attrs["bayesflow_hpo_objective_schema"] == names
+
+    def test_a_different_metric_set_is_refused(self, tmp_path: Path) -> None:
+        """Same width, different meaning -- the case an encoding check misses."""
+        study = self._study(tmp_path)
+        _guard_resumed_study(
+            study, ["log_gamma", "nrmse"],
+            ["log_gamma", "nrmse", "inference_time"],
+        )
+        with pytest.raises(ValueError, match="same column"):
+            _guard_resumed_study(
+                study, ["calibration_error", "nrmse"],
+                ["calibration_error", "nrmse", "inference_time"],
+            )
+
+    def test_reordering_the_same_metrics_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        """Optuna addresses objectives by position, so order is meaning."""
+        study = self._study(tmp_path)
+        _guard_resumed_study(
+            study, ["log_gamma", "nrmse"],
+            ["log_gamma", "nrmse", "inference_time"],
+        )
+        with pytest.raises(ValueError, match="same column"):
+            _guard_resumed_study(
+                study, ["nrmse", "log_gamma"],
+                ["nrmse", "log_gamma", "inference_time"],
+            )
+
+    def test_an_unchanged_schema_resumes(self, tmp_path: Path) -> None:
+        study = self._study(tmp_path)
+        names = ["log_gamma", "nrmse", "inference_time"]
+        _guard_resumed_study(study, ["log_gamma", "nrmse"], names)
+        _guard_resumed_study(study, ["log_gamma", "nrmse"], list(names))
+
+    def test_callers_without_metric_names_skip_the_check(
+        self, tmp_path: Path
+    ) -> None:
+        """The parameter is optional, and omitting it must not refuse."""
+        study = self._study(tmp_path)
+        _guard_resumed_study(
+            study, ["log_gamma", "nrmse"],
+            ["log_gamma", "nrmse", "inference_time"],
+        )
+        _guard_resumed_study(study, ["log_gamma", "nrmse"])
