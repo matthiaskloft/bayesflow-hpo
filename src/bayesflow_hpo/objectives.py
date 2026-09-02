@@ -545,6 +545,30 @@ def worst_objective_value(key: CanonicalMetricName) -> MinimizeScore:
     return _metric_to_minimize(key, worst_raw_value(key))
 
 
+def _canonical_summary(summary: dict[str, Any]) -> dict[str, Any]:
+    """Re-key a validation summary by canonical metric name.
+
+    The pipeline emits canonical names, but a caller's own ``validate_fn``
+    emits whatever spelling its author used, and both reach these extractors.
+    Resolving only the requested name would therefore fix one shape and break
+    the other.
+
+    Unknown names pass through unchanged, so non-metric entries are kept. A
+    summary carrying BOTH spellings of one metric keeps the canonical value:
+    that is what the pipeline itself wrote, and dropping it in favour of an
+    alias would let a caller's spelling override the measurement.
+    """
+    from bayesflow_hpo.validation.registry import canonical_metric_name
+
+    out: dict[str, Any] = {}
+    for key, value in summary.items():
+        canonical = canonical_metric_name(key)
+        if canonical != key and canonical in summary:
+            continue
+        out[canonical] = value
+    return out
+
+
 def compute_inference_time_per_dataset(
     inference_time: float,
     n_datasets: int,
@@ -587,10 +611,12 @@ def extract_objective_values(
     """
     from bayesflow_hpo.validation.registry import canonical_metric_name
 
-    summary = metrics.get("summary", metrics)
-    # The summary is emitted under canonical names, so an alias supplied here
-    # missed the lookup and every trial scored the worst-case penalty
-    # identically -- silently flattening the objective this function returns.
+    # BOTH sides, as `_validate_metric_keys` already does. Canonicalizing only
+    # the requested name fixes a canonical summary read with an alias while
+    # breaking an alias-keyed summary read with that same alias -- a shape the
+    # previous contract accepted, because a caller's own `validate_fn` emits
+    # whatever spelling its author chose.
+    summary = _canonical_summary(metrics.get("summary", metrics))
     objective_metric = canonical_metric_name(objective_metric)
     if objective_metric not in summary:
         logger.warning(
@@ -646,11 +672,10 @@ def extract_multi_objective_values(
             f"Expected 'mean' or 'pareto'."
         )
 
-    summary = metrics.get("summary", metrics)
+    summary = _canonical_summary(metrics.get("summary", metrics))
 
     raw_values: list[float] = []
-    # As in `extract_objective_values`: the summary is keyed by canonical
-    # name, so an alias here missed and took the penalty instead.
+    # Both sides, for the reason given in `extract_objective_values`.
     for key in map(canonical_metric_name, objective_metrics):
         if key not in summary:
             logger.warning(

@@ -699,3 +699,63 @@ _metric_to_minimize(k, worst_objective_value(k))
             "the raw-space call is correct and must still type-check; got:\n"
             f"{result.stdout}{result.stderr}"
         )
+
+
+class TestBothSpellingsOfASummaryResolve:
+    """Canonicalizing one side alone fixes one shape and breaks another.
+
+    The pipeline emits canonical names, but a caller's own `validate_fn`
+    emits whatever spelling its author used -- and both reach these
+    extractors. Resolving only the requested name made an alias-keyed summary
+    read with that same alias miss, which had worked before.
+    """
+
+    _CANONICAL = {"calibration_error": 0.02, "nrmse": 0.1}
+    _ALIASED = {"cal_error": 0.02, "nrmse": 0.1}
+
+    @pytest.mark.parametrize("summary_style", ["canonical", "aliased"])
+    @pytest.mark.parametrize("requested", ["calibration_error", "cal_error"])
+    def test_every_spelling_combination_finds_the_value(
+        self, summary_style: str, requested: str
+    ) -> None:
+        from bayesflow_hpo.objectives import extract_objective_values
+
+        summary = (
+            self._CANONICAL if summary_style == "canonical" else self._ALIASED
+        )
+        value, _ = extract_objective_values(summary, 1.0, requested)
+        assert value == 0.02
+
+    @pytest.mark.parametrize("requested", ["calibration_error", "cal_error"])
+    def test_the_multi_extractor_too(self, requested: str) -> None:
+        from bayesflow_hpo.objectives import extract_multi_objective_values
+
+        values = extract_multi_objective_values(
+            self._ALIASED, 1.0, [requested, "nrmse"], "pareto"
+        )
+        assert values[0] == 0.02
+
+    def test_a_summary_holding_both_keeps_the_canonical_value(self) -> None:
+        """The pipeline's own measurement wins over a caller's spelling.
+
+        Re-keying by canonical name collides when a summary carries both. The
+        canonical entry is what the pipeline wrote, so letting the alias
+        overwrite it would let a spelling override a measurement.
+        """
+        from bayesflow_hpo.objectives import extract_objective_values
+
+        both = {"calibration_error": 0.02, "cal_error": 0.99, "nrmse": 0.1}
+        for requested in ("calibration_error", "cal_error"):
+            value, _ = extract_objective_values(both, 1.0, requested)
+            assert value == 0.02
+
+    def test_non_metric_entries_survive_the_rekeying(self) -> None:
+        """Unknown names pass through, so a summary is not filtered."""
+        from bayesflow_hpo.objectives import _canonical_summary
+
+        out = _canonical_summary(
+            {"cal_error": 0.02, "n_datasets": 500, "some_note": "x"}
+        )
+        assert out == {
+            "calibration_error": 0.02, "n_datasets": 500, "some_note": "x"
+        }

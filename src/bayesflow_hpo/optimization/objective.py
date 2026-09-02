@@ -635,17 +635,26 @@ class ObjectiveConfig:
 
     @property
     def canonical_objective_metrics(self) -> list[CanonicalMetricName]:
-        """:attr:`objective_metrics` after ``__post_init__`` normalized it.
+        """:attr:`objective_metrics`, resolved to canonical names.
 
         The field itself stays ``list[str]``, because constructing this config
         with aliases is legitimate -- resolving them is what ``__post_init__``
         is for. But rewriting a field in place cannot change its declared
         type, so every consumer downstream still saw a bare ``str`` and the
-        guarantee survived only as a comment. This states it once, in the one
-        place entitled to: immediately after the normalization that makes it
-        true.
+        guarantee survived only as a comment.
+
+        This RESOLVES rather than asserting. A ``cast`` would be sound only
+        while nothing reassigns the field, and nothing stops that: the
+        dataclass is mutable, so ``config.objective_metrics = ["cal_error"]``
+        or an ``.append()`` after construction never reaches
+        ``__post_init__``. A cast would then label those strings canonical on
+        exactly the failure and rejection paths that trust the label --
+        ``_penalty``, ``_metric_penalty_map``, ``_validate_metric_keys``,
+        ``_training_loss_fallback`` -- which is worse than no type at all.
+        Canonicalization is idempotent and cheap, so doing it for real costs
+        nothing worth saving.
         """
-        return cast(list[CanonicalMetricName], self.objective_metrics)
+        return [canonical_metric_name(m) for m in self.objective_metrics]
 
 
 def _extract_best_training_loss(callbacks: list[Any]) -> float | None:
