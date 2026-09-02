@@ -651,8 +651,18 @@ _metric_to_minimize(k, worst_objective_value(k))
 
         src = tmp_path / "snippet.py"
         src.write_text(self._SNIPPET, encoding="utf-8")
+        # `--python-version` must match the interpreter running the tests, NOT
+        # the project's pinned 3.11. Inheriting the pin made mypy parse this
+        # interpreter's own numpy stubs under 3.11 rules, and on 3.12+ those
+        # use `type` statements: mypy aborted with a syntax error before it
+        # reached the snippet, and the test read that empty result as "the bad
+        # call was accepted".
+        version = f"{sys.version_info.major}.{sys.version_info.minor}"
         return subprocess.run(
-            [sys.executable, "-m", "mypy", "--no-error-summary", str(src)],
+            [
+                sys.executable, "-m", "mypy",
+                "--no-error-summary", f"--python-version={version}", str(src),
+            ],
             capture_output=True, text=True,
         )
 
@@ -668,6 +678,16 @@ _metric_to_minimize(k, worst_objective_value(k))
         """
         pytest.importorskip("mypy")
         result = self._run_mypy(tmp_path)
+
+        # Exit 2 is a mypy crash or config error, not a clean verdict. Without
+        # this the test passes vacuously whenever mypy fails to run at all.
+        assert result.returncode == 1, (
+            "expected mypy to report type errors (exit 1), not to fail to "
+            f"run (exit {result.returncode}):\n{result.stdout}{result.stderr}"
+        )
+        assert "[syntax]" not in result.stdout, (
+            f"mypy could not parse its inputs:\n{result.stdout}"
+        )
 
         # Line 10 is the worst_raw_value call (correct); line 11 the
         # worst_objective_value one (the bug).
