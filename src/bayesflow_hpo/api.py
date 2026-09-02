@@ -11,7 +11,9 @@ import optuna
 
 from bayesflow_hpo.objectives import (
     ENCODING_CHANGED_AT_V2,
+    ENCODING_UNCHANGED_AT_V2,
     OBJECTIVE_ENCODING_VERSION,
+    schema_matches,
 )
 from bayesflow_hpo.optimization.checkpoint_pool import CheckpointPool
 from bayesflow_hpo.optimization.constraints import (
@@ -679,33 +681,6 @@ def _build_objective(
     )
 
 
-def _normalize_schema_entry(entry: str) -> str:
-    """Put a ``mean(...)`` column into a canonical, order-independent form.
-
-    Mean mode stores a single arithmetic mean, so the order of the metrics
-    inside the name carries no meaning and two spellings of the same objective
-    must compare equal. Sorting only at construction would not be enough: a
-    study stamped by an earlier build holds the members in whatever order that
-    run requested them, and would then be refused on resume.
-
-    Pareto columns are returned unchanged -- there order IS meaning, because
-    Optuna addresses objectives by position.
-    """
-    if not (entry.startswith("mean(") and entry.endswith(")")):
-        return entry
-    members = entry[len("mean(") : -1].split("+")
-    return "mean(" + "+".join(sorted(members)) + ")"
-
-
-def _schema_matches(stored: list[str], current: list[str]) -> bool:
-    """Compare two objective schemas, tolerating mean-mode member order."""
-    if len(stored) != len(current):
-        return False
-    return [_normalize_schema_entry(e) for e in stored] == [
-        _normalize_schema_entry(e) for e in current
-    ]
-
-
 def _encoding_sensitive(metric: str) -> bool:
     """Did *metric*'s stored numbers change at objective encoding 2?
 
@@ -721,11 +696,14 @@ def _encoding_sensitive(metric: str) -> bool:
     ``TestEncodingChangeSetIsDerived`` recomputes that set from the pre-change
     rule. Anything else is treated as changed.
     """
-    from bayesflow_hpo.validation.registry import list_metrics
-
     if metric in ENCODING_CHANGED_AT_V2:
         return True
-    return metric not in set(list_metrics())
+    # Deliberately NOT `list_metrics()`: that is the live registry, so a custom
+    # metric installed through `register_metric()` would read as known and
+    # therefore unchanged -- while its penalty moved from a finite 1.0 to +inf
+    # like any other unregistered name. Only the names actually audited against
+    # the pre-change rule can be assumed comparable.
+    return metric not in ENCODING_UNCHANGED_AT_V2
 
 
 def _guard_resumed_study(
@@ -807,7 +785,7 @@ def _guard_resumed_study(
     if (
         metric_names is not None
         and stored_schema is not None
-        and not _schema_matches(list(stored_schema), list(metric_names))
+        and not schema_matches(list(stored_schema), list(metric_names))
     ):
         raise ValueError(
             f"Study {study.study_name!r} stores objectives "
@@ -839,6 +817,21 @@ def _guard_resumed_study(
         )
     ]
     has_trials = bool(settled or active)
+
+    # A populated study with no recorded schema cannot be resumed safely,
+    # whatever its encoding. This used to sit inside the `encoding == current`
+    # branch, so a legacy study with neither encoding nor schema slipped past
+    # whenever its metrics were encoding-insensitive -- and resuming that with
+    # a different same-width built-in set mixes unrelated objectives by column
+    # with nothing to compare against.
+    if has_trials and metric_names is not None and stored_schema is None:
+        raise ValueError(
+            f"Study {study.study_name!r} holds trials but records no "
+            "objective schema, so the metric behind each column cannot be "
+            "verified. Start a new study, or set the study's "
+            "'bayesflow_hpo_objective_schema' user attribute to the names it "
+            f"was actually run with (this run would use {list(metric_names)!r})."
+        )
     # Only metrics whose stored numbers changed make old trials incomparable.
     # Read from an explicit record, not inferred from `higher_is_better`:
     # `contraction` is higher-is-better AND a usable objective, but its
@@ -877,20 +870,8 @@ def _guard_resumed_study(
             "metric from objective_metrics."
         )
     if encoding == OBJECTIVE_ENCODING_VERSION:
-        if has_trials and metric_names is not None and stored_schema is None:
-            # Correctly encoded, but which metric wrote each column is
-            # unknown. Adopting the current run's names would ASSERT they
-            # match rather than check it, and if the stored columns came from
-            # a different same-width metric set every later trial mixes
-            # meanings under a schema that now looks verified.
-            raise ValueError(
-                f"Study {study.study_name!r} holds trials but records no "
-                "objective schema, so the metric behind each column cannot "
-                "be verified. Start a new study, or set the study's "
-                "'bayesflow_hpo_objective_schema' user attribute to the "
-                "names it was actually run with "
-                f"(this run would use {list(metric_names)!r})."
-            )
+        # Any populated study without a schema was refused above, so reaching
+        # here with none means the study is empty and safe to label.
         if metric_names is not None and stored_schema is None:
             study.set_user_attr(
                 "bayesflow_hpo_objective_schema", list(metric_names)
