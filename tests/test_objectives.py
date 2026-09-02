@@ -619,3 +619,63 @@ class TestAliasesReachTheSummary:
             self._SUMMARY, 1.0, "not_a_metric_at_all"
         )
         assert value == math.inf
+
+
+class TestTheScoreSpacesCannotBeMixed:
+    """The raw/minimize distinction is enforced statically, not by review.
+
+    Eight review rounds caught instances of this pair being confused by
+    reading the code. The two spaces are indistinguishable at runtime -- both
+    are plain floats -- so nothing raises when they are swapped; a
+    higher-is-better metric simply ranks backwards. These `NewType`s make the
+    swap a type error, and this test is what fails if either signature is
+    later widened back to a bare `float`.
+    """
+
+    _SNIPPET = """
+from bayesflow_hpo.objectives import (
+    _metric_to_minimize,
+    worst_objective_value,
+    worst_raw_value,
+)
+from bayesflow_hpo.validation.registry import canonical_metric_name
+
+k = canonical_metric_name("log_gamma")
+_metric_to_minimize(k, worst_raw_value(k))
+_metric_to_minimize(k, worst_objective_value(k))
+"""
+
+    def _run_mypy(self, tmp_path):
+        import subprocess
+        import sys
+
+        src = tmp_path / "snippet.py"
+        src.write_text(self._SNIPPET, encoding="utf-8")
+        return subprocess.run(
+            [sys.executable, "-m", "mypy", "--no-error-summary", str(src)],
+            capture_output=True, text=True,
+        )
+
+    def test_a_minimize_value_in_a_raw_slot_is_a_type_error(
+        self, tmp_path
+    ) -> None:
+        """The round-2 P1 on PR #72, now unrepresentable.
+
+        `worst_objective_value` is minimize-space; the second argument of
+        `_metric_to_minimize` is consumed before conversion. Feeding one to
+        the other double-converts it, which for `log_gamma` turned a penalty
+        into a value that beat every genuine result.
+        """
+        pytest.importorskip("mypy")
+        result = self._run_mypy(tmp_path)
+
+        # Line 10 is the worst_raw_value call (correct); line 11 the
+        # worst_objective_value one (the bug).
+        assert "snippet.py:11" in result.stdout, (
+            "expected the minimize-space argument to be rejected; got:\n"
+            f"{result.stdout}{result.stderr}"
+        )
+        assert "snippet.py:10" not in result.stdout, (
+            "the raw-space call is correct and must still type-check; got:\n"
+            f"{result.stdout}{result.stderr}"
+        )

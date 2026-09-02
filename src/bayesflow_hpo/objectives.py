@@ -26,9 +26,27 @@ import logging
 import math
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NewType
 
 import numpy as np
+
+#: A metric value as the validation pipeline reported it, before any
+#: direction conversion. Higher may be better or worse depending on the
+#: metric.
+#:
+#: Distinct from :data:`MinimizeScore` at type-check time only; both are plain
+#: floats at runtime. The pair exists because the two spaces are
+#: indistinguishable by inspection and mixing them is silent: the round-2 P1
+#: on PR #72 fed a minimize-space penalty into a slot consumed BEFORE
+#: conversion, so a flat 1.0 for `log_gamma` became -1.0 and a trial that
+#: failed to report the metric outranked one reporting a good value. Nothing
+#: raised; the ranking simply inverted.
+RawScore = NewType("RawScore", float)
+
+#: A metric value already converted so that lower is better, ready to hand to
+#: Optuna. Must never be passed through :func:`_metric_to_minimize` again --
+#: double conversion re-inverts every higher-is-better metric.
+MinimizeScore = NewType("MinimizeScore", float)
 
 if TYPE_CHECKING:
     # Import-time only: `bayesflow_hpo.validation.__init__` pulls in
@@ -487,16 +505,18 @@ def _direction_for(key: CanonicalMetricName) -> MetricDirection | None:
 
 
 def _metric_to_minimize(
-    key: CanonicalMetricName, value: float
-) -> float:
+    key: CanonicalMetricName, value: RawScore
+) -> MinimizeScore:
     """Convert a raw metric value to a minimize-is-better scalar."""
     direction = _direction_for(key)
     if direction is None:
-        return value
-    return direction.to_minimize(value)
+        # No recorded direction: lower-is-better is assumed, so the raw value
+        # already IS the minimize-space one.
+        return MinimizeScore(value)
+    return MinimizeScore(direction.to_minimize(value))
 
 
-def worst_raw_value(key: CanonicalMetricName) -> float:
+def worst_raw_value(key: CanonicalMetricName) -> RawScore:
     """Raw-space value representing the worst case for *key*.
 
     This is what a *penalty injected before conversion* must use. Injecting a
@@ -512,11 +532,11 @@ def worst_raw_value(key: CanonicalMetricName) -> float:
     """
     direction = _direction_for(key)
     if direction is not None:
-        return direction.worst_raw
-    return math.inf
+        return RawScore(direction.worst_raw)
+    return RawScore(math.inf)
 
 
-def worst_objective_value(key: CanonicalMetricName) -> float:
+def worst_objective_value(key: CanonicalMetricName) -> MinimizeScore:
     """Minimize-space value standing in for a metric missing from a summary.
 
     Returned already converted, so callers must not pass it through
@@ -580,7 +600,7 @@ def extract_objective_values(
         )
     if objective_metric in summary:
         objective_value = _metric_to_minimize(
-            objective_metric, float(summary[objective_metric])
+            objective_metric, RawScore(float(summary[objective_metric]))
         )
     else:
         # No cross-metric substitution. This used to fall back to
@@ -639,7 +659,9 @@ def extract_multi_objective_values(
                 key, list(summary.keys()),
             )
         if key in summary:
-            raw_values.append(_metric_to_minimize(key, float(summary[key])))
+            raw_values.append(
+                _metric_to_minimize(key, RawScore(float(summary[key])))
+            )
         else:
             # Already in minimize space -- do not convert it again.
             raw_values.append(worst_objective_value(key))

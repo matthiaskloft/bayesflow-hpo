@@ -31,7 +31,7 @@ import numpy as np
 import optuna
 from keras.callbacks import Callback
 
-from bayesflow_hpo.objectives import _metric_to_minimize
+from bayesflow_hpo.objectives import RawScore, _metric_to_minimize
 from bayesflow_hpo.optimization.pruning_strategies import (
     should_prune_dominance,
     should_prune_mo_sha,
@@ -251,7 +251,9 @@ class PeriodicValidationCallback(Callback):
 
         self._update_early_stopping(raw_scores)
         scores: dict[str, float] = {
-            metric: _metric_to_minimize(metric, float(raw_scores[metric]))
+            metric: _metric_to_minimize(
+                metric, RawScore(float(raw_scores[metric]))
+            )
             for metric in self.objective_metrics
         }
 
@@ -273,8 +275,16 @@ class PeriodicValidationCallback(Callback):
             if self.trial.should_prune():
                 raise optuna.TrialPruned()
 
-    def _update_early_stopping(self, scores: dict[str, float]) -> None:
-        """Stop on a moving average of the configured validation objective."""
+    def _update_early_stopping(
+        self, raw_scores: dict[str, float]
+    ) -> None:
+        """Stop on a moving average of the configured validation objective.
+
+        Takes RAW pipeline values and converts them here. The parameter used
+        to be called `scores`, which reads as the already-converted dict of
+        the same name in the caller -- the two spaces are indistinguishable by
+        inspection, so the name was the only thing distinguishing them.
+        """
         if self.early_stopping_patience is None:
             return
 
@@ -282,7 +292,9 @@ class PeriodicValidationCallback(Callback):
             value = float(
                 np.mean(
                     [
-                        _metric_to_minimize(metric, float(scores[metric]))
+                        _metric_to_minimize(
+                            metric, RawScore(float(raw_scores[metric]))
+                        )
                         for metric in self.objective_metrics
                     ]
                 )
@@ -292,7 +304,9 @@ class PeriodicValidationCallback(Callback):
             # canonical name here; the attribute is a plain `str` because it
             # holds either.
             monitor = cast(CanonicalMetricName, self.early_stopping_monitor)
-            value = _metric_to_minimize(monitor, float(scores[monitor]))
+            value = _metric_to_minimize(
+                monitor, RawScore(float(raw_scores[monitor]))
+            )
         self._early_stopping_values.append(value)
         if len(self._early_stopping_values) > self.early_stopping_window:
             self._early_stopping_values.pop(0)
