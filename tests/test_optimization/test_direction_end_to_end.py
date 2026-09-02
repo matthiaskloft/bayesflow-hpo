@@ -301,7 +301,7 @@ class TestResumeGuards:
         study = self._study(
             tmp_path, ["minimize"] * 3, with_trial=True
         )
-        with pytest.raises(ValueError, match="opposite scales"):
+        with pytest.raises(ValueError, match="different scales"):
             _guard_resumed_study(study, ["log_gamma", "nrmse"])
 
     def test_pre_encoding_trials_are_fine_when_no_metric_flipped(
@@ -346,7 +346,7 @@ class TestResumeGuards:
             study_name="s", storage=url,
             directions=["minimize"] * 3, load_if_exists=True,
         )
-        with pytest.raises(ValueError, match="opposite scales"):
+        with pytest.raises(ValueError, match="different scales"):
             _guard_resumed_study(reloaded, ["log_gamma", "nrmse"])
         assert "bayesflow_hpo_objective_encoding" not in reloaded.user_attrs
 
@@ -393,7 +393,7 @@ class TestResumeGuards:
             warm_start_from=source,
             warm_start_top_k=1,
         )
-        with pytest.raises(ValueError, match="opposite scales"):
+        with pytest.raises(ValueError, match="different scales"):
             _guard_resumed_study(target, ["log_gamma", "nrmse"])
 
 
@@ -446,7 +446,7 @@ def test_contraction_studies_still_resume(tmp_path: Path) -> None:
     # let a later `log_gamma` resume sail past the guard -- which is exactly
     # what this assertion caught the first time it was written.
     assert "bayesflow_hpo_objective_encoding" not in resumed.user_attrs
-    with pytest.raises(ValueError, match="opposite scales"):
+    with pytest.raises(ValueError, match="different scales"):
         _guard_resumed_study(resumed, ["log_gamma", "nrmse"])
 
 
@@ -538,3 +538,105 @@ class TestObjectiveSchema:
             ["log_gamma", "nrmse", "inference_time"],
         )
         _guard_resumed_study(study, ["log_gamma", "nrmse"])
+
+
+class TestUnverifiableProvenance:
+    """Absent provenance is one case; unrecognized provenance is another."""
+
+    def _study(self, tmp_path: Path, *, with_trial: bool) -> optuna.Study:
+        import optuna as _optuna
+
+        url = "sqlite:///" + str(tmp_path / "p.db").replace("\\", "/")
+        study = _optuna.create_study(
+            study_name="p", storage=url, directions=["minimize"] * 3
+        )
+        if with_trial:
+            study.add_trial(
+                _optuna.trial.create_trial(
+                    params={}, distributions={}, values=[1.5, 0.2, 0.5]
+                )
+            )
+        return _optuna.create_study(
+            study_name="p", storage=url,
+            directions=["minimize"] * 3, load_if_exists=True,
+        )
+
+    @pytest.mark.parametrize(
+        "encoding", [1, 999, "v2", None], ids=["older", "future", "junk", "absent"]
+    )
+    def test_any_non_current_encoding_is_refused(
+        self, tmp_path: Path, encoding
+    ) -> None:
+        """`!= current`, not `is None`.
+
+        Checking only for an absent attribute waved through an older version,
+        a future one written by a newer build, and a malformed caller-written
+        value -- three kinds of "provenance I cannot verify" treated as one
+        kind of "provenance I have".
+        """
+        study = self._study(tmp_path, with_trial=True)
+        if encoding is not None:
+            study.set_user_attr("bayesflow_hpo_objective_encoding", encoding)
+        with pytest.raises(ValueError, match="different scales"):
+            _guard_resumed_study(study, ["log_gamma", "nrmse"])
+
+    def test_a_stamped_study_with_trials_but_no_schema_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        """Backfilling a populated study asserts what it cannot check.
+
+        The values are correctly encoded, but which metric wrote each column
+        is unknown. Adopting the current run's names would mark it verified,
+        and if the columns came from a different same-width metric set every
+        later trial mixes meanings behind a schema that now looks checked.
+        """
+        study = self._study(tmp_path, with_trial=True)
+        study.set_user_attr(
+            "bayesflow_hpo_objective_encoding", OBJECTIVE_ENCODING_VERSION
+        )
+        with pytest.raises(ValueError, match="records no objective schema"):
+            _guard_resumed_study(
+                study, ["log_gamma", "nrmse"],
+                ["log_gamma", "nrmse", "inference_time"],
+            )
+        assert "bayesflow_hpo_objective_schema" not in study.user_attrs
+
+    def test_an_empty_stamped_study_is_backfilled(self, tmp_path: Path) -> None:
+        """With nothing stored, there is nothing to contradict."""
+        study = self._study(tmp_path, with_trial=False)
+        study.set_user_attr(
+            "bayesflow_hpo_objective_encoding", OBJECTIVE_ENCODING_VERSION
+        )
+        names = ["log_gamma", "nrmse", "inference_time"]
+        _guard_resumed_study(study, ["log_gamma", "nrmse"], names)
+        assert study.user_attrs["bayesflow_hpo_objective_schema"] == names
+
+    def test_a_warm_start_with_a_conflicting_schema_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        """Validate the source BEFORE copying, not after.
+
+        Inheriting the encoding alone left the target looking verified while
+        its columns meant something else: the guard would find no schema,
+        record the requested names, and treat copied values as though they
+        had always represented those metrics.
+        """
+        from bayesflow_hpo.optimization.study import create_study
+
+        source = self._study(tmp_path, with_trial=True)
+        source.set_user_attr(
+            "bayesflow_hpo_objective_encoding", OBJECTIVE_ENCODING_VERSION
+        )
+        source.set_user_attr(
+            "bayesflow_hpo_objective_schema",
+            ["calibration_error", "nrmse", "inference_time"],
+        )
+        with pytest.raises(ValueError, match="mean something else"):
+            create_study(
+                study_name="ws_conflict",
+                directions=["minimize"] * 3,
+                metric_names=["log_gamma", "nrmse", "inference_time"],
+                storage=None,
+                warm_start_from=source,
+                warm_start_top_k=1,
+            )

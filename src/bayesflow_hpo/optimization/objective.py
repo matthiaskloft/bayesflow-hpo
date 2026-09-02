@@ -419,6 +419,11 @@ class ObjectiveConfig:
     max_param_count: int = MAX_PARAM_COUNT
     max_memory_mb: float | None = None
     metric_constraints_hard: list[MetricConstraintSpec] | None = None
+    #: Soft constraints are enforced by Optuna's constraints function, not by
+    #: this objective, but their metrics still have to be COMPUTED here or the
+    #: constraint reads a missing user attribute as zero violation and never
+    #: fires. Recorded so the pipeline metric list can include them.
+    metric_constraints_soft: list[MetricConstraintSpec] | None = None
     n_posterior_samples: int = 500
     n_intermediate_posterior_samples: int = 250
     intermediate_validation_interval: int = 10
@@ -471,11 +476,13 @@ class ObjectiveConfig:
                 self.pruning_strategy[0],
                 canonical_metric_name(self.pruning_strategy[1]),
             )
-        if self.metric_constraints_hard is not None:
-            self.metric_constraints_hard = [
-                (canonical_metric_name(name), threshold, direction)
-                for name, threshold, direction in self.metric_constraints_hard
-            ]
+        for _attr in ("metric_constraints_hard", "metric_constraints_soft"):
+            _specs = getattr(self, _attr)
+            if _specs is not None:
+                setattr(self, _attr, [
+                    (canonical_metric_name(name), threshold, direction)
+                    for name, threshold, direction in _specs
+                ])
         if self.training_mode not in ("fixed_budget", "open_ended"):
             raise ValueError(
                 f"Unknown training_mode: {self.training_mode!r}. "
@@ -670,10 +677,34 @@ def _accepts_training_loss_proxy(metric: str) -> bool:
     return not direction.higher_is_better and direction.worst_objective == 1.0
 
 
-def _pipeline_metrics(objective_metrics: list[str]) -> list[str]:
-    """DEFAULT_METRICS plus any registered objective, order-stable.
+def _constraint_metric_names(config: ObjectiveConfig) -> list[str]:
+    """Metric names referenced by hard or soft constraints, in order."""
+    names: list[str] = []
+    for specs in (
+        config.metric_constraints_hard,
+        config.metric_constraints_soft,
+    ):
+        for name, _threshold, _direction in specs or ():
+            if name not in names:
+                names.append(name)
+    return names
 
-    Unregistered objectives are left out because the pipeline resolves names
+
+def _pipeline_metrics(
+    objective_metrics: list[str],
+    constraint_metrics: Sequence[str] = (),
+) -> list[str]:
+    """DEFAULT_METRICS plus registered objectives and constraints, in order.
+
+    Constraints are included for the same reason objectives are, and the
+    consequence of omitting them is quieter: a constraint naming a registered
+    non-default metric -- ``metric_constraints_hard=[("sbc_ks", 0.2, "above")]``
+    alongside the default objectives -- was never computed, and neither path
+    complains. The hard path skips a missing key outright, and the soft
+    callback reads a missing user attribute as zero violation, so the
+    constraint is configured, inactive, and silent.
+
+    Unregistered names are left out because the pipeline resolves names
     through the registry and would raise; they behave as before, falling to a
     penalty.
     """
@@ -681,7 +712,7 @@ def _pipeline_metrics(objective_metrics: list[str]) -> list[str]:
 
     known = set(list_metrics())
     names = list(DEFAULT_METRICS)
-    for metric in objective_metrics:
+    for metric in list(objective_metrics) + list(constraint_metrics):
         if metric in known and metric not in names:
             names.append(metric)
     return names
@@ -1243,7 +1274,10 @@ class GenericObjective:
                     # hard constraint silently skips a missing key while a
                     # soft one reads it as zero violation. Computing both sets
                     # keeps constraints working and the objectives present.
-                    metrics=_pipeline_metrics(config.objective_metrics),
+                    metrics=_pipeline_metrics(
+                        config.objective_metrics,
+                        _constraint_metric_names(config),
+                    ),
                 )
                 inference_time = result.timing.get("inference", 0.0)
                 metrics_summary = _validate_metric_keys(

@@ -6,7 +6,6 @@ import numpy as np
 import pytest
 
 from bayesflow_hpo.objectives import (
-    FAILED_TRIAL_CAL_ERROR,
     HIGHER_IS_BETTER,
     MAX_PARAM_COUNT,
     METRIC_DIRECTIONS,
@@ -92,7 +91,15 @@ def test_extract_multi_with_correlation():
 
 
 def test_extract_multi_missing_metric_returns_worst():
-    """Missing lower-is-better metric defaults to 1.0 (worst)."""
+    """An unregistered missing metric defaults to +inf, not 1.0.
+
+    Re-baselined with reasoning rather than to make the suite green. Nothing
+    is known about an unregistered metric's scale, so no finite constant is
+    defensible: with 1.0, a custom RMSE-like metric reporting 100.0 lost to a
+    trial that reported nothing at all -- the same "missing beats bad"
+    inversion found separately for `log_gamma` and `correlation`. Registering
+    the metric is how a caller supplies a tighter bound.
+    """
     metrics = {"summary": {"nrmse": 0.1}}
     values = extract_multi_objective_values(
         metrics,
@@ -100,7 +107,7 @@ def test_extract_multi_missing_metric_returns_worst():
         objective_metrics=["nrmse", "nonexistent_key"],
         objective_mode="pareto",
     )
-    assert values[1] == 1.0  # fallback for missing lower-is-better key
+    assert values[1] == math.inf
 
 
 def test_extract_multi_missing_correlation_returns_worst():
@@ -362,7 +369,10 @@ class TestMissingMetricDefaults:
         HIGHER_IS_BETTER.discard("contraction")
         try:
             assert _metric_to_minimize("contraction", 0.8) == pytest.approx(0.8)
-            assert worst_objective_value("contraction") == FAILED_TRIAL_CAL_ERROR
+            # Removing it makes the metric unknown, and an unknown scale now
+            # takes +inf rather than a finite 1.0 -- the conversion claim
+            # above is what this test is about, and it is unchanged.
+            assert worst_objective_value("contraction") == math.inf
         finally:
             HIGHER_IS_BETTER.add("contraction")
         assert _metric_to_minimize("contraction", 0.8) == pytest.approx(0.2)
@@ -441,3 +451,77 @@ class TestMissingMetricDefaults:
         # Pearson runs [-1, 1], so its worst minimize-space value is 2.0.
         assert worst_objective_value("correlation") == 2.0
         assert worst_objective_value("contraction") == 1.0
+
+
+class TestEncodingChangeSetIsDerived:
+    """`ENCODING_CHANGED_AT_V2` must be computed, not remembered.
+
+    Its first version listed `log_gamma` alone. That came from diffing the
+    conversion function and stopping there -- but a trial stores a number for
+    two reasons, and the *penalty* substituted for a missing metric moved as
+    well. `correlation` went from an objective penalty of 1.0 to 2.0, so a
+    legacy study's old failed trials outranked new ones while the guard waved
+    it through. Reading the diff is exactly what failed; this computes it.
+    """
+
+    # The pre-change rule, reproduced from `git show b93501b~1`: conversion was
+    # `1 - value` for these two names and pass-through otherwise, and the
+    # missing-metric substitute was `0.0 if key in HIGHER_IS_BETTER else 1.0`.
+    _OLD_HIGHER_IS_BETTER = {"correlation", "contraction"}
+
+    def _old_penalty(self, name: str) -> float:
+        raw = 0.0 if name in self._OLD_HIGHER_IS_BETTER else 1.0
+        return (1.0 - raw) if name in self._OLD_HIGHER_IS_BETTER else raw
+
+    def _old_conversion(self, name: str, value: float) -> float:
+        return (1.0 - value) if name in self._OLD_HIGHER_IS_BETTER else value
+
+    def test_the_declared_set_matches_the_computed_one(self) -> None:
+        from bayesflow_hpo.objectives import (
+            ENCODING_CHANGED_AT_V2,
+            METRIC_DIRECTIONS,
+            _metric_to_minimize,
+            worst_objective_value,
+        )
+        from bayesflow_hpo.validation.registry import _KINDS
+
+        # Every metric a study could actually store an objective column for.
+        candidates = {
+            name for name, kind in _KINDS.items() if kind == "objective"
+        } | set(METRIC_DIRECTIONS)
+
+        computed = set()
+        for name in candidates:
+            penalty_moved = (
+                self._old_penalty(name) != worst_objective_value(name)
+            )
+            probe = 0.3
+            conversion_moved = abs(
+                self._old_conversion(name, probe)
+                - _metric_to_minimize(name, probe)
+            ) > 1e-12
+            if penalty_moved or conversion_moved:
+                computed.add(name)
+
+        assert computed == set(ENCODING_CHANGED_AT_V2), (
+            "ENCODING_CHANGED_AT_V2 no longer matches the metrics whose "
+            "stored values actually changed. Missing: "
+            f"{sorted(computed - set(ENCODING_CHANGED_AT_V2))}; stale: "
+            f"{sorted(set(ENCODING_CHANGED_AT_V2) - computed)}."
+        )
+
+    def test_contraction_is_excluded_for_the_right_reason(self) -> None:
+        """Not merely absent -- absent because nothing about it moved."""
+        from bayesflow_hpo.objectives import (
+            ENCODING_CHANGED_AT_V2,
+            _metric_to_minimize,
+            worst_objective_value,
+        )
+
+        assert "contraction" not in ENCODING_CHANGED_AT_V2
+        assert self._old_penalty("contraction") == worst_objective_value(
+            "contraction"
+        )
+        assert self._old_conversion("contraction", 0.3) == pytest.approx(
+            _metric_to_minimize("contraction", 0.3)
+        )

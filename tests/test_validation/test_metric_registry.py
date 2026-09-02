@@ -284,7 +284,9 @@ def test_describe_metrics_kind_and_requires():
     rows = {r["name"]: r for r in describe_metrics()}
     # Objective metrics return a single scalar
     assert rows["nrmse"]["kind"] == "objective"
-    assert rows["bias"]["kind"] == "objective"
+    # Signed bias is diagnostic-only: its optimum is zero, so minimizing it
+    # drives the search toward ever more severe underestimation.
+    assert rows["bias"]["kind"] == "diagnostic"
     assert rows["sbc_ks"]["kind"] == "objective"
     # Diagnostic metrics return multiple sub-keys
     assert rows["z_score"]["kind"] == "diagnostic"

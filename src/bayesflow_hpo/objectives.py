@@ -282,6 +282,13 @@ METRIC_DIRECTIONS: dict[str, MetricDirection] = {
     "rmse": MetricDirection(
         higher_is_better=False,
         to_minimize=lambda v: v,
+        # NOTE: `rmse` is in parameter units and unbounded above, so this
+        # finite worst case is beatable -- an RMSE of 5.0 ranks below a
+        # missing value at 1.0, the same defect fixed elsewhere in this
+        # change. It is left as-is deliberately: raising it to `inf` would
+        # also move rmse's stored penalty (a third encoding change) and make
+        # it ineligible for the training-loss proxy, which keys on unit scale.
+        # Tracked separately rather than folded in here.
         worst_raw=1.0,
     ),
     # The SBC tests are lower-is-better and pass through unchanged, but they
@@ -312,16 +319,35 @@ OBJECTIVE_ENCODING_VERSION = 2
 
 #: Metrics whose stored objective values actually changed at version 2.
 #:
-#: Recorded explicitly rather than derived from ``higher_is_better``, because
-#: that predicate is wrong here. Before this change the conversion was
-#: ``1 - value`` for the two names in the old ``HIGHER_IS_BETTER`` set and
-#: pass-through for everything else, so ``correlation`` and ``contraction``
-#: convert exactly as they always did and their stored values are unchanged.
-#: Only ``log_gamma`` moved -- from pass-through to negation. Using
-#: ``higher_is_better`` would refuse a resumable ``contraction`` study, which
-#: is a real objective metric, on the strength of a property that says nothing
-#: about whether its numbers moved.
-ENCODING_CHANGED_AT_V2: frozenset[str] = frozenset({"log_gamma"})
+#: Recorded explicitly rather than derived from ``higher_is_better``, which is
+#: the wrong predicate: ``contraction`` is higher-is-better and a usable
+#: objective, yet its conversion is byte-for-byte what it always was, so
+#: inferring would refuse a perfectly resumable study.
+#:
+#: A trial stores a number for one of two reasons, and BOTH count:
+#:
+#: 1. **Conversion.** ``log_gamma`` moved from pass-through to negation.
+#: 2. **Penalty.** A missing or non-finite metric is substituted, and those
+#:    substitutes moved too. Before this change every metric shared one
+#:    penalty: ``default = 0.0 if key in HIGHER_IS_BETTER else 1.0``, which
+#:    converts to an objective of ``1.0`` in both branches. Now the substitute
+#:    is metric-specific -- ``correlation`` gives ``2.0`` because its worst raw
+#:    value became ``-1.0``, and ``sbc_chi2`` gives ``inf`` because the raw
+#:    statistic is unbounded above.
+#:
+#: The first version of this set listed ``log_gamma`` alone, because it was
+#: derived by diffing the conversion function and nothing else. That left a
+#: legacy ``correlation`` study resumable while its old penalty trials sat at
+#: ``1.0`` against new ones at ``2.0`` -- old failures outranking new ones, in
+#: the same Pareto front, silently. Penalties are stored values too.
+#: ``mae`` is here for the penalty reason too: it is objective-eligible with
+#: no direction entry, so it takes the unregistered fallback, which moved from
+#: a finite 1.0 to +inf once an unknown scale stopped being assumed bounded.
+#: `tests/test_objectives.py` derives this set by computing old and new values
+#: for every registered metric, so it cannot drift from the code again.
+ENCODING_CHANGED_AT_V2: frozenset[str] = frozenset(
+    {"log_gamma", "correlation", "sbc_chi2", "mae"}
+)
 
 #: Mutable set of higher-is-better metric names, kept as a live extension
 #: point rather than a derived view.
@@ -430,11 +456,17 @@ def worst_raw_value(key: str) -> float:
     minimize-space value there is the bug this function exists to prevent: a
     flat raw penalty of 1.0 for ``log_gamma`` converts to ``-1.0``, which
     beats a genuinely reported ``log_gamma`` of 0.5.
+
+    An unregistered metric falls back to ``+inf``, not to
+    ``FAILED_TRIAL_CAL_ERROR``. Nothing is known about its scale, so no finite
+    constant is defensible: with 1.0, a custom RMSE-like metric reporting
+    100.0 lost to a trial that reported nothing. Registering the metric is how
+    a caller supplies a tighter bound.
     """
     direction = _direction_for(key)
     if direction is not None:
         return direction.worst_raw
-    return FAILED_TRIAL_CAL_ERROR
+    return math.inf
 
 
 def worst_objective_value(key: str) -> float:

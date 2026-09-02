@@ -67,6 +67,7 @@ _METRIC_NAME_FIELDS = {
     "early_stopping_monitor",
     "pruning_strategy",
     "metric_constraints_hard",
+    "metric_constraints_soft",
 }
 
 # One registered alias and the canonical name it must resolve to.
@@ -117,9 +118,9 @@ def test_field_canonicalizes_aliases(field_name):
         cfg = _config(pruning_strategy=("primary", _ALIAS))
         assert cfg.pruning_strategy == ("primary", _CANONICAL)
 
-    elif field_name == "metric_constraints_hard":
-        cfg = _config(metric_constraints_hard=[(_ALIAS, 0.1, "below")])
-        assert cfg.metric_constraints_hard == [(_CANONICAL, 0.1, "below")]
+    elif field_name in ("metric_constraints_hard", "metric_constraints_soft"):
+        cfg = _config(**{field_name: [(_ALIAS, 0.1, "below")]})
+        assert getattr(cfg, field_name) == [(_CANONICAL, 0.1, "below")]
 
     else:  # pragma: no cover - guarded by the inventory test above
         pytest.fail(f"No canonicalization check written for {field_name!r}")
@@ -160,12 +161,11 @@ def test_pruning_metric_matches_the_key_the_pipeline_writes():
     assert pruning_metric in cfg.objective_metrics
 
 
-# NOT covered here: `metric_constraints_soft`. It never reaches
-# ObjectiveConfig -- `optimize()` hands it straight to `create_study` -- so it
-# is canonicalized at the API boundary instead, and only an end-to-end
-# `optimize()` run would exercise that. The inventory above cannot see it,
-# which is worth stating plainly rather than covering with a source-text
-# assertion that would pass on a comment and break on a reformat.
+# `metric_constraints_soft` is now a field of ObjectiveConfig -- it has to be,
+# so its metrics get COMPUTED rather than silently reading as zero violation --
+# which is what brought it into the inventory above. It is still canonicalized
+# at the API boundary as well, because `optimize()` hands its own copy to
+# `create_study` without going through the config.
 
 
 def test_default_validator_computes_non_default_objectives(monkeypatch):
@@ -201,3 +201,36 @@ def test_default_validator_computes_non_default_objectives(monkeypatch):
     # DEFAULT_METRICS stay in: constraints may reference metrics that can
     # never be objectives, and restricting the list would disable them.
     assert "calibration_error" in seen["metrics"]
+
+
+def test_constraint_metrics_are_computed_by_the_pipeline():
+    """A constraint on a non-default metric must actually be measured.
+
+    Neither constraint path complains when the metric is absent: the hard
+    path skips a missing key, and the soft callback reads a missing user
+    attribute as zero violation. So a constraint naming `sbc_ks` alongside
+    the default objectives was configured, inactive, and silent.
+    """
+    from bayesflow_hpo.optimization.objective import (
+        _constraint_metric_names,
+        _pipeline_metrics,
+    )
+
+    cfg = _config(
+        metric_constraints_hard=[("sbc_ks", 0.2, "above")],
+        metric_constraints_soft=[("sbc_chi2", 5.0, "below")],
+    )
+    names = _constraint_metric_names(cfg)
+    assert names == ["sbc_ks", "sbc_chi2"]
+
+    computed = _pipeline_metrics(cfg.objective_metrics, names)
+    assert "sbc_ks" in computed
+    assert "sbc_chi2" in computed
+    # Objectives and DEFAULT_METRICS are still there.
+    assert "calibration_error" in computed
+
+
+def test_soft_constraint_specs_are_canonicalized():
+    """Soft constraints reach ObjectiveConfig now, so they join the inventory."""
+    cfg = _config(metric_constraints_soft=[(_ALIAS, 0.1, "below")])
+    assert cfg.metric_constraints_soft == [(_CANONICAL, 0.1, "below")]

@@ -745,6 +745,13 @@ register_metric(
 register_metric(
     "bias", _bias_metric,
     description="Mean signed error (positive=overestimate, negative=underestimate).",
+    # Diagnostic-only, because signed bias has no minimizable direction: its
+    # optimum is ZERO, not negative infinity. Minimizing it drives the search
+    # toward ever more severe underestimation -- a model biased -10 outranks
+    # an unbiased one. Reading the sign is what the metric is for, so it is
+    # reported and never optimized. An absolute-bias objective would be
+    # minimizable, but that is a different metric and is not invented here.
+    kind="diagnostic",
 )
 register_metric(
     "mae", _mae_metric,

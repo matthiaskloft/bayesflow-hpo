@@ -499,6 +499,7 @@ def optimize(
         max_param_count=max_param_count,
         max_memory_mb=resolved_max_memory_mb,
         metric_constraints_hard=metric_constraints_hard,
+        metric_constraints_soft=metric_constraints_soft,
         n_posterior_samples=n_posterior_samples,
         objective_metrics=objective_metrics,
         objective_mode=objective_mode,
@@ -625,6 +626,7 @@ def _build_objective(
     max_param_count: int,
     max_memory_mb: float | None,
     metric_constraints_hard: list[MetricConstraintSpec] | None,
+    metric_constraints_soft: list[MetricConstraintSpec] | None = None,
     n_posterior_samples: int,
     objective_metrics: list[str],
     objective_mode: str,
@@ -655,6 +657,7 @@ def _build_objective(
             max_param_count=max_param_count,
             max_memory_mb=max_memory_mb,
             metric_constraints_hard=metric_constraints_hard,
+            metric_constraints_soft=metric_constraints_soft,
             n_posterior_samples=n_posterior_samples,
             objective_metrics=objective_metrics,
             objective_mode=objective_mode,
@@ -760,15 +763,6 @@ def _guard_resumed_study(
         )
 
     encoding = study.user_attrs.get("bayesflow_hpo_objective_encoding")
-    if encoding == OBJECTIVE_ENCODING_VERSION:
-        if metric_names is not None and stored_schema is None:
-            # Stamped before schemas were recorded. Nothing to compare
-            # against, so record it now rather than leaving the next resume
-            # equally blind.
-            study.set_user_attr(
-                "bayesflow_hpo_objective_schema", list(metric_names)
-            )
-        return
 
     # COMPLETE trials hold stored objective values. RUNNING and WAITING ones
     # will hold them shortly, and under shared storage they may belong to a
@@ -795,15 +789,43 @@ def _guard_resumed_study(
     # conversion is identical to before this change, so inferring would refuse
     # a study that is perfectly comparable.
     sensitive = [m for m in objective_metrics if m in ENCODING_CHANGED_AT_V2]
-    if has_trials and encoding is None and sensitive:
-        raise ValueError(
-            f"Study {study.study_name!r} holds trials written before objective "
-            f"values were normalized to minimize-is-better, and this run "
-            f"optimizes {sensitive!r}, whose stored values changed sign. Old "
-            "and new trials would sit on opposite scales in one Pareto front. "
-            "Start a new study, or drop the affected metric from "
-            "objective_metrics."
+    # ANY encoding that is not the current one, not merely a missing one. An
+    # older version, a future version written by a newer build, and a
+    # malformed caller-written value are all "provenance I cannot verify",
+    # and checking `encoding is None` waved the latter two straight through.
+    if has_trials and encoding != OBJECTIVE_ENCODING_VERSION and sensitive:
+        described = (
+            "before objective values were normalized to minimize-is-better"
+            if encoding is None
+            else f"under objective encoding {encoding!r}"
         )
+        raise ValueError(
+            f"Study {study.study_name!r} holds trials written {described}, "
+            f"and this run optimizes {sensitive!r}, whose stored values "
+            f"changed at encoding {OBJECTIVE_ENCODING_VERSION}. Old and new "
+            "trials would sit on different scales in one Pareto front. Start "
+            "a new study, or drop the affected metric from objective_metrics."
+        )
+    if encoding == OBJECTIVE_ENCODING_VERSION:
+        if has_trials and metric_names is not None and stored_schema is None:
+            # Correctly encoded, but which metric wrote each column is
+            # unknown. Adopting the current run's names would ASSERT they
+            # match rather than check it, and if the stored columns came from
+            # a different same-width metric set every later trial mixes
+            # meanings under a schema that now looks verified.
+            raise ValueError(
+                f"Study {study.study_name!r} holds trials but records no "
+                "objective schema, so the metric behind each column cannot "
+                "be verified. Start a new study, or set the study's "
+                "'bayesflow_hpo_objective_schema' user attribute to the "
+                "names it was actually run with "
+                f"(this run would use {list(metric_names)!r})."
+            )
+        if metric_names is not None and stored_schema is None:
+            study.set_user_attr(
+                "bayesflow_hpo_objective_schema", list(metric_names)
+            )
+        return
     if not has_trials:
         # Stamp ONLY a study with nothing in it yet. The stamp asserts "every
         # trial here was written by this encoding", and stamping a study that

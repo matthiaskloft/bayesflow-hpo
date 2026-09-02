@@ -602,22 +602,50 @@ def create_study(
     if metric_names and not getattr(study, "metric_names", None):
         study._metric_names = metric_names  # type: ignore[attr-defined]
     if warm_start_from is not None and len(study.trials) == 0:
+        # Provenance is validated BEFORE any trial is copied. Copied values
+        # carry both their encoding and the metric behind each column, so a
+        # target that inherits the encoding alone looks verified while its
+        # columns may mean something else entirely: the resume guard would
+        # then find no schema, record the *requested* names, and treat the
+        # copied values as though they had always represented those metrics.
+        source_schema = warm_start_from.user_attrs.get(
+            "bayesflow_hpo_objective_schema"
+        )
+        if isinstance(source_schema, (list, tuple)):
+            source_schema = list(source_schema)
+        else:
+            source_schema = None
+        if (
+            source_schema is not None
+            and metric_names is not None
+            and source_schema != list(metric_names)
+        ):
+            raise ValueError(
+                f"Cannot warm-start from study "
+                f"{warm_start_from.study_name!r}: it stores objectives "
+                f"{source_schema!r}, but this run produces "
+                f"{list(metric_names)!r}. Its trials would be copied into "
+                "columns that mean something else."
+            )
+
         warm_start_study(
             target_study=study,
             source_study=warm_start_from,
             top_k=warm_start_top_k,
         )
-        # Copying trials copies their encoding with them, so the target must
-        # inherit the source's provenance. Without this the target holds
-        # COMPLETE trials with no encoding attribute, which is exactly the
-        # signature of a legacy study -- and the resume guard would reject a
-        # perfectly valid warm start from an already-re-encoded study.
+        # Without this the target holds COMPLETE trials and no provenance --
+        # the exact signature of a legacy study -- so the resume guard would
+        # reject a perfectly valid warm start from an already-re-encoded one.
         source_encoding = warm_start_from.user_attrs.get(
             "bayesflow_hpo_objective_encoding"
         )
         if source_encoding is not None:
             study.set_user_attr(
                 "bayesflow_hpo_objective_encoding", source_encoding
+            )
+        if source_schema is not None:
+            study.set_user_attr(
+                "bayesflow_hpo_objective_schema", source_schema
             )
     return study
 

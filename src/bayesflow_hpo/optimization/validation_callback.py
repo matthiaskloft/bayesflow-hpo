@@ -307,11 +307,26 @@ class PeriodicValidationCallback(Callback):
         """Compute objective_metrics via validation pipeline."""
         try:
             if self.validate_fn is not None:
-                result_dict = self.validate_fn(
+                from bayesflow_hpo.validation.registry import (
+                    canonical_metric_name,
+                )
+
+                raw_result = self.validate_fn(
                     self.approximator,
                     self.validation_data,
                     self.n_posterior_samples,
                 )
+                # A hook returns the spelling its caller asked for, while
+                # `objective_metrics` was canonicalized at the API boundary.
+                # This is the third call site of that mismatch, after
+                # pre-flight and final validation: here every scheduled
+                # validation read as "missing", disabling pruning and -- in
+                # open_ended mode -- validation early stopping and best-weight
+                # restoration, behind nothing louder than a warning log.
+                result_dict = {
+                    canonical_metric_name(k): v
+                    for k, v in raw_result.items()
+                }
                 # Validate that all objective_metrics are present.
                 missing = [
                     k for k in self.objective_metrics
