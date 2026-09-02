@@ -44,6 +44,11 @@ _ALIASES: dict[str, str] = {}
 _DESCRIPTIONS: dict[str, str] = {}  # canonical name -> one-line description
 _KINDS: dict[str, str] = {}  # "objective" or "diagnostic"
 _REQUIRES: dict[str, str] = {}  # extra dependency, e.g. "sklearn"
+# canonical name -> summary keys it emits, when they are not the name
+# itself. A constraint names an output key, not the metric that produces
+# it, so without this a constraint on `left_coverage_90` found nothing to
+# compute and was silently inactive.
+_OUTPUTS: dict[str, tuple[str, ...]] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -59,6 +64,7 @@ def register_metric(
     description: str | None = None,
     kind: Literal["objective", "diagnostic"] = "objective",
     requires: str = "",
+    outputs: tuple[str, ...] = (),
 ) -> None:
     """Register a metric function under *name* (and optional aliases).
 
@@ -89,6 +95,13 @@ def register_metric(
         Extra dependency needed to compute this metric (e.g.
         ``"sklearn"``).  Empty string (default) means no extra
         dependencies beyond bayesflow and numpy.
+    outputs
+        Summary keys this metric emits, when they differ from *name* --
+        ``coverage_left`` emits ``left_coverage_90`` and friends.  A
+        constraint names an output key rather than its producer, so
+        without this declaration nothing computes the metric behind the
+        key and the constraint is silently inactive.  Empty (default)
+        means the metric emits *name* alone.
 
     Raises
     ------
@@ -122,6 +135,10 @@ def register_metric(
     if description is not None:
         _DESCRIPTIONS[name] = description
     _KINDS[name] = kind
+    if outputs:
+        _OUTPUTS[name] = tuple(outputs)
+    else:
+        _OUTPUTS.pop(name, None)
     if requires:
         _REQUIRES[name] = requires
     if aliases:
@@ -151,6 +168,62 @@ def get_metric(name: str) -> MetricFn:
     if canonical not in _REGISTRY:
         raise KeyError(f"Unknown metric '{name}'. Available: {list_metrics()}")
     return _REGISTRY[canonical]
+
+
+def canonical_metric_name(name: str) -> str:
+    """Resolve a metric alias to its canonical registered name.
+
+    Callers must agree on one spelling of a metric, because the validation
+    pipeline emits canonical names while a configuration may request an
+    alias. Where the two disagreed the lookup missed and inserted a penalty,
+    so every trial using a supported alias scored identically with no error
+    raised.
+
+    Parameters
+    ----------
+    name
+        Metric name as supplied by a caller: a canonical name, a registered
+        alias (e.g. ``"cal_error"``), or a custom name.
+
+    Returns
+    -------
+    str
+        The canonical name for a registered alias, otherwise *name*
+        unchanged. Passing through unknown names keeps this safe to apply to
+        custom metrics resolved by a caller's own ``validate_fn``.
+
+    See Also
+    --------
+    resolve_metrics : Resolve names to metric callables.
+    """
+    return _ALIASES.get(name, name)
+
+
+def producer_for_key(key: str) -> str | None:
+    """Return the metric that emits summary *key*, or ``None``.
+
+    A metric's own name is its output key in the common case; multi-output
+    diagnostics declare theirs via ``register_metric(outputs=...)``.
+
+    Parameters
+    ----------
+    key
+        A summary key as it appears in pipeline output, e.g.
+        ``"left_coverage_90"``.
+
+    Returns
+    -------
+    str or None
+        Canonical name of the producing metric, or ``None`` when no
+        registered metric claims *key*.
+    """
+    canonical = canonical_metric_name(key)
+    if canonical in _REGISTRY:
+        return canonical
+    for name, keys in _OUTPUTS.items():
+        if key in keys:
+            return name
+    return None
 
 
 def resolve_metrics(names: list[str]) -> dict[str, MetricFn]:
@@ -668,42 +741,86 @@ register_metric(
 )
 register_metric(
     "z_score", _bf_z_score,
+    outputs=(
+        "mean_z_score",
+        "mean_abs_z_score",
+    ),
     description="Posterior z-score (mean and mean-absolute; bias + calibration).",
     kind="diagnostic",
 )
 register_metric(
     "log_gamma", _bf_log_gamma,
-    description="Log-gamma calibration diagnostic from BayesFlow.",
+    description=(
+        "Log-gamma calibration statistic from BayesFlow. HIGHER IS BETTER -- "
+        "log_gamma < 0 rejects uniform ranks at the 5% level. BayesFlow "
+        "documents it as typically more sensitive than the KS or ChiSq tests. "
+        "Ranks marginal parameters only unless given data-dependent "
+        "test_quantities, which this wrapper does not."
+    ),
 )
 
 # Native metrics — SBC rank uniformity
 register_metric(
     "sbc_ks", _sbc_ks_metric,
-    description="SBC KS statistic (minimize -> 0 = uniform ranks).",
+    description=(
+        "SBC KS statistic (minimize -> 0 = uniform ranks). BayesFlow "
+        "documents log_gamma as typically more sensitive than this test."
+    ),
 )
 register_metric(
     "sbc_chi2", _sbc_chi2_metric,
-    description="SBC chi-squared statistic (minimize -> 0 = uniform ranks).",
+    description=(
+        "SBC chi-squared statistic (minimize -> 0 = uniform ranks). BayesFlow "
+        "documents log_gamma as typically more sensitive than this test."
+    ),
 )
 register_metric(
     "coverage", _coverage_two_sided,
+    outputs=(
+        "coverage_90",
+        "coverage_95",
+        "coverage_98",
+        "coverage_99",
+        "mean_cal_error",
+    ),
     aliases=["coverage_two_sided"],
     description="Two-sided SBC rank coverage at standard credible-interval levels.",
     kind="diagnostic",
 )
 register_metric(
     "coverage_left", _coverage_left,
+    outputs=(
+        "left_coverage_90",
+        "left_coverage_95",
+        "left_coverage_98",
+        "left_coverage_99",
+        "left_mean_cal_error",
+    ),
     description="Left-sided coverage (statistical efficiency).",
     kind="diagnostic",
 )
 register_metric(
     "coverage_right", _coverage_right,
+    outputs=(
+        "right_coverage_90",
+        "right_coverage_95",
+        "right_coverage_98",
+        "right_coverage_99",
+        "right_mean_cal_error",
+    ),
     description="Right-sided coverage (futility / conservatism).",
     kind="diagnostic",
 )
 register_metric(
     "bias", _bias_metric,
     description="Mean signed error (positive=overestimate, negative=underestimate).",
+    # Diagnostic-only, because signed bias has no minimizable direction: its
+    # optimum is ZERO, not negative infinity. Minimizing it drives the search
+    # toward ever more severe underestimation -- a model biased -10 outranks
+    # an unbiased one. Reading the sign is what the metric is for, so it is
+    # reported and never optimized. An absolute-bias objective would be
+    # minimizable, but that is a different metric and is not invented here.
+    kind="diagnostic",
 )
 register_metric(
     "mae", _mae_metric,

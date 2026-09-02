@@ -19,6 +19,7 @@ This module manages the Optuna study lifecycle.  Key design decisions:
 from __future__ import annotations
 
 import logging
+import warnings
 from collections.abc import Callable, Sequence
 from typing import Any
 
@@ -594,21 +595,77 @@ def create_study(
         sampler=sampler,
         pruner=pruner,
     )
-    # metric_names was added in Optuna >=4.x — pass it only when supported.
-    import inspect
-
-    if "metric_names" in inspect.signature(optuna.create_study).parameters:
-        create_kwargs["metric_names"] = metric_names
     study = optuna.create_study(**create_kwargs)
-    # Stash metric names as a fallback for result extraction.
-    if metric_names and not getattr(study, "metric_names", None):
-        study._metric_names = metric_names  # type: ignore[attr-defined]
-    if warm_start_from is not None and len(study.trials) == 0:
+    # `metric_names` is NOT a `create_study` parameter -- the guard that used
+    # to test for one was never true on any Optuna release, so the assignment
+    # below it always ran and set a private, in-memory-only attribute. The
+    # real API is `Study.set_metric_names` (Optuna >= 3.2), which persists to
+    # storage and survives a reload, so column provenance is recoverable
+    # rather than lost the moment the process exits.
+    if metric_names:
+        try:
+            with warnings.catch_warnings():
+                # set_metric_names is flagged experimental; the alternative is
+                # no persisted provenance at all.
+                warnings.simplefilter("ignore")
+                study.set_metric_names(list(metric_names))
+        except (AttributeError, RuntimeError) as exc:  # pragma: no cover
+            logger.debug("Could not persist metric names: %s", exc)
+            study._metric_names = metric_names  # type: ignore[attr-defined]
+    # A warm start that will copy nothing cannot import a foreign schema,
+    # so neither the check nor the encoding propagation below applies:
+    # `warm_start_top_k=0` is explicitly supported by `max(0, int(top_k))`,
+    # and a source with no COMPLETE trials has nothing to give either.
+    will_copy = warm_start_top_k > 0 and warm_start_from is not None and any(
+        t.state == TrialState.COMPLETE and t.values is not None
+        for t in warm_start_from.trials
+    )
+    if warm_start_from is not None and will_copy and len(study.trials) == 0:
+        # Provenance is validated BEFORE any trial is copied. Copied values
+        # carry both their encoding and the metric behind each column, so a
+        # target that inherits the encoding alone looks verified while its
+        # columns may mean something else entirely: the resume guard would
+        # then find no schema, record the *requested* names, and treat the
+        # copied values as though they had always represented those metrics.
+        source_schema = warm_start_from.user_attrs.get(
+            "bayesflow_hpo_objective_schema"
+        )
+        if isinstance(source_schema, (list, tuple)):
+            source_schema = list(source_schema)
+        else:
+            source_schema = None
+        if (
+            source_schema is not None
+            and metric_names is not None
+            and source_schema != list(metric_names)
+        ):
+            raise ValueError(
+                f"Cannot warm-start from study "
+                f"{warm_start_from.study_name!r}: it stores objectives "
+                f"{source_schema!r}, but this run produces "
+                f"{list(metric_names)!r}. Its trials would be copied into "
+                "columns that mean something else."
+            )
+
         warm_start_study(
             target_study=study,
             source_study=warm_start_from,
             top_k=warm_start_top_k,
         )
+        # Without this the target holds COMPLETE trials and no provenance --
+        # the exact signature of a legacy study -- so the resume guard would
+        # reject a perfectly valid warm start from an already-re-encoded one.
+        source_encoding = warm_start_from.user_attrs.get(
+            "bayesflow_hpo_objective_encoding"
+        )
+        if source_encoding is not None:
+            study.set_user_attr(
+                "bayesflow_hpo_objective_encoding", source_encoding
+            )
+        if source_schema is not None:
+            study.set_user_attr(
+                "bayesflow_hpo_objective_schema", source_schema
+            )
     return study
 
 

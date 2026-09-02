@@ -183,6 +183,36 @@ https://doi.org/10.48550/arXiv.2306.03580
 Reference-free local posterior diagnostic using joint samples p(theta, x).
 Implementation: `bayesflow_hpo.validation.c2st.lc2st()`.
 
+### Modrák, M., Moon, A. H., Kim, S., Bürkner, P.-C., Huurre, N., Faltejsková, K., Gelman, A., & Vehtari, A. (2025)
+
+Simulation-based calibration checking for Bayesian computation: The choice of
+test quantities shapes sensitivity. *Bayesian Analysis, 20*(2), 461--488.
+https://doi.org/10.1214/23-BA1404
+
+Source of the log-gamma calibration statistic, `log(gamma/gamma_null)`, where
+`gamma_null` is the 5th percentile of the null distribution under uniformity of
+ranks. This is what fixes the metric's **direction**: `log_gamma < 0` rejects
+the hypothesis of uniform ranks at the 5% level, so larger is better, and
+minimizing it would search for the most miscalibrated model available.
+Recorded in `bayesflow_hpo.objectives.METRIC_DIRECTIONS`; the metric itself is
+wrapped from BayesFlow in `bayesflow_hpo.validation.registry._bf_log_gamma`.
+
+The same paper backs two limits on what the statistic can do. Rank-based
+calibration over *marginal* parameters returns a clean result for a posterior
+that ignores the data entirely, so switching the objective from
+`calibration_error` to `log_gamma` improves sensitivity without closing that
+blind spot -- detecting it requires test quantities that are functions of data
+*and* parameters. And averaging a calibration statistic across conditions lets
+opposite failures cancel, which is why per-corner reduction belongs to the
+caller rather than the objective.
+
+Bibliographic record verified against OpenAlex work `W4388952075`: eight
+authors as listed, *Bayesian Analysis* volume 20, issue 2, pages 461--488, DOI
+`10.1214/23-BA1404`. OpenAlex reports `publication_year` 2023 from the
+2023-11-23 online-first posting; the issue itself is dated June 2025, which is
+the year cited here and the one BayesFlow's own `calibration_log_gamma`
+docstring uses.
+
 ### Lopez-Paz, D., & Oquab, M. (2017)
 
 Revisiting classifier two-sample tests. In *Proceedings of the 5th

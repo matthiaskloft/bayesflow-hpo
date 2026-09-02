@@ -22,7 +22,10 @@ from bayesflow_hpo.optimization.objective import default_train_fn, default_valid
 from bayesflow_hpo.search_spaces.composite import CompositeSearchSpace
 from bayesflow_hpo.types import BuildApproximatorFn, TrainFn, ValidateFn
 from bayesflow_hpo.validation.data import generate_validation_dataset
-from bayesflow_hpo.validation.registry import validate_objective_metric_kinds
+from bayesflow_hpo.validation.registry import (
+    canonical_metric_name,
+    validate_objective_metric_kinds,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -208,6 +211,9 @@ def check_pipeline(
     """
     if objective_metrics is None:
         objective_metrics = ["calibration_error", "nrmse"]
+    # Public entry point, so canonicalize here too: `optimize()` already hands
+    # us canonical names, but a direct caller may not.
+    objective_metrics = [canonical_metric_name(m) for m in objective_metrics]
     validate_objective_metric_kinds(objective_metrics)
 
     # --- Step 0: Validate hook signatures ---
@@ -320,9 +326,22 @@ def check_pipeline(
         raise PipelineError(f"Training step failed: {exc}") from exc
 
     # --- Step 6: Validate ---
-    actual_validate_fn = validate_fn if validate_fn is not None else default_validate_fn
     try:
-        result = actual_validate_fn(approximator, validation_data, n_posterior_samples)
+        if validate_fn is not None:
+            # A custom hook keeps the documented 3-argument contract.
+            result = validate_fn(
+                approximator, validation_data, n_posterior_samples
+            )
+        else:
+            # The built-in validator has to be told which metrics this run
+            # optimizes, or it computes DEFAULT_METRICS only and the missing
+            # key check below rejects every non-default objective.
+            result = default_validate_fn(
+                approximator,
+                validation_data,
+                n_posterior_samples,
+                objective_metrics=objective_metrics,
+            )
     except Exception as exc:
         raise PipelineError(f"Validation step failed: {exc}") from exc
 
@@ -330,6 +349,11 @@ def check_pipeline(
         raise PipelineError(
             f"validate_fn must return dict[str, float], got {type(result).__name__}"
         )
+
+    # A custom hook returns the spelling its caller asked for, which may be an
+    # alias; `objective_metrics` is already canonical. Meet in canonical space
+    # so pre-flight does not reject a hook honouring the documented contract.
+    result = {canonical_metric_name(k): v for k, v in result.items()}
 
     missing_keys = set(objective_metrics) - set(result.keys())
     if missing_keys:

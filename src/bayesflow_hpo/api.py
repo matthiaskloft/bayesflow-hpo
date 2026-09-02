@@ -9,6 +9,10 @@ from typing import Any, Literal
 import bayesflow as bf
 import optuna
 
+from bayesflow_hpo.objectives import (
+    ENCODING_CHANGED_AT_V2,
+    OBJECTIVE_ENCODING_VERSION,
+)
 from bayesflow_hpo.optimization.checkpoint_pool import CheckpointPool
 from bayesflow_hpo.optimization.constraints import (
     MetricConstraintSpec,
@@ -28,7 +32,10 @@ from bayesflow_hpo.validation.data import (
     ValidationDataset,
     generate_validation_dataset,
 )
-from bayesflow_hpo.validation.registry import validate_objective_metric_kinds
+from bayesflow_hpo.validation.registry import (
+    canonical_metric_name,
+    validate_objective_metric_kinds,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -349,6 +356,18 @@ def optimize(
     directions
         Optimization directions.  Default ``None`` (auto-derived as
         ``["minimize"] * n_objectives``).
+
+        An explicit list must have exactly ``n_objectives`` entries, and
+        every entry must be ``"minimize"``; anything else raises. The
+        objective already converts each metric to minimize-is-better through
+        :data:`bayesflow_hpo.objectives.METRIC_DIRECTIONS`, and the failure
+        penalties are in minimize space too, so a ``"maximize"`` entry inverts
+        that a second time -- the search would then prefer the *worst* model
+        and the failure penalty would become its most attractive value, with
+        nothing in the study output looking wrong. To optimize a
+        higher-is-better metric, register its direction with
+        :func:`bayesflow_hpo.objectives.register_metric_direction` and leave
+        this ``None``.
     warm_start_from
         Optional source ``optuna.Study`` to seed initial trials from.
     warm_start_top_k
@@ -399,7 +418,23 @@ def optimize(
     """
     if objective_metrics is None:
         objective_metrics = ["calibration_error", "nrmse"]
+    # Canonicalize at the PUBLIC boundary, before anything downstream sees the
+    # names. Doing it inside ObjectiveConfig was too late: `check_pipeline`
+    # already ran pre-flight against the caller's spelling, so
+    # `objective_metrics=["cal_error"]` either failed pre-flight (the default
+    # validator emits `calibration_error`) or passed pre-flight and then had
+    # every trial penalized at runtime, depending on which validator was used.
+    objective_metrics = [canonical_metric_name(m) for m in objective_metrics]
     validate_objective_metric_kinds(objective_metrics)
+    # Soft constraints bypass ObjectiveConfig entirely -- they are handed
+    # straight to `create_study` -- so they are canonicalized here or nowhere.
+    # An aliased name never matches the pipeline's key, and a soft constraint
+    # reads a missing key as zero violation: silently inactive, no error.
+    if metric_constraints_soft is not None:
+        metric_constraints_soft = [
+            (canonical_metric_name(name), threshold, direction)
+            for name, threshold, direction in metric_constraints_soft
+        ]
 
     # --- Early validation ---
     if report_frequency < 1:
@@ -446,6 +481,12 @@ def optimize(
             "instance. Soft constraints are only auto-wired for sampler presets; "
             "skipping soft constraints."
         )
+        # The warning said "skipping", but the specs still reached
+        # ObjectiveConfig, so `_constraint_metric_names()` made final
+        # validation compute every metric behind them -- work no sampler
+        # consumes, and a failure path for an optional or custom metric that
+        # should have been irrelevant here.
+        metric_constraints_soft = None
 
     # Step 4: Build objective
     objective = _build_objective(
@@ -465,6 +506,7 @@ def optimize(
         max_param_count=max_param_count,
         max_memory_mb=resolved_max_memory_mb,
         metric_constraints_hard=metric_constraints_hard,
+        metric_constraints_soft=metric_constraints_soft,
         n_posterior_samples=n_posterior_samples,
         objective_metrics=objective_metrics,
         objective_mode=objective_mode,
@@ -591,6 +633,7 @@ def _build_objective(
     max_param_count: int,
     max_memory_mb: float | None,
     metric_constraints_hard: list[MetricConstraintSpec] | None,
+    metric_constraints_soft: list[MetricConstraintSpec] | None = None,
     n_posterior_samples: int,
     objective_metrics: list[str],
     objective_mode: str,
@@ -621,6 +664,7 @@ def _build_objective(
             max_param_count=max_param_count,
             max_memory_mb=max_memory_mb,
             metric_constraints_hard=metric_constraints_hard,
+            metric_constraints_soft=metric_constraints_soft,
             n_posterior_samples=n_posterior_samples,
             objective_metrics=objective_metrics,
             objective_mode=objective_mode,
@@ -633,6 +677,241 @@ def _build_objective(
             checkpoint_pool=checkpoint_pool,
         )
     )
+
+
+def _normalize_schema_entry(entry: str) -> str:
+    """Put a ``mean(...)`` column into a canonical, order-independent form.
+
+    Mean mode stores a single arithmetic mean, so the order of the metrics
+    inside the name carries no meaning and two spellings of the same objective
+    must compare equal. Sorting only at construction would not be enough: a
+    study stamped by an earlier build holds the members in whatever order that
+    run requested them, and would then be refused on resume.
+
+    Pareto columns are returned unchanged -- there order IS meaning, because
+    Optuna addresses objectives by position.
+    """
+    if not (entry.startswith("mean(") and entry.endswith(")")):
+        return entry
+    members = entry[len("mean(") : -1].split("+")
+    return "mean(" + "+".join(sorted(members)) + ")"
+
+
+def _schema_matches(stored: list[str], current: list[str]) -> bool:
+    """Compare two objective schemas, tolerating mean-mode member order."""
+    if len(stored) != len(current):
+        return False
+    return [_normalize_schema_entry(e) for e in stored] == [
+        _normalize_schema_entry(e) for e in current
+    ]
+
+
+def _encoding_sensitive(metric: str) -> bool:
+    """Did *metric*'s stored numbers change at objective encoding 2?
+
+    ``ENCODING_CHANGED_AT_V2`` lists the registered metrics whose values moved.
+    It cannot list a custom metric supplied through a caller's ``validate_fn``,
+    and those moved too: an unregistered name's failure and missing-value
+    penalty went from a finite ``1.0`` to ``+inf``. Resuming an unstamped study
+    with such a metric therefore leaves old failures able to dominate valid new
+    values above 1, which is the inversion this guard exists to prevent.
+
+    So membership of the set is not the question -- provable *absence* of
+    change is. A registered metric outside the set is known unchanged, because
+    ``TestEncodingChangeSetIsDerived`` recomputes that set from the pre-change
+    rule. Anything else is treated as changed.
+    """
+    from bayesflow_hpo.validation.registry import list_metrics
+
+    if metric in ENCODING_CHANGED_AT_V2:
+        return True
+    return metric not in set(list_metrics())
+
+
+def _guard_resumed_study(
+    study: optuna.Study,
+    objective_metrics: list[str],
+    metric_names: list[str] | None = None,
+) -> None:
+    """Refuse to continue a study whose stored values mean something else.
+
+    Three hazards, all silent, and all specific to *resuming*.
+
+    Optuna's ``create_study(load_if_exists=True)`` returns the stored study and
+    keeps ITS directions, ignoring the ones requested here. This is documented,
+    not inferred: ``optuna.create_study`` says of ``load_if_exists`` that where
+    a study of that name already exists in the storage, "the creation of the
+    study is skipped, and the existing one is returned" (Optuna 4.9.0
+    docstring; https://optuna.readthedocs.io/en/stable/reference/generated/
+    optuna.create_study.html). Nothing reconciles the requested ``directions``
+    with the stored ones. So a study created before objective values became
+    minimize-space
+    retains its ``maximize`` direction, never reaches
+    :func:`_derive_directions` (the caller passes ``directions=None``), and
+    then maximizes the newly negated values: the search would prefer the worst
+    model available.
+
+    Separately, trials stored under an older encoding hold raw values for a
+    metric this version negates, so old and new trials in one study are on
+    opposite scales. The sampler and the Pareto computation would compare them
+    directly.
+
+    Thirdly, the encoding stamp says *how* values were encoded but nothing
+    about *which* metric produced each column. Two runs with the same number
+    of objectives but a different metric list -- or the same list in a
+    different order -- write into the same columns, and the Pareto front then
+    compares one metric against another. Both reviewers raised this
+    independently, and ``metric_names`` already carries the whole schema:
+    metric order, the ``objective_mode`` wrapper, and the cost metric.
+
+    None of the three is repairable in place, so all refuse rather than warn.
+
+    Parameters
+    ----------
+    study
+        The study just created or loaded.
+    objective_metrics
+        Canonical objective metric names for this run.
+    metric_names
+        Ordered names of the study's objective columns, as built by
+        :func:`_derive_directions`. Recorded on a fresh study and compared on
+        a resumed one. ``None`` skips the schema check, for callers that have
+        not derived them.
+
+    Raises
+    ------
+    ValueError
+        If the study carries a non-minimize direction, holds trials written
+        under an older objective encoding while an encoding-sensitive metric
+        is in use, or was built for a different objective schema.
+    """
+    if any(d != optuna.study.StudyDirection.MINIMIZE for d in study.directions):
+        raise ValueError(
+            f"Study {study.study_name!r} was created with directions "
+            f"{[d.name.lower() for d in study.directions]}, but this version "
+            "returns minimize-is-better objective values for every metric. "
+            "Optuna keeps a loaded study's own directions, so continuing "
+            "would maximize already-negated values and select the worst "
+            "model. Start a new study."
+        )
+
+    # The schema check runs BEFORE the encoding early-return: a study can be
+    # correctly encoded and still have its columns mean different metrics.
+    # `user_attrs` is caller-writable and round-trips through JSON, so the
+    # stored value is checked for type rather than assumed to be a name list.
+    # Anything else is treated as absent: refusing on an unrecognized value
+    # would block a study over something this guard cannot interpret.
+    stored_schema = study.user_attrs.get("bayesflow_hpo_objective_schema")
+    if not isinstance(stored_schema, (list, tuple)):
+        stored_schema = None
+    if (
+        metric_names is not None
+        and stored_schema is not None
+        and not _schema_matches(list(stored_schema), list(metric_names))
+    ):
+        raise ValueError(
+            f"Study {study.study_name!r} stores objectives "
+            f"{list(stored_schema)!r}, but this run produces "
+            f"{list(metric_names)!r}. Optuna addresses objectives by position, "
+            "so continuing would compare one metric against another in the "
+            "same column. Start a new study, or restore the original "
+            "objective_metrics, objective_mode and cost_metric."
+        )
+
+    encoding = study.user_attrs.get("bayesflow_hpo_objective_encoding")
+
+    # COMPLETE trials hold stored objective values. RUNNING and WAITING ones
+    # will hold them shortly, and under shared storage they may belong to a
+    # worker on an older version: counting only COMPLETE let a new worker stamp
+    # the study while an old worker's `log_gamma` trial was still in flight,
+    # and its raw value then landed in a study marked as fully re-encoded.
+    # FAILED and PRUNED trials store no objective values, so they neither
+    # block nor need protecting.
+    settled = [
+        t for t in study.trials
+        if t.state == optuna.trial.TrialState.COMPLETE
+    ]
+    active = [
+        t for t in study.trials
+        if t.state in (
+            optuna.trial.TrialState.RUNNING,
+            optuna.trial.TrialState.WAITING,
+        )
+    ]
+    has_trials = bool(settled or active)
+    # Only metrics whose stored numbers changed make old trials incomparable.
+    # Read from an explicit record, not inferred from `higher_is_better`:
+    # `contraction` is higher-is-better AND a usable objective, but its
+    # conversion is identical to before this change, so inferring would refuse
+    # a study that is perfectly comparable.
+    sensitive = [m for m in objective_metrics if _encoding_sensitive(m)]
+    # ANY encoding that is not the current one, not merely a missing one. An
+    # older version, a future version written by a newer build, and a
+    # malformed caller-written value are all "provenance I cannot verify",
+    # and checking `encoding is None` waved the latter two straight through.
+    # `ENCODING_CHANGED_AT_V2` establishes compatibility between the legacy
+    # encoding and version 2, and says nothing about any other version. An
+    # unrecognized encoding -- a future build's, or a malformed caller-written
+    # value -- therefore cannot exempt any metric, however unaffected it was
+    # by the v2 change.
+    unverifiable = encoding is not None and encoding != OBJECTIVE_ENCODING_VERSION
+    if has_trials and encoding != OBJECTIVE_ENCODING_VERSION and (
+        sensitive or unverifiable
+    ):
+        described = (
+            "before objective values were normalized to minimize-is-better"
+            if encoding is None
+            else f"under objective encoding {encoding!r}"
+        )
+        reason = (
+            f"this run optimizes {sensitive!r}, whose stored values changed "
+            f"at encoding {OBJECTIVE_ENCODING_VERSION}"
+            if sensitive
+            else "that encoding is not one this version can reason about, so "
+            "no metric can be assumed comparable"
+        )
+        raise ValueError(
+            f"Study {study.study_name!r} holds trials written {described}, "
+            f"and {reason}. Old and new trials would sit on different scales "
+            "in one Pareto front. Start a new study, or drop the affected "
+            "metric from objective_metrics."
+        )
+    if encoding == OBJECTIVE_ENCODING_VERSION:
+        if has_trials and metric_names is not None and stored_schema is None:
+            # Correctly encoded, but which metric wrote each column is
+            # unknown. Adopting the current run's names would ASSERT they
+            # match rather than check it, and if the stored columns came from
+            # a different same-width metric set every later trial mixes
+            # meanings under a schema that now looks verified.
+            raise ValueError(
+                f"Study {study.study_name!r} holds trials but records no "
+                "objective schema, so the metric behind each column cannot "
+                "be verified. Start a new study, or set the study's "
+                "'bayesflow_hpo_objective_schema' user attribute to the "
+                "names it was actually run with "
+                f"(this run would use {list(metric_names)!r})."
+            )
+        if metric_names is not None and stored_schema is None:
+            study.set_user_attr(
+                "bayesflow_hpo_objective_schema", list(metric_names)
+            )
+        return
+    if not has_trials:
+        # Stamp ONLY a study with nothing in it yet. The stamp asserts "every
+        # trial here was written by this encoding", and stamping a study that
+        # already holds pre-encoding trials would make that assertion false --
+        # a legacy study resumed once with an unaffected metric would be
+        # marked compatible, and a later resume with `log_gamma` would then
+        # sail past this guard and mix encodings after all. Leaving it
+        # unstamped costs nothing: the check below re-evaluates against
+        # whichever metrics are actually in use each time.
+        if metric_names is not None:
+            study.set_user_attr(
+                "bayesflow_hpo_objective_schema", list(metric_names)
+            )
+        study.set_user_attr(
+            "bayesflow_hpo_objective_encoding", OBJECTIVE_ENCODING_VERSION
+        )
 
 
 def _derive_directions(
@@ -653,6 +932,24 @@ def _derive_directions(
     n_obj = objective.n_objectives
     if directions is None:
         directions = ["minimize"] * n_obj
+    elif any(d != "minimize" for d in directions):
+        # Every value the objective returns is already in minimize space:
+        # higher-is-better metrics are converted through METRIC_DIRECTIONS,
+        # and the failure penalties are minimize-space too. Applying
+        # "maximize" on top inverts that a second time, so a good raw
+        # log_gamma of 1.5 (objective -1.5) would rank below a bad -25.5
+        # (objective 25.5) -- and the +inf failure penalty would become the
+        # single most attractive value in the study. Silently accepting the
+        # override would make the search optimize for the worst model with
+        # nothing in the output looking wrong.
+        raise ValueError(
+            "directions must be all 'minimize': the objective already "
+            "converts every metric to minimize-is-better via "
+            "bayesflow_hpo.objectives.METRIC_DIRECTIONS, so a 'maximize' "
+            f"entry inverts it a second time. Got {directions!r}. To optimize "
+            "a higher-is-better metric, register its direction with "
+            "register_metric_direction() and leave directions=None."
+        )
     elif len(directions) != n_obj:
         raise ValueError(
             f"directions has {len(directions)} entries but the "
@@ -666,7 +963,13 @@ def _derive_directions(
     if objective_mode == "pareto":
         metric_names = list(objective_metrics) + [cost_metric]
     else:
-        metric_names = ["mean(" + "+".join(objective_metrics) + ")", cost_metric]
+        # Sorted because the mean is commutative: the column holds one
+        # arithmetic mean, so `mean(nrmse+log_gamma)` and
+        # `mean(log_gamma+nrmse)` are the same objective and must compare
+        # equal on resume. Order stays significant for pareto mode, where
+        # each metric owns a column.
+        joined = "+".join(sorted(objective_metrics))
+        metric_names = [f"mean({joined})", cost_metric]
 
     return directions, metric_names
 
@@ -711,6 +1014,9 @@ def _create_and_run_study(
         warm_start_from=warm_start_from,
         warm_start_top_k=warm_start_top_k,
         qmc_startup_trials=qmc_startup_trials,
+    )
+    _guard_resumed_study(
+        study, objective.config.objective_metrics, metric_names
     )
 
     # Auto-detect n_startup_trials from sampler if not set explicitly.

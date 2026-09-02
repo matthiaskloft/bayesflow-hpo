@@ -1,10 +1,14 @@
 """Tests for objective extraction and param normalization."""
 
+import math
+
 import numpy as np
 import pytest
 
 from bayesflow_hpo.objectives import (
+    HIGHER_IS_BETTER,
     MAX_PARAM_COUNT,
+    METRIC_DIRECTIONS,
     MIN_PARAM_COUNT,
     _metric_to_minimize,
     compute_inference_time_per_dataset,
@@ -13,6 +17,8 @@ from bayesflow_hpo.objectives import (
     extract_objective_values,
     mean_objective_score,
     normalize_param_count,
+    register_metric_direction,
+    worst_objective_value,
 )
 
 
@@ -85,7 +91,15 @@ def test_extract_multi_with_correlation():
 
 
 def test_extract_multi_missing_metric_returns_worst():
-    """Missing lower-is-better metric defaults to 1.0 (worst)."""
+    """An unregistered missing metric defaults to +inf, not 1.0.
+
+    Re-baselined with reasoning rather than to make the suite green. Nothing
+    is known about an unregistered metric's scale, so no finite constant is
+    defensible: with 1.0, a custom RMSE-like metric reporting 100.0 lost to a
+    trial that reported nothing at all -- the same "missing beats bad"
+    inversion found separately for `log_gamma` and `correlation`. Registering
+    the metric is how a caller supplies a tighter bound.
+    """
     metrics = {"summary": {"nrmse": 0.1}}
     values = extract_multi_objective_values(
         metrics,
@@ -93,11 +107,17 @@ def test_extract_multi_missing_metric_returns_worst():
         objective_metrics=["nrmse", "nonexistent_key"],
         objective_mode="pareto",
     )
-    assert values[1] == 1.0  # fallback for missing lower-is-better key
+    assert values[1] == math.inf
 
 
 def test_extract_multi_missing_correlation_returns_worst():
-    """Missing higher-is-better metric should default to worst (1.0 after inversion)."""
+    """A missing correlation must be worse than any value it could report.
+
+    This previously asserted 1.0, from a default raw correlation of 0.0. That
+    was wrong: Pearson correlation runs [-1, 1], so a reported -0.5 maps to
+    1.5 -- worse than the penalty. A missing value beat a genuinely negative
+    one. The worst raw correlation is -1.0, giving 2.0.
+    """
     metrics = {"summary": {"calibration_error": 0.05}}
     values = extract_multi_objective_values(
         metrics,
@@ -105,8 +125,8 @@ def test_extract_multi_missing_correlation_returns_worst():
         objective_metrics=["calibration_error", "correlation"],
         objective_mode="pareto",
     )
-    # correlation missing -> default 0.0 -> _metric_to_minimize: 1.0 - 0.0 = 1.0
-    assert values[1] == 1.0
+    assert values[1] == 2.0
+    assert values[1] > _metric_to_minimize("correlation", -0.99)
 
 
 def test_extract_legacy_applies_metric_to_minimize():
@@ -270,3 +290,238 @@ def test_inference_time_per_dataset_zero_datasets():
     """n_datasets=0 uses max(0, 1)=1 to avoid division by zero."""
     result = compute_inference_time_per_dataset(5.0, n_datasets=0)
     assert np.isclose(result, 5.0)
+
+
+class TestLogGammaDirection:
+    """`log_gamma` runs opposite to every other calibration metric.
+
+    BayesFlow's `calibration_log_gamma` returns log(gamma/gamma_null) and
+    documents `log_gamma < 0` as rejecting the hypothesis of uniform ranks at
+    the 5% level. Larger is better. Before this was recorded, `log_gamma`
+    passed through `_metric_to_minimize` unchanged, so Optuna minimized it and
+    would have selected the most miscalibrated model in the study -- silently,
+    since nothing in the output looks wrong.
+    """
+
+    def test_a_well_calibrated_model_beats_a_miscalibrated_one(self):
+        good = _metric_to_minimize("log_gamma", 1.5)
+        bad = _metric_to_minimize("log_gamma", -25.5)
+        assert good < bad, (
+            "Optuna minimizes, so the better-calibrated model must map to the "
+            "SMALLER objective value"
+        )
+
+    def test_conversion_is_negation_not_one_minus(self):
+        """`1 - v` is meaningless for an unbounded log-ratio."""
+        assert _metric_to_minimize("log_gamma", -25.5) == 25.5
+        assert _metric_to_minimize("log_gamma", 1.5) == -1.5
+
+    def test_bounded_metrics_keep_the_one_minus_conversion(self):
+        """The scales differ; correlation must not change behaviour."""
+        assert np.isclose(_metric_to_minimize("correlation", 0.8), 0.2)
+        assert np.isclose(_metric_to_minimize("contraction", 0.8), 0.2)
+
+    def test_log_gamma_is_reported_as_higher_is_better(self):
+        assert "log_gamma" in HIGHER_IS_BETTER
+        assert METRIC_DIRECTIONS["log_gamma"].higher_is_better is True
+
+    def test_unknown_metrics_pass_through_unchanged(self):
+        """Error-style metrics have no entry and must stay as they are."""
+        assert _metric_to_minimize("some_custom_error", 0.3) == 0.3
+
+
+class TestMissingMetricDefaults:
+    def test_a_missing_log_gamma_does_not_look_excellent(self):
+        """The old cross-metric fallback made a missing metric a winner.
+
+        `extract_objective_values` used to substitute `calibration_error` for
+        any missing objective. For `log_gamma` that is catastrophic: a good
+        calibration_error of 0.05 becomes an objective of -0.05, which under
+        minimization beats every real log_gamma a trial could report. A trial
+        that failed to produce the metric would outrank every trial that did.
+        """
+        metrics = {"summary": {"calibration_error": 0.05, "nrmse": 0.2}}
+        value, _ = extract_objective_values(metrics, 1.0, "log_gamma")
+        assert value == worst_objective_value("log_gamma")
+        assert value > _metric_to_minimize("log_gamma", -50.0)
+
+    def test_an_unknown_metric_does_not_borrow_calibration_error(self) -> None:
+        """Absence from the table establishes neither direction nor scale.
+
+        This previously substituted `calibration_error` for any unregistered
+        objective. A missing `custom_rmse` would take calibration_error's
+        0.05, while a genuinely reported custom RMSE can be 100 -- so the
+        missing metric wins. An earlier version of this test asserted the
+        substitution, which enshrined the assumption rather than checking it.
+        """
+        metrics = {"summary": {"calibration_error": 0.05}}
+        value, _ = extract_objective_values(metrics, 1.0, "custom_rmse")
+        assert value == worst_objective_value("custom_rmse")
+        assert value != pytest.approx(0.05)
+
+    def test_legacy_higher_is_better_removal_is_honoured(self) -> None:
+        """The old set controlled conversion by content, both ways.
+
+        Supporting only additions would silently ignore a consumer that
+        removed a built-in to make it pass through.
+        """
+        assert _metric_to_minimize("contraction", 0.8) == pytest.approx(0.2)
+        HIGHER_IS_BETTER.discard("contraction")
+        try:
+            assert _metric_to_minimize("contraction", 0.8) == pytest.approx(0.8)
+            # Removing it makes the metric unknown, and an unknown scale now
+            # takes +inf rather than a finite 1.0 -- the conversion claim
+            # above is what this test is about, and it is unchanged.
+            assert worst_objective_value("contraction") == math.inf
+        finally:
+            HIGHER_IS_BETTER.add("contraction")
+        assert _metric_to_minimize("contraction", 0.8) == pytest.approx(0.2)
+
+    def test_register_metric_direction_round_trips(self) -> None:
+        register_metric_direction(
+            "my_unbounded_score",
+            higher_is_better=True,
+            worst_raw=-math.inf,
+            to_minimize=lambda v: -v,
+        )
+        try:
+            assert _metric_to_minimize("my_unbounded_score", 3.0) == -3.0
+            assert math.isinf(worst_objective_value("my_unbounded_score"))
+            assert "my_unbounded_score" in HIGHER_IS_BETTER
+        finally:
+            METRIC_DIRECTIONS.pop("my_unbounded_score", None)
+            HIGHER_IS_BETTER.discard("my_unbounded_score")
+
+    def test_missing_worst_case_is_not_converted_twice(self):
+        """`worst_objective_value` is already in minimize space."""
+        metrics = {"summary": {"nrmse": 0.2}}
+        values = extract_multi_objective_values(
+            metrics, 1.0, ["log_gamma", "nrmse"], objective_mode="pareto"
+        )
+        assert values[0] == worst_objective_value("log_gamma")
+        assert values[0] > 0, "a double negation would flip this negative"
+
+    def test_missing_correlation_still_maps_to_its_worst(self):
+        metrics = {"summary": {"nrmse": 0.2}}
+        values = extract_multi_objective_values(
+            metrics, 1.0, ["correlation", "nrmse"], objective_mode="pareto"
+        )
+        assert values[0] == pytest.approx(2.0)
+
+    def test_a_catastrophic_value_still_ranks_better_than_a_missing_one(self):
+        """A finite penalty can be beaten, which inverts the intent.
+
+        log_gamma is unbounded below, so no finite constant is provably its
+        worst value. With a penalty of 1e3, a real log_gamma of -5000 would
+        score worse than a missing one -- i.e. failing to report the metric
+        would look better than reporting a catastrophic value.
+        """
+        assert _metric_to_minimize("log_gamma", -5000.0) < worst_objective_value(
+            "log_gamma"
+        )
+
+    @pytest.mark.parametrize("metric", ["sbc_ks", "sbc_chi2"])
+    def test_sbc_tests_take_their_own_penalty_not_calibration_errors(
+        self, metric
+    ):
+        """Built-in metrics must not silently borrow another's value."""
+        metrics = {"summary": {"calibration_error": 0.05, "nrmse": 0.2}}
+        value, _ = extract_objective_values(metrics, 1.0, metric)
+        assert value == worst_objective_value(metric)
+        assert value != pytest.approx(0.05)
+
+    @pytest.mark.parametrize("metric", ["sbc_ks", "sbc_chi2"])
+    def test_sbc_tests_pass_through_unchanged_when_present(self, metric):
+        """They are lower-is-better; the entry must not flip them."""
+        assert _metric_to_minimize(metric, 0.3) == 0.3
+
+    @pytest.mark.parametrize("metric", ["sbc_ks", "sbc_chi2"])
+    def test_sbc_tests_missing_in_multi_objective(self, metric):
+        metrics = {"summary": {"nrmse": 0.2}}
+        values = extract_multi_objective_values(
+            metrics, 1.0, [metric, "nrmse"], objective_mode="pareto"
+        )
+        assert values[0] == worst_objective_value(metric)
+
+    def test_only_the_bounded_metrics_get_a_finite_worst_case(self):
+        """KS is a sup of a CDF difference; chi-squared is unbounded above."""
+        assert worst_objective_value("sbc_ks") == 1.0
+        assert math.isinf(worst_objective_value("sbc_chi2"))
+        assert math.isinf(worst_objective_value("log_gamma"))
+        # Pearson runs [-1, 1], so its worst minimize-space value is 2.0.
+        assert worst_objective_value("correlation") == 2.0
+        assert worst_objective_value("contraction") == 1.0
+
+
+class TestEncodingChangeSetIsDerived:
+    """`ENCODING_CHANGED_AT_V2` must be computed, not remembered.
+
+    Its first version listed `log_gamma` alone. That came from diffing the
+    conversion function and stopping there -- but a trial stores a number for
+    two reasons, and the *penalty* substituted for a missing metric moved as
+    well. `correlation` went from an objective penalty of 1.0 to 2.0, so a
+    legacy study's old failed trials outranked new ones while the guard waved
+    it through. Reading the diff is exactly what failed; this computes it.
+    """
+
+    # The pre-change rule, reproduced from `git show b93501b~1`: conversion was
+    # `1 - value` for these two names and pass-through otherwise, and the
+    # missing-metric substitute was `0.0 if key in HIGHER_IS_BETTER else 1.0`.
+    _OLD_HIGHER_IS_BETTER = {"correlation", "contraction"}
+
+    def _old_penalty(self, name: str) -> float:
+        raw = 0.0 if name in self._OLD_HIGHER_IS_BETTER else 1.0
+        return (1.0 - raw) if name in self._OLD_HIGHER_IS_BETTER else raw
+
+    def _old_conversion(self, name: str, value: float) -> float:
+        return (1.0 - value) if name in self._OLD_HIGHER_IS_BETTER else value
+
+    def test_the_declared_set_matches_the_computed_one(self) -> None:
+        from bayesflow_hpo.objectives import (
+            ENCODING_CHANGED_AT_V2,
+            METRIC_DIRECTIONS,
+            _metric_to_minimize,
+            worst_objective_value,
+        )
+        from bayesflow_hpo.validation.registry import _KINDS
+
+        # Every metric a study could actually store an objective column for.
+        candidates = {
+            name for name, kind in _KINDS.items() if kind == "objective"
+        } | set(METRIC_DIRECTIONS)
+
+        computed = set()
+        for name in candidates:
+            penalty_moved = (
+                self._old_penalty(name) != worst_objective_value(name)
+            )
+            probe = 0.3
+            conversion_moved = abs(
+                self._old_conversion(name, probe)
+                - _metric_to_minimize(name, probe)
+            ) > 1e-12
+            if penalty_moved or conversion_moved:
+                computed.add(name)
+
+        assert computed == set(ENCODING_CHANGED_AT_V2), (
+            "ENCODING_CHANGED_AT_V2 no longer matches the metrics whose "
+            "stored values actually changed. Missing: "
+            f"{sorted(computed - set(ENCODING_CHANGED_AT_V2))}; stale: "
+            f"{sorted(set(ENCODING_CHANGED_AT_V2) - computed)}."
+        )
+
+    def test_contraction_is_excluded_for_the_right_reason(self) -> None:
+        """Not merely absent -- absent because nothing about it moved."""
+        from bayesflow_hpo.objectives import (
+            ENCODING_CHANGED_AT_V2,
+            _metric_to_minimize,
+            worst_objective_value,
+        )
+
+        assert "contraction" not in ENCODING_CHANGED_AT_V2
+        assert self._old_penalty("contraction") == worst_objective_value(
+            "contraction"
+        )
+        assert self._old_conversion("contraction", 0.3) == pytest.approx(
+            _metric_to_minimize("contraction", 0.3)
+        )

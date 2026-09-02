@@ -43,11 +43,14 @@ from bayesflow_hpo.objectives import (
     FAILED_TRIAL_CAL_ERROR,
     FAILED_TRIAL_COST,
     MAX_PARAM_COUNT,
+    _direction_for,
     compute_inference_time_per_dataset,
     extract_multi_objective_values,
     get_param_count,
     mean_objective_score,
     normalize_param_count,
+    worst_objective_value,
+    worst_raw_value,
 )
 from bayesflow_hpo.optimization.callbacks import (
     MovingAverageEarlyStopping,
@@ -62,7 +65,10 @@ from bayesflow_hpo.optimization.constraints import (
 from bayesflow_hpo.search_spaces.composite import CompositeSearchSpace
 from bayesflow_hpo.types import BuildApproximatorFn, TrainFn, ValidateFn
 from bayesflow_hpo.validation.data import ValidationDataset
-from bayesflow_hpo.validation.registry import validate_objective_metric_kinds
+from bayesflow_hpo.validation.registry import (
+    canonical_metric_name,
+    validate_objective_metric_kinds,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +110,7 @@ def default_validate_fn(
     approximator: Any,
     validation_data: ValidationDataset,
     n_posterior_samples: int,
+    objective_metrics: list[str] | None = None,
 ) -> dict[str, float]:
     """Run the built-in validation pipeline and return metric dict.
 
@@ -118,6 +125,14 @@ def default_validate_fn(
         Pre-generated validation dataset.
     n_posterior_samples
         Number of posterior draws per simulation.
+    objective_metrics
+        Metrics this run optimizes.  Every registered name here is computed in
+        addition to :data:`DEFAULT_METRICS`.  Leaving it ``None`` computes
+        ``DEFAULT_METRICS`` alone, which is why callers must thread it
+        through: ``log_gamma``, ``sbc_ks`` and ``sbc_chi2`` are registered but
+        *not* default, so pre-flight reported them as missing keys and
+        rejected the run before training started -- the headline metric could
+        not be optimized through the public workflow at all.
 
     Returns
     -------
@@ -130,6 +145,7 @@ def default_validate_fn(
         approximator=approximator,
         validation_data=validation_data,
         n_posterior_samples=n_posterior_samples,
+        metrics=_pipeline_metrics(objective_metrics or []),
     )
     return dict(result.summary)
 
@@ -157,12 +173,22 @@ def _validate_metric_keys(
 
     Returns a cleaned copy of the dict.
     """
-    cleaned = dict(raw)
+    # `objective_metrics` was canonicalized at the public boundary, but a
+    # custom hook returns whatever spelling its author used -- and the
+    # documented contract is that it returns the keys the caller *asked* for.
+    # Comparing literally would penalize every trial of a hook that honoured
+    # that contract with an alias. Canonicalize both sides so they meet.
+    cleaned = {canonical_metric_name(k): v for k, v in raw.items()}
     for key in objective_metrics:
+        # The penalty is inserted BEFORE direction conversion, so it must be a
+        # raw-space value. A flat 1.0 is not: for `log_gamma` it converts to
+        # -1.0, which beats a genuinely reported log_gamma of 0.5 -- a trial
+        # that failed to report the metric would outrank one that reported a
+        # good value. `worst_raw_value` is the raw-space worst case.
         penalty = (
-            penalty_values.get(key, FAILED_TRIAL_CAL_ERROR)
+            penalty_values.get(key, worst_raw_value(key))
             if penalty_values is not None
-            else FAILED_TRIAL_CAL_ERROR
+            else worst_raw_value(key)
         )
         if key not in cleaned:
             logger.warning(
@@ -401,6 +427,11 @@ class ObjectiveConfig:
     max_param_count: int = MAX_PARAM_COUNT
     max_memory_mb: float | None = None
     metric_constraints_hard: list[MetricConstraintSpec] | None = None
+    #: Soft constraints are enforced by Optuna's constraints function, not by
+    #: this objective, but their metrics still have to be COMPUTED here or the
+    #: constraint reads a missing user attribute as zero violation and never
+    #: fires. Recorded so the pipeline metric list can include them.
+    metric_constraints_soft: list[MetricConstraintSpec] | None = None
     n_posterior_samples: int = 500
     n_intermediate_posterior_samples: int = 250
     intermediate_validation_interval: int = 10
@@ -420,6 +451,46 @@ class ObjectiveConfig:
 
     def __post_init__(self) -> None:
         validate_objective_metric_kinds(self.objective_metrics)
+        # Canonicalize aliases HERE, once, so every downstream consumer agrees
+        # on the key. They did not: `list_metrics()` returns canonical names,
+        # so `cal_error` was excluded from the pipeline's metric list; the
+        # pipeline emitted `calibration_error`; and `_validate_metric_keys`
+        # then looked for `cal_error`, found it missing, and inserted the
+        # penalty. Every trial using a supported alias tied at the penalty.
+        self.objective_metrics = [
+            canonical_metric_name(m) for m in self.objective_metrics
+        ]
+        # `early_stopping_monitor` names one of those metrics, so it has to be
+        # canonicalized with them. Otherwise canonicalizing only the list turns
+        # a previously-valid pairing -- objective_metrics=["cal_error"] with
+        # early_stopping_monitor="cal_error" -- into a ValueError, because the
+        # membership check below compares the still-aliased monitor against
+        # the now-canonical list.
+        if self.early_stopping_monitor != "objective_mean":
+            self.early_stopping_monitor = canonical_metric_name(
+                self.early_stopping_monitor
+            )
+        # Every OTHER field naming a metric has to be canonicalized in the same
+        # place, or it reads a key nothing writes. These are not hypothetical:
+        # `("primary", "cal_error")` made PeriodicValidationCallback index a
+        # dict keyed `calibration_error`, raising KeyError at each intermediate
+        # validation and converting the trial into a training-failure penalty;
+        # a constraint spec naming an alias silently never matched, so a hard
+        # constraint skipped it and a soft one read zero violation. See
+        # `tests/test_optimization/test_metric_name_inventory.py`, which fails
+        # if a future field joins this set without joining this block.
+        if isinstance(self.pruning_strategy, tuple):
+            self.pruning_strategy = (
+                self.pruning_strategy[0],
+                canonical_metric_name(self.pruning_strategy[1]),
+            )
+        for _attr in ("metric_constraints_hard", "metric_constraints_soft"):
+            _specs = getattr(self, _attr)
+            if _specs is not None:
+                setattr(self, _attr, [
+                    (canonical_metric_name(name), threshold, direction)
+                    for name, threshold, direction in _specs
+                ])
         if self.training_mode not in ("fixed_budget", "open_ended"):
             raise ValueError(
                 f"Unknown training_mode: {self.training_mode!r}. "
@@ -573,6 +644,98 @@ def _extract_best_training_loss(callbacks: list[Any]) -> float | None:
     return None
 
 
+def _accepts_training_loss_proxy(metric: str) -> bool:
+    """Is a clamped [0, 1] lower-is-better loss on scale for this metric?
+
+    When final validation raises, :func:`_training_loss_fallback` substitutes
+    the best clamped training loss for each objective. That substitution is a
+    [0, 1] lower-is-better number, so it is only meaningful for a metric on
+    the same scale and in the same direction. Applied to a higher-is-better
+    metric it does not merely approximate badly, it inverts the ranking: a
+    trial whose validation failed would score better than one that reported a
+    real value.
+
+    Parameters
+    ----------
+    metric
+        Objective metric name, canonical or custom.
+
+    Returns
+    -------
+    bool
+        ``True`` only when the metric has a recorded direction that is
+        lower-is-better with a unit worst case. A metric with no recorded
+        direction returns ``False``: absence establishes neither direction nor
+        scale, and guessing in the permissive direction is what lets a failed
+        trial win.
+
+    References
+    ----------
+    The asymmetry this guards against is documented for ``log_gamma`` in
+    ``docs/references.md`` (Modrák et al., 2025): ``log_gamma < 0`` rejects
+    rank uniformity, so larger is better and a small substituted loss reads as
+    a *good* result.
+    """
+    direction = _direction_for(metric)
+    if direction is None:
+        # No recorded direction or scale. A custom metric could be
+        # higher-is-better or unbounded, and substituting a small loss would
+        # claim a good result for a trial whose validation failed.
+        return False
+    return not direction.higher_is_better and direction.worst_objective == 1.0
+
+
+def _constraint_metric_names(config: ObjectiveConfig) -> list[str]:
+    """Metric names referenced by hard or soft constraints, in order."""
+    names: list[str] = []
+    for specs in (
+        config.metric_constraints_hard,
+        config.metric_constraints_soft,
+    ):
+        for name, _threshold, _direction in specs or ():
+            if name not in names:
+                names.append(name)
+    return names
+
+
+def _pipeline_metrics(
+    objective_metrics: list[str],
+    constraint_metrics: Sequence[str] = (),
+) -> list[str]:
+    """DEFAULT_METRICS plus registered objectives and constraints, in order.
+
+    Constraints are included for the same reason objectives are, and the
+    consequence of omitting them is quieter: a constraint naming a registered
+    non-default metric -- ``metric_constraints_hard=[("sbc_ks", 0.2, "above")]``
+    alongside the default objectives -- was never computed, and neither path
+    complains. The hard path skips a missing key outright, and the soft
+    callback reads a missing user attribute as zero violation, so the
+    constraint is configured, inactive, and silent.
+
+    Unregistered names are left out because the pipeline resolves names
+    through the registry and would raise; they behave as before, falling to a
+    penalty.
+    """
+    from bayesflow_hpo.validation.registry import (
+        DEFAULT_METRICS,
+        producer_for_key,
+    )
+
+    names = list(DEFAULT_METRICS)
+    for metric in list(objective_metrics) + list(constraint_metrics):
+        # A constraint names an output KEY, which for a multi-output
+        # diagnostic is not the metric that produces it: constraining
+        # `left_coverage_90` needs `coverage_left` in the pipeline. Filtering
+        # on registered names alone dropped the producer, so nothing computed
+        # the key -- and neither constraint path complains, because the hard
+        # path skips a missing key and the soft path reads it as zero
+        # violation.
+        producer = producer_for_key(metric)
+        if producer is not None and producer not in names:
+            names.append(producer)
+    return names
+
+
 def _training_loss_fallback(
     best_training_loss: float | None,
     objective_metrics: list[str],
@@ -623,10 +786,23 @@ def _training_loss_fallback(
         # No inference was performed, so use the penalty cost value.
         cost_score = FAILED_TRIAL_COST
 
+    # The clamped loss is a [0, 1] lower-is-better proxy, so it is only on
+    # scale for a metric that is itself [0, 1] and lower-is-better. Applying
+    # it to `log_gamma` is not merely imprecise, it inverts the ranking: a
+    # trial whose validation FAILED scores 0.1, while a valid trial reporting
+    # log_gamma = -50 scores 50, so the failure dominates the real result.
+    # Metrics off that scale get their worst objective instead.
+    per_metric = [
+        clamped_loss
+        if _accepts_training_loss_proxy(metric)
+        else worst_objective_value(metric)
+        for metric in objective_metrics
+    ]
     if objective_mode == "pareto":
-        return tuple([clamped_loss] * len(objective_metrics)) + (cost_score,)
-    # "mean" mode
-    return (clamped_loss, cost_score)
+        return tuple(per_metric) + (cost_score,)
+    # "mean" mode collapses the metrics, so the proxy must too.
+    mean_val = math.fsum(per_metric) / len(per_metric) if per_metric else clamped_loss
+    return (mean_val, cost_score)
 
 
 def _log_trial_summary(
@@ -739,21 +915,39 @@ class GenericObjective:
         return 2  # mean + cost
 
     def _penalty(self) -> tuple[float, ...]:
-        """Return penalty values matching the expected objective shape."""
+        """Return penalty values matching the expected objective shape.
+
+        These are returned directly as Optuna objective values, so they are in
+        MINIMIZE space and must be per-metric: a flat ``FAILED_TRIAL_CAL_ERROR``
+        of 1.0 means ``log_gamma = -1``, an ordinary value that would not deter
+        the sampler from a region where trials keep failing.
+        """
         n = self.n_objectives
+        metrics = self.config.objective_metrics
+        if self.config.objective_mode == "pareto":
+            worst = [worst_objective_value(m) for m in metrics]
+            return tuple(worst) + (FAILED_TRIAL_COST,)
+        # "mean" mode collapses the metrics into one value, so the penalty is
+        # the mean of their individual worst cases.
         if n == 2:
-            return (FAILED_TRIAL_CAL_ERROR, FAILED_TRIAL_COST)
+            worst = [worst_objective_value(m) for m in metrics]
+            mean_worst = (
+                math.fsum(worst) / len(worst)
+                if worst
+                else FAILED_TRIAL_CAL_ERROR
+            )
+            return (mean_worst, FAILED_TRIAL_COST)
         return tuple([FAILED_TRIAL_CAL_ERROR] * (n - 1)) + (FAILED_TRIAL_COST,)
 
     def _metric_penalty_map(self) -> dict[str, float]:
-        """Per-metric penalty values for :func:`_validate_metric_keys`."""
-        penalties = self._penalty()
-        metrics = self.config.objective_metrics
-        # In pareto mode penalties[:-1] map 1:1 to objective_metrics;
-        # in mean mode there is only one metric penalty slot.
-        if self.config.objective_mode == "pareto":
-            return dict(zip(metrics, penalties))
-        return {m: penalties[0] for m in metrics}
+        """Per-metric RAW-space penalties for :func:`_validate_metric_keys`.
+
+        Deliberately *not* derived from :meth:`_penalty`, which is in minimize
+        space. Feeding a minimize-space value into the pre-conversion
+        substitution double-converts it -- the bug that let a missing
+        ``log_gamma`` outrank a reported one.
+        """
+        return {m: worst_raw_value(m) for m in self.config.objective_metrics}
 
     def _reject_compile(
         self, trial: optuna.Trial, exc: Exception,
@@ -1088,6 +1282,20 @@ class GenericObjective:
                     approximator=approximator,
                     validation_data=config.validation_data,
                     n_posterior_samples=config.n_posterior_samples,
+                    # UNION, not restriction. Without the objectives the
+                    # pipeline computes only DEFAULT_METRICS, so a configured
+                    # objective missing from that list falls through to a
+                    # penalty. But restricting it to the objectives is worse:
+                    # constraints may reference metrics that cannot be
+                    # objectives at all -- `coverage_90` comes from
+                    # `coverage`, which is registered diagnostic-only -- and a
+                    # hard constraint silently skips a missing key while a
+                    # soft one reads it as zero violation. Computing both sets
+                    # keeps constraints working and the objectives present.
+                    metrics=_pipeline_metrics(
+                        config.objective_metrics,
+                        _constraint_metric_names(config),
+                    ),
                 )
                 inference_time = result.timing.get("inference", 0.0)
                 metrics_summary = _validate_metric_keys(

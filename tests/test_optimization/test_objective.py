@@ -1,19 +1,31 @@
 """Tests for objective training failure handling and budget enforcement."""
 
 import logging
+import math
 
 import numpy as np
 import pytest
 
-from bayesflow_hpo.objectives import FAILED_TRIAL_CAL_ERROR, FAILED_TRIAL_COST
+from bayesflow_hpo.objectives import (
+    FAILED_TRIAL_CAL_ERROR,
+    FAILED_TRIAL_COST,
+    HIGHER_IS_BETTER,
+    _metric_to_minimize,
+    extract_multi_objective_values,
+    worst_objective_value,
+    worst_raw_value,
+)
 from bayesflow_hpo.optimization.objective import (
     GenericObjective,
     ObjectiveConfig,
+    _accepts_training_loss_proxy,
     _extract_best_training_loss,
+    _pipeline_metrics,
     _training_loss_fallback,
     _validate_metric_keys,
 )
 from bayesflow_hpo.validation.data import ValidationDataset
+from bayesflow_hpo.validation.registry import DEFAULT_METRICS
 
 _DUMMY_VALIDATION_DATA = ValidationDataset(
     simulations=[],
@@ -1713,3 +1725,244 @@ def test_hard_metric_constraints_multiple_partial_violation(monkeypatch):
     values = objective(trial)
     assert trial.user_attrs["rejected_reason"] == "metric_constraint"
     assert values[-1] == FAILED_TRIAL_COST
+
+
+# ---------------------------------------------------------------------------
+# Direction-aware penalties in the production objective path
+# ---------------------------------------------------------------------------
+
+
+class TestLogGammaPenaltiesEndToEnd:
+    """The extractor-only tests did not exercise this path, and it was broken.
+
+    `_validate_metric_keys` substitutes a penalty *before* direction
+    conversion, so the penalty has to be a raw-space value. It was a flat 1.0
+    for every metric, which for `log_gamma` converts to -1.0 -- beating a
+    genuinely reported log_gamma of 0.5 (objective -0.5). A trial that failed
+    to report the metric outranked one that reported a good value, and no
+    extractor-level test could see it because the extractor never received a
+    missing key.
+    """
+
+    def _objective(
+        self, metrics: list[str], mode: str = "pareto"
+    ) -> GenericObjective:
+        return GenericObjective(
+            ObjectiveConfig(
+                simulator=object(),
+                adapter=object(),
+                search_space=_FakeSearchSpace(),
+                epochs=1,
+                num_batches=1,
+                validation_data=_DUMMY_VALIDATION_DATA,
+                objective_metrics=metrics,
+                objective_mode=mode,
+            )
+        )
+
+    def test_missing_log_gamma_does_not_beat_a_reported_one(self) -> None:
+        obj = self._objective(["log_gamma", "nrmse"])
+        cleaned = _validate_metric_keys(
+            {"nrmse": 0.2},
+            ["log_gamma", "nrmse"],
+            penalty_values=obj._metric_penalty_map(),
+        )
+        values = extract_multi_objective_values(
+            {"summary": cleaned}, 1.0, ["log_gamma", "nrmse"],
+            objective_mode="pareto",
+        )
+        reported_good = _metric_to_minimize("log_gamma", 0.5)
+        reported_awful = _metric_to_minimize("log_gamma", -50.0)
+        assert values[0] > reported_good
+        assert values[0] > reported_awful
+
+    def test_non_finite_log_gamma_is_penalised_in_the_right_direction(self) -> None:
+        obj = self._objective(["log_gamma", "nrmse"])
+        cleaned = _validate_metric_keys(
+            {"log_gamma": float("nan"), "nrmse": 0.2},
+            ["log_gamma", "nrmse"],
+            penalty_values=obj._metric_penalty_map(),
+        )
+        assert _metric_to_minimize(
+            "log_gamma", cleaned["log_gamma"]
+        ) > _metric_to_minimize("log_gamma", 0.5)
+
+    def test_metric_penalty_map_is_raw_space(self) -> None:
+        """It must not be derived from `_penalty()`, which is minimize space.
+
+        Feeding a minimize-space value into the pre-conversion substitution
+        double-converts it.
+        """
+        obj = self._objective(["log_gamma", "nrmse"])
+        assert obj._metric_penalty_map()["log_gamma"] == worst_raw_value(
+            "log_gamma"
+        )
+
+    def test_failure_penalty_is_per_metric_and_minimize_space(self) -> None:
+        """A flat 1.0 means log_gamma = -1, an unremarkable value."""
+        obj = self._objective(["log_gamma", "nrmse"])
+        penalty = obj._penalty()
+        assert penalty[0] == worst_objective_value("log_gamma")
+        assert penalty[0] > _metric_to_minimize("log_gamma", -50.0)
+        assert penalty[-1] == FAILED_TRIAL_COST
+
+    def test_lower_is_better_metrics_keep_their_historical_penalty(self) -> None:
+        obj = self._objective(["calibration_error", "nrmse"])
+        assert obj._penalty() == (
+            FAILED_TRIAL_CAL_ERROR,
+            FAILED_TRIAL_CAL_ERROR,
+            FAILED_TRIAL_COST,
+        )
+
+
+    def test_a_failed_validation_does_not_beat_a_valid_trial(self) -> None:
+        """The training-loss proxy is a [0, 1] LOWER-is-better scale.
+
+        Substituting it for `log_gamma` inverts the ranking rather than merely
+        approximating it: a trial whose validation FAILED scored 0.1, while a
+        valid trial reporting log_gamma = -50 scores 50, so the failure
+        dominated the real result on that objective.
+        """
+        values = _training_loss_fallback(
+            0.1, ["log_gamma"], "pareto", 50_000, 1_000_000,
+            "param_count", (math.inf, FAILED_TRIAL_COST),
+        )
+        assert values[0] >= _metric_to_minimize("log_gamma", -50.0)
+        assert values[0] == worst_objective_value("log_gamma")
+
+    def test_error_style_metrics_keep_the_training_loss_proxy(self) -> None:
+        """The proxy is on-scale for these, and must not regress."""
+        values = _training_loss_fallback(
+            0.1, ["calibration_error", "nrmse"], "pareto", 50_000, 1_000_000,
+            "param_count", (1.0, 1.0, FAILED_TRIAL_COST),
+        )
+        assert values[0] == pytest.approx(0.1)
+        assert values[1] == pytest.approx(0.1)
+
+    def test_constraint_metrics_survive_the_pipeline_metric_list(self) -> None:
+        """Restricting validation to the objectives disables constraints.
+
+        `coverage_90` comes from `coverage`, which is registered
+        diagnostic-only and so can never be an objective. A hard constraint
+        silently skips a missing key and a soft one reads it as zero
+        violation, so narrowing the computed set would quietly disable them.
+        """
+        names = _pipeline_metrics(["log_gamma", "nrmse"])
+        assert "coverage" in names, "constraint producer must still be computed"
+        assert "log_gamma" in names, "configured objective must be computed"
+        assert set(DEFAULT_METRICS) <= set(names)
+
+    def test_unregistered_objectives_are_left_out_of_the_pipeline(self) -> None:
+        """The pipeline resolves through the registry and would raise."""
+        names = _pipeline_metrics(["not_a_registered_metric"])
+        assert "not_a_registered_metric" not in names
+
+
+class TestMetricAliasHandling:
+    """A supported alias made every trial tie at the penalty.
+
+    `list_metrics()` returns canonical names, so `cal_error` was excluded from
+    the pipeline's metric list; the pipeline emitted `calibration_error`; and
+    `_validate_metric_keys` then looked for `cal_error`, found it missing, and
+    inserted the penalty. Nothing errored -- every trial simply scored 1.0.
+    """
+
+    def _config(self, metrics: list[str]) -> ObjectiveConfig:
+        return ObjectiveConfig(
+            simulator=object(),
+            adapter=object(),
+            search_space=_FakeSearchSpace(),
+            epochs=1,
+            num_batches=1,
+            validation_data=_DUMMY_VALIDATION_DATA,
+            objective_metrics=metrics,
+            objective_mode="pareto",
+        )
+
+    def test_aliases_are_canonicalized_at_the_config_boundary(self) -> None:
+        config = self._config(["cal_error", "nrmse"])
+        assert config.objective_metrics == ["calibration_error", "nrmse"]
+
+    def test_alias_objective_reaches_the_pipeline_and_survives_lookup(
+        self,
+    ) -> None:
+        config = self._config(["cal_error"])
+        names = _pipeline_metrics(config.objective_metrics)
+        assert "calibration_error" in names
+        # The pipeline emits canonical names; the lookup must agree.
+        emitted = {"calibration_error": 0.05, "nrmse": 0.2}
+        cleaned = _validate_metric_keys(emitted, config.objective_metrics)
+        assert cleaned["calibration_error"] == pytest.approx(0.05)
+        assert cleaned["calibration_error"] != FAILED_TRIAL_CAL_ERROR
+
+    def test_unknown_names_pass_through_unchanged(self) -> None:
+        config = self._config(["my_custom_metric"])
+        assert config.objective_metrics == ["my_custom_metric"]
+
+
+class TestTrainingLossProxyEligibility:
+    """The proxy must not be handed to a metric of unknown direction/scale."""
+
+    def test_error_style_metrics_accept_it(self) -> None:
+        assert _accepts_training_loss_proxy("calibration_error")
+        assert _accepts_training_loss_proxy("nrmse")
+        assert _accepts_training_loss_proxy("rmse")
+
+    def test_higher_is_better_and_unbounded_metrics_do_not(self) -> None:
+        assert not _accepts_training_loss_proxy("log_gamma")
+        assert not _accepts_training_loss_proxy("correlation")
+        assert not _accepts_training_loss_proxy("sbc_chi2")
+
+    def test_a_legacy_set_addition_does_not(self) -> None:
+        """Added to HIGHER_IS_BETTER only -- direction known, scale is not."""
+        HIGHER_IS_BETTER.add("my_hib_metric")
+        try:
+            assert not _accepts_training_loss_proxy("my_hib_metric")
+        finally:
+            HIGHER_IS_BETTER.discard("my_hib_metric")
+
+    def test_an_unregistered_metric_does_not(self) -> None:
+        assert not _accepts_training_loss_proxy("totally_unknown_metric")
+
+
+def test_early_stopping_monitor_alias_is_canonicalized() -> None:
+    """Canonicalizing the metric list alone broke a valid pairing.
+
+    `early_stopping_monitor` names one of `objective_metrics`, and the
+    membership check compares them directly. Canonicalizing only the list
+    turned `objective_metrics=["cal_error"]` with
+    `early_stopping_monitor="cal_error"` -- valid before -- into a ValueError.
+    """
+    config = ObjectiveConfig(
+        simulator=object(),
+        adapter=object(),
+        search_space=_FakeSearchSpace(),
+        epochs=1,
+        num_batches=1,
+        validation_data=_DUMMY_VALIDATION_DATA,
+        objective_metrics=["cal_error", "nrmse"],
+        objective_mode="pareto",
+        training_mode="open_ended",
+        early_stopping_patience=5,
+        early_stopping_monitor="cal_error",
+    )
+    assert config.early_stopping_monitor == "calibration_error"
+    assert config.early_stopping_monitor in config.objective_metrics
+
+
+def test_objective_mean_monitor_is_not_canonicalized() -> None:
+    """`objective_mean` is a sentinel, not a metric name."""
+    config = ObjectiveConfig(
+        simulator=object(),
+        adapter=object(),
+        search_space=_FakeSearchSpace(),
+        epochs=1,
+        num_batches=1,
+        validation_data=_DUMMY_VALIDATION_DATA,
+        objective_metrics=["cal_error"],
+        objective_mode="pareto",
+        training_mode="open_ended",
+        early_stopping_patience=5,
+        early_stopping_monitor="objective_mean",
+    )
+    assert config.early_stopping_monitor == "objective_mean"
