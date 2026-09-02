@@ -706,6 +706,25 @@ def _encoding_sensitive(metric: str) -> bool:
     return metric not in ENCODING_UNCHANGED_AT_V2
 
 
+def _persisted_metric_names(study: optuna.Study) -> list[str] | None:
+    """Read Optuna's own persisted objective labels, if it has any.
+
+    `Study.metric_names` is populated by `set_metric_names` (Optuna >= 3.2)
+    and persists in storage, so it is independent evidence of what each
+    objective column holds. It is read defensively: the property is flagged
+    experimental, is absent on older Optuna, and returns None when unset.
+    """
+    try:
+        names = study.metric_names
+    except (AttributeError, RuntimeError):  # pragma: no cover
+        return None
+    if not isinstance(names, (list, tuple)) or not names:
+        return None
+    if not all(isinstance(n, str) for n in names):  # pragma: no cover
+        return None
+    return list(names)
+
+
 def _guard_resumed_study(
     study: optuna.Study,
     objective_metrics: list[str],
@@ -782,6 +801,13 @@ def _guard_resumed_study(
     stored_schema = study.user_attrs.get("bayesflow_hpo_objective_schema")
     if not isinstance(stored_schema, (list, tuple)):
         stored_schema = None
+    if stored_schema is None:
+        # Optuna's own persisted labels are column provenance too, and they
+        # survive in studies this package never stamped. Without this fallback
+        # the missing-schema refusal below strands a study whose columns ARE
+        # verifiable -- it was refused for the absence of our user attribute
+        # while `study.metric_names` said exactly what each column holds.
+        stored_schema = _persisted_metric_names(study)
     if (
         metric_names is not None
         and stored_schema is not None

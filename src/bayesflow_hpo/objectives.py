@@ -356,8 +356,12 @@ ENCODING_CHANGED_AT_V2: frozenset[str] = frozenset(
 #: to +inf exactly like an unregistered name's. Treating "registered" as
 #: "audited" therefore let a populated pre-v2 study with a custom objective
 #: resume, leaving its old failures dominant over valid new values above 1.
-#: Together with ENCODING_CHANGED_AT_V2 this partitions the built-ins; the
-#: partition is asserted by TestEncodingChangeSetIsDerived.
+#: Together with ENCODING_CHANGED_AT_V2 this partitions every built-in a study
+#: could store an objective column for -- NOT every registered name: `sbc` is a
+#: deprecated diagnostic shim that produces `sbc_ks` and `sbc_chi2` rather than
+#: a column of its own, so it belongs to neither set. Both the disjointness and
+#: the coverage of that candidate set are asserted by
+#: TestEncodingChangeSetIsDerived.
 ENCODING_UNCHANGED_AT_V2: frozenset[str] = frozenset(
     {
         "calibration_error",

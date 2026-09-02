@@ -621,12 +621,24 @@ def create_study(
                 "cost_metric."
             )
 
-    # Only label a study that holds nothing yet. `set_metric_names` overwrites,
-    # and `results/extraction.py` trusts the result, so labelling on every call
-    # let a resume that `_guard_resumed_study()` goes on to REJECT permanently
-    # rename the existing columns -- attributing stored values to metrics that
-    # never produced them.
-    if metric_names and not study.trials:
+    # Only label a study that holds no objective values yet. `set_metric_names`
+    # overwrites, and `results/extraction.py` trusts the result, so labelling on
+    # every call let a resume that `_guard_resumed_study()` goes on to REJECT
+    # permanently rename the existing columns -- attributing stored values to
+    # metrics that never produced them.
+    #
+    # The predicate is the guard's, not `not study.trials`: FAILED and PRUNED
+    # trials store no objective values, so they have no column meaning to
+    # protect. Requiring an empty trial list left a study whose early trials
+    # all failed unlabelled forever, and `_objective_column_names` then fell
+    # back to `objective_0`, `objective_1`, ... for every later real trial.
+    unlabellable = any(
+        t.state in (
+            TrialState.COMPLETE, TrialState.RUNNING, TrialState.WAITING,
+        )
+        for t in study.trials
+    )
+    if metric_names and not unlabellable:
         try:
             with warnings.catch_warnings():
                 # set_metric_names is flagged experimental; the alternative is

@@ -601,6 +601,56 @@ class TestUnverifiableProvenance:
             )
         assert "bayesflow_hpo_objective_schema" not in study.user_attrs
 
+    def test_optuna_s_own_metric_names_count_as_schema_evidence(
+        self, tmp_path: Path
+    ) -> None:
+        """Refusing on our attribute alone stranded verifiable studies.
+
+        `Study.metric_names` is persisted by Optuna and says exactly what each
+        column holds. A study labelled through that API but never stamped with
+        our user attribute was refused for the absence of the attribute, not
+        for any real ambiguity about its columns.
+        """
+        import warnings as _warnings
+
+        names = ["log_gamma", "nrmse", "inference_time"]
+        study = self._study(tmp_path, with_trial=True)
+        study.set_user_attr(
+            "bayesflow_hpo_objective_encoding", OBJECTIVE_ENCODING_VERSION
+        )
+        with _warnings.catch_warnings():
+            _warnings.simplefilter("ignore")
+            study.set_metric_names(names)
+
+        _guard_resumed_study(study, ["log_gamma", "nrmse"], names)
+
+    def test_optuna_s_metric_names_are_checked_not_merely_accepted(
+        self, tmp_path: Path
+    ) -> None:
+        """The fallback is evidence, not an exemption.
+
+        A persisted label that disagrees with this run must refuse exactly as
+        a mismatched user attribute does -- otherwise the fallback would be a
+        way to bypass the column check rather than satisfy it.
+        """
+        import warnings as _warnings
+
+        study = self._study(tmp_path, with_trial=True)
+        study.set_user_attr(
+            "bayesflow_hpo_objective_encoding", OBJECTIVE_ENCODING_VERSION
+        )
+        with _warnings.catch_warnings():
+            _warnings.simplefilter("ignore")
+            study.set_metric_names(
+                ["calibration_error", "nrmse", "inference_time"]
+            )
+
+        with pytest.raises(ValueError, match="stores objectives"):
+            _guard_resumed_study(
+                study, ["log_gamma", "nrmse"],
+                ["log_gamma", "nrmse", "inference_time"],
+            )
+
     def test_an_empty_stamped_study_is_backfilled(self, tmp_path: Path) -> None:
         """With nothing stored, there is nothing to contradict."""
         study = self._study(tmp_path, with_trial=False)
@@ -640,6 +690,39 @@ class TestUnverifiableProvenance:
                 warm_start_from=source,
                 warm_start_top_k=1,
             )
+
+    def test_a_study_whose_only_trials_failed_is_still_labelled(
+        self, tmp_path: Path
+    ) -> None:
+        """FAILED trials store no values, so they gate nothing.
+
+        The labelling guard required an empty trial list, but the resume guard
+        counts only COMPLETE/RUNNING/WAITING trials. A study whose early
+        trials all failed therefore never got its metric names, and result
+        extraction fell back to `objective_0`, `objective_1`, ... for every
+        real trial that followed.
+        """
+        import optuna as _optuna
+
+        from bayesflow_hpo.optimization.study import create_study
+
+        url = "sqlite:///" + str(tmp_path / "failed.db").replace("\\", "/")
+        names = ["log_gamma", "nrmse", "inference_time"]
+        seeded = _optuna.create_study(
+            study_name="failed_only", storage=url,
+            directions=["minimize"] * 3,
+        )
+        trial = seeded.ask()
+        seeded.tell(trial, state=_optuna.trial.TrialState.FAIL)
+
+        resumed = create_study(
+            study_name="failed_only",
+            directions=["minimize"] * 3,
+            metric_names=names,
+            storage=url,
+            load_if_exists=True,
+        )
+        assert resumed.metric_names == names
 
     def test_a_warm_start_source_with_no_schema_is_refused(
         self, tmp_path: Path
