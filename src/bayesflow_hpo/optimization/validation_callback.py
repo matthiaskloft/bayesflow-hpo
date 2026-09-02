@@ -25,7 +25,7 @@ Strategy implementations live in
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import optuna
@@ -39,6 +39,10 @@ from bayesflow_hpo.optimization.pruning_strategies import (
 )
 from bayesflow_hpo.types import ValidateFn
 from bayesflow_hpo.validation.data import ValidationDataset
+from bayesflow_hpo.validation.registry import (
+    CanonicalMetricName,
+    canonical_metric_name,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -149,7 +153,16 @@ class PeriodicValidationCallback(Callback):
         self._is_multi_objective = len(trial.study.directions) > 1
         self.early_stopping_patience = early_stopping_patience
         self.early_stopping_window = early_stopping_window
-        self.early_stopping_monitor = early_stopping_monitor
+        # Canonicalized for the same reason `ObjectiveConfig.__post_init__`
+        # does it: this class is public and constructible directly, the
+        # validation summary is keyed by canonical name, and an alias here
+        # therefore missed every lookup. `objective_mean` is a sentinel, not a
+        # metric, so it is passed through untouched.
+        self.early_stopping_monitor = (
+            early_stopping_monitor
+            if early_stopping_monitor == "objective_mean"
+            else canonical_metric_name(early_stopping_monitor)
+        )
         self._early_stopping_values: list[float] = []
         self._early_stopping_wait = 0
         self.best_validation_score = np.inf
@@ -171,7 +184,9 @@ class PeriodicValidationCallback(Callback):
                     f"('primary', metric_name), got {pruning_strategy!r}"
                 )
             self._strategy_name = "primary"
-            self._primary_metric: str | None = pruning_strategy[1]
+            self._primary_metric: CanonicalMetricName | None = (
+                canonical_metric_name(pruning_strategy[1])
+            )
         else:
             if pruning_strategy not in _VALID_STRATEGIES:
                 raise ValueError(
@@ -182,11 +197,17 @@ class PeriodicValidationCallback(Callback):
             self._primary_metric = None
 
         # Resolve objective_metrics with backward-compatible default.
-        self.objective_metrics = (
-            objective_metrics
-            if objective_metrics is not None
-            else ["calibration_error", "nrmse"]
-        )
+        # Canonicalized BEFORE the membership check below, so that a caller
+        # pairing an alias in both fields -- objective_metrics=["cal_error"]
+        # with early_stopping_monitor="cal_error" -- still validates.
+        self.objective_metrics: list[CanonicalMetricName] = [
+            canonical_metric_name(m)
+            for m in (
+                objective_metrics
+                if objective_metrics is not None
+                else ["calibration_error", "nrmse"]
+            )
+        ]
         if (
             self.early_stopping_monitor != "objective_mean"
             and self.early_stopping_monitor not in self.objective_metrics
@@ -229,7 +250,7 @@ class PeriodicValidationCallback(Callback):
         self._step += 1
 
         self._update_early_stopping(raw_scores)
-        scores = {
+        scores: dict[str, float] = {
             metric: _metric_to_minimize(metric, float(raw_scores[metric]))
             for metric in self.objective_metrics
         }
@@ -267,10 +288,11 @@ class PeriodicValidationCallback(Callback):
                 )
             )
         else:
-            value = _metric_to_minimize(
-                self.early_stopping_monitor,
-                float(scores[self.early_stopping_monitor]),
-            )
+            # Not the `objective_mean` sentinel, so `__init__` put a
+            # canonical name here; the attribute is a plain `str` because it
+            # holds either.
+            monitor = cast(CanonicalMetricName, self.early_stopping_monitor)
+            value = _metric_to_minimize(monitor, float(scores[monitor]))
         self._early_stopping_values.append(value)
         if len(self._early_stopping_values) > self.early_stopping_window:
             self._early_stopping_values.pop(0)
@@ -360,10 +382,11 @@ class PeriodicValidationCallback(Callback):
                         missing,
                     )
                     return None
-                return {
+                out: dict[str, float] = {
                     k: float(result_dict[k])
                     for k in self.objective_metrics
                 }
+                return out
             else:
                 from bayesflow_hpo.validation.pipeline import (
                     run_validation_pipeline,
@@ -375,7 +398,7 @@ class PeriodicValidationCallback(Callback):
                     n_posterior_samples=self.n_posterior_samples,
                     metrics=self.objective_metrics,
                 )
-                extracted = {
+                extracted: dict[str, float] = {
                     k: float(result.summary[k])
                     for k in self.objective_metrics
                     if k in result.summary

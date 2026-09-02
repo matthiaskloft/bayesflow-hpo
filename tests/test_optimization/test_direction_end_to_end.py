@@ -210,17 +210,21 @@ def test_an_alias_objective_scores_the_reported_value() -> None:
     )
     assert _selected(study) == {0}
 
-    # Without canonicalization the lookup misses and every trial ties at the
-    # penalty, so nothing is distinguishable -- the failure this guards.
-    tied = _run_study(
+    # This half used to assert the OPPOSITE: that passing the alias straight
+    # through tied every trial at the penalty, demonstrating the hazard the
+    # boundary canonicalization protects against. It no longer can, because
+    # `extract_multi_objective_values` now resolves aliases itself. Its own
+    # failure message anticipated this ("the alias reaches the summary by
+    # another route"), and that route is deliberate: the alias must now score
+    # identically to the canonical spelling, not merely be corrected earlier.
+    direct = _run_study(
         [{"calibration_error": 0.02, "nrmse": 0.2},
          {"calibration_error": 0.40, "nrmse": 0.2}],
         requested,
     )
-    assert len(_selected(tied)) == 2, (
-        "expected the un-canonicalized form to be indistinguishable; if this "
-        "now discriminates, the alias reaches the summary by another route "
-        "and this test no longer demonstrates the hazard"
+    assert _selected(direct) == _selected(study), (
+        "an alias must select the same trial as its canonical spelling; a "
+        "difference means one of the two routes stopped resolving it"
     )
 
 

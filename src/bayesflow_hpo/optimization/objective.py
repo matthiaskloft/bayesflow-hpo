@@ -66,6 +66,7 @@ from bayesflow_hpo.search_spaces.composite import CompositeSearchSpace
 from bayesflow_hpo.types import BuildApproximatorFn, TrainFn, ValidateFn
 from bayesflow_hpo.validation.data import ValidationDataset
 from bayesflow_hpo.validation.registry import (
+    CanonicalMetricName,
     canonical_metric_name,
     validate_objective_metric_kinds,
 )
@@ -152,7 +153,7 @@ def default_validate_fn(
 
 def _validate_metric_keys(
     raw: dict[str, float],
-    objective_metrics: list[str],
+    objective_metrics: list[CanonicalMetricName],
     penalty_values: dict[str, float] | None = None,
 ) -> dict[str, float]:
     """Validate and sanitize metric dict from a custom validate_fn.
@@ -165,7 +166,9 @@ def _validate_metric_keys(
     raw
         Raw metric dict from the validation function.
     objective_metrics
-        Metric keys expected in *raw*.
+        Metric keys expected in *raw*, already canonicalized. The type says
+        so: *raw* comes from a caller's own hook and is canonicalized here,
+        so if this side were not canonical too the two would never meet.
     penalty_values
         Per-metric penalty values.  When provided, the penalty for a
         given key is looked up here; keys not present fall back to
@@ -178,7 +181,9 @@ def _validate_metric_keys(
     # documented contract is that it returns the keys the caller *asked* for.
     # Comparing literally would penalize every trial of a hook that honoured
     # that contract with an alias. Canonicalize both sides so they meet.
-    cleaned = {canonical_metric_name(k): v for k, v in raw.items()}
+    cleaned: dict[str, float] = {
+        canonical_metric_name(k): v for k, v in raw.items()
+    }
     for key in objective_metrics:
         # The penalty is inserted BEFORE direction conversion, so it must be a
         # raw-space value. A flat 1.0 is not: for `log_gamma` it converts to
@@ -628,6 +633,20 @@ class ObjectiveConfig:
                 f"got {self.pruning_n_startup_trials}."
             )
 
+    @property
+    def canonical_objective_metrics(self) -> list[CanonicalMetricName]:
+        """:attr:`objective_metrics` after ``__post_init__`` normalized it.
+
+        The field itself stays ``list[str]``, because constructing this config
+        with aliases is legitimate -- resolving them is what ``__post_init__``
+        is for. But rewriting a field in place cannot change its declared
+        type, so every consumer downstream still saw a bare ``str`` and the
+        guarantee survived only as a comment. This states it once, in the one
+        place entitled to: immediately after the normalization that makes it
+        true.
+        """
+        return cast(list[CanonicalMetricName], self.objective_metrics)
+
 
 def _extract_best_training_loss(callbacks: list[Any]) -> float | None:
     """Extract the best moving-average loss from training callbacks.
@@ -644,7 +663,7 @@ def _extract_best_training_loss(callbacks: list[Any]) -> float | None:
     return None
 
 
-def _accepts_training_loss_proxy(metric: str) -> bool:
+def _accepts_training_loss_proxy(metric: CanonicalMetricName) -> bool:
     """Is a clamped [0, 1] lower-is-better loss on scale for this metric?
 
     When final validation raises, :func:`_training_loss_fallback` substitutes
@@ -738,7 +757,7 @@ def _pipeline_metrics(
 
 def _training_loss_fallback(
     best_training_loss: float | None,
-    objective_metrics: list[str],
+    objective_metrics: list[CanonicalMetricName],
     objective_mode: str,
     param_count: int,
     max_param_count: int,
@@ -923,7 +942,7 @@ class GenericObjective:
         the sampler from a region where trials keep failing.
         """
         n = self.n_objectives
-        metrics = self.config.objective_metrics
+        metrics = self.config.canonical_objective_metrics
         if self.config.objective_mode == "pareto":
             worst = [worst_objective_value(m) for m in metrics]
             return tuple(worst) + (FAILED_TRIAL_COST,)
@@ -947,7 +966,10 @@ class GenericObjective:
         substitution double-converts it -- the bug that let a missing
         ``log_gamma`` outrank a reported one.
         """
-        return {m: worst_raw_value(m) for m in self.config.objective_metrics}
+        return {
+            m: worst_raw_value(m)
+            for m in self.config.canonical_objective_metrics
+        }
 
     def _reject_compile(
         self, trial: optuna.Trial, exc: Exception,
@@ -1268,7 +1290,7 @@ class GenericObjective:
                 )
                 inference_time = time.perf_counter() - t_val_start
                 metrics_summary = _validate_metric_keys(
-                    raw, config.objective_metrics,
+                    raw, config.canonical_objective_metrics,
                     penalty_values=self._metric_penalty_map(),
                 )
             else:
@@ -1299,7 +1321,7 @@ class GenericObjective:
                 )
                 inference_time = result.timing.get("inference", 0.0)
                 metrics_summary = _validate_metric_keys(
-                    dict(result.summary), config.objective_metrics,
+                    dict(result.summary), config.canonical_objective_metrics,
                     penalty_values=self._metric_penalty_map(),
                 )
 
@@ -1333,7 +1355,7 @@ class GenericObjective:
             trial.set_user_attr("validation_error", str(exc))
             values = _training_loss_fallback(
                 best_training_loss,
-                config.objective_metrics,
+                config.canonical_objective_metrics,
                 config.objective_mode,
                 param_count_actual,
                 config.max_param_count,

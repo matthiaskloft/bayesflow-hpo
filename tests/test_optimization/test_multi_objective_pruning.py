@@ -576,3 +576,60 @@ class TestStartupTrialsNeverNone:
         study = _make_study()
         with pytest.raises(TypeError):
             should_prune_dominance(study.ask(), {"m1": 0.1, "m2": 0.2}, 1, None)
+
+
+class TestTheCallbackCanonicalizesItsOwnNames:
+    """`PeriodicValidationCallback` is public and takes metric names directly.
+
+    `ObjectiveConfig.__post_init__` canonicalized on the way in, so the
+    callback was protected when built through the pipeline and unprotected
+    when built on its own -- which `__all__` invites. An alias then missed
+    every summary lookup: pruning reported its metrics as "missing" and
+    skipped, and early stopping read a key nothing writes.
+    """
+
+    def _callback(self, **kwargs):
+        study = _make_study()
+        return PeriodicValidationCallback(
+            trial=study.ask(),
+            approximator=None,
+            validation_data=_DUMMY_VALIDATION_DATA,
+            interval=1,
+            warmup=0,
+            n_startup_trials=5,
+            **kwargs,
+        )
+
+    def test_an_alias_in_objective_metrics_is_resolved(self) -> None:
+        cb = self._callback(objective_metrics=["cal_error", "nrmse"])
+        assert cb.objective_metrics == ["calibration_error", "nrmse"]
+
+    def test_an_alias_pruning_target_is_resolved(self) -> None:
+        cb = self._callback(
+            objective_metrics=["cal_error", "nrmse"],
+            pruning_strategy=("primary", "cal_error"),
+        )
+        assert cb._primary_metric == "calibration_error"
+
+    def test_an_alias_pairing_still_constructs(self) -> None:
+        """Canonicalizing one field but not the other breaks a valid pairing.
+
+        `objective_metrics=["cal_error"]` with
+        `early_stopping_monitor="cal_error"` is a legitimate request. Were the
+        list canonicalized before the membership check and the monitor after,
+        it would raise -- the ordering bug `__post_init__` already records.
+        """
+        cb = self._callback(
+            objective_metrics=["cal_error", "nrmse"],
+            early_stopping_monitor="cal_error",
+        )
+        assert cb.early_stopping_monitor == "calibration_error"
+        assert cb.early_stopping_monitor in cb.objective_metrics
+
+    def test_the_objective_mean_sentinel_is_not_a_metric(self) -> None:
+        """It names no metric, so it must pass through untouched."""
+        cb = self._callback(
+            objective_metrics=["cal_error"],
+            early_stopping_monitor="objective_mean",
+        )
+        assert cb.early_stopping_monitor == "objective_mean"

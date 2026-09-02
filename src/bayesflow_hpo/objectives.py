@@ -26,9 +26,17 @@ import logging
 import math
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
+
+if TYPE_CHECKING:
+    # Import-time only: `bayesflow_hpo.validation.__init__` pulls in
+    # `optimization`, which imports this module back. Annotations are strings
+    # under `from __future__ import annotations`, so the type costs nothing at
+    # runtime; the runtime helper is imported inside the functions that need
+    # it, matching `register_metric_direction` below.
+    from bayesflow_hpo.validation.registry import CanonicalMetricName
 
 logger = logging.getLogger(__name__)
 
@@ -440,7 +448,7 @@ def register_metric_direction(
 _LEGACY_WORST_RAW = -math.inf
 
 
-def _direction_for(key: str) -> MetricDirection | None:
+def _direction_for(key: CanonicalMetricName) -> MetricDirection | None:
     """Resolve a metric's direction, honouring both compatibility mutations.
 
     :data:`HIGHER_IS_BETTER` used to control conversion by its contents, so a
@@ -478,7 +486,9 @@ def _direction_for(key: str) -> MetricDirection | None:
     return None
 
 
-def _metric_to_minimize(key: str, value: float) -> float:
+def _metric_to_minimize(
+    key: CanonicalMetricName, value: float
+) -> float:
     """Convert a raw metric value to a minimize-is-better scalar."""
     direction = _direction_for(key)
     if direction is None:
@@ -486,7 +496,7 @@ def _metric_to_minimize(key: str, value: float) -> float:
     return direction.to_minimize(value)
 
 
-def worst_raw_value(key: str) -> float:
+def worst_raw_value(key: CanonicalMetricName) -> float:
     """Raw-space value representing the worst case for *key*.
 
     This is what a *penalty injected before conversion* must use. Injecting a
@@ -506,7 +516,7 @@ def worst_raw_value(key: str) -> float:
     return math.inf
 
 
-def worst_objective_value(key: str) -> float:
+def worst_objective_value(key: CanonicalMetricName) -> float:
     """Minimize-space value standing in for a metric missing from a summary.
 
     Returned already converted, so callers must not pass it through
@@ -552,9 +562,16 @@ def extract_objective_values(
         ``inference_time_s`` (seconds per dataset) or
         ``normalized_param_count``.
     objective_metric
-        Key to look up inside the summary dict.
+        Key to look up inside the summary dict. Resolved through
+        :func:`canonical_metric_name`, so a registered alias works here.
     """
+    from bayesflow_hpo.validation.registry import canonical_metric_name
+
     summary = metrics.get("summary", metrics)
+    # The summary is emitted under canonical names, so an alias supplied here
+    # missed the lookup and every trial scored the worst-case penalty
+    # identically -- silently flattening the objective this function returns.
+    objective_metric = canonical_metric_name(objective_metric)
     if objective_metric not in summary:
         logger.warning(
             "Metric key %r not found in validation summary. "
@@ -594,12 +611,15 @@ def extract_multi_objective_values(
         ``inference_time_s`` (seconds per dataset) or
         ``normalized_param_count``.
     objective_metrics
-        List of metric keys to optimize.
+        List of metric keys to optimize. Each is resolved through
+        :func:`canonical_metric_name`, so registered aliases work here.
     objective_mode
         ``"mean"`` — return ``(mean_of_metrics, cost_score)`` (2 values).
         ``"pareto"`` — return ``(*metric_values, cost_score)``
         (one value per metric + cost).
     """
+    from bayesflow_hpo.validation.registry import canonical_metric_name
+
     if objective_mode not in ("mean", "pareto"):
         raise ValueError(
             f"Unknown objective_mode: {objective_mode!r}. "
@@ -609,7 +629,9 @@ def extract_multi_objective_values(
     summary = metrics.get("summary", metrics)
 
     raw_values: list[float] = []
-    for key in objective_metrics:
+    # As in `extract_objective_values`: the summary is keyed by canonical
+    # name, so an alias here missed and took the penalty instead.
+    for key in map(canonical_metric_name, objective_metrics):
         if key not in summary:
             logger.warning(
                 "Metric key %r not found in validation summary. "

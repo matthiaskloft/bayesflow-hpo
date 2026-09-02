@@ -573,3 +573,49 @@ class TestEncodingChangeSetIsDerived:
         assert self._old_conversion("contraction", 0.3) == pytest.approx(
             _metric_to_minimize("contraction", 0.3)
         )
+
+
+class TestAliasesReachTheSummary:
+    """The public extractors are keyed by canonical name.
+
+    Found by giving `canonical_metric_name` a `NewType` return and letting
+    mypy report every site that fed it a bare `str`. Both functions are
+    exported in `__all__`, and both looked an alias up directly in a summary
+    that is emitted under canonical names: the lookup missed and the
+    worst-case penalty stood in for the real value, with no error raised.
+    For an unregistered spelling that penalty is `+inf`, so every trial tied
+    at the worst possible score and the objective went flat.
+    """
+
+    _SUMMARY = {"calibration_error": 0.02, "nrmse": 0.1}
+
+    def test_the_single_extractor_resolves_an_alias(self) -> None:
+        from bayesflow_hpo.objectives import extract_objective_values
+
+        canonical = extract_objective_values(
+            self._SUMMARY, 1.0, "calibration_error"
+        )
+        alias = extract_objective_values(self._SUMMARY, 1.0, "cal_error")
+        assert alias == canonical
+        assert math.isfinite(alias[0])
+
+    def test_the_multi_extractor_resolves_an_alias(self) -> None:
+        from bayesflow_hpo.objectives import extract_multi_objective_values
+
+        canonical = extract_multi_objective_values(
+            self._SUMMARY, 1.0, ["calibration_error", "nrmse"], "pareto"
+        )
+        alias = extract_multi_objective_values(
+            self._SUMMARY, 1.0, ["cal_error", "nrmse"], "pareto"
+        )
+        assert alias == canonical
+        assert all(math.isfinite(v) for v in alias)
+
+    def test_an_unknown_name_still_takes_the_penalty(self) -> None:
+        """Resolving aliases must not turn into accepting anything."""
+        from bayesflow_hpo.objectives import extract_objective_values
+
+        value, _ = extract_objective_values(
+            self._SUMMARY, 1.0, "not_a_metric_at_all"
+        )
+        assert value == math.inf

@@ -33,11 +33,24 @@ from __future__ import annotations
 import html as _html
 import warnings
 from collections.abc import Callable
-from typing import Literal
+from typing import Literal, NewType
 
 import numpy as np
 
 MetricFn = Callable[[np.ndarray, np.ndarray], dict[str, float]]
+
+#: A metric name that has been through :func:`canonical_metric_name`.
+#:
+#: Distinct from ``str`` at type-check time only -- at runtime it IS a plain
+#: string, with no wrapper and no cost. Its purpose is to make one specific
+#: mistake unrepresentable: a name normalized at one site and read
+#: un-normalized at another. That mistake is silent every time, because the
+#: lookup simply misses and a worst-case penalty stands in for the real
+#: value, so it took eight review rounds to find seven separate instances of
+#: it by inspection. Functions that key a validation summary by metric name
+#: now require this type, which turns a raw ``str`` reaching one into an
+#: error at the call site rather than a plausible number in the results.
+CanonicalMetricName = NewType("CanonicalMetricName", str)
 
 _REGISTRY: dict[str, MetricFn] = {}
 _ALIASES: dict[str, str] = {}
@@ -170,7 +183,7 @@ def get_metric(name: str) -> MetricFn:
     return _REGISTRY[canonical]
 
 
-def canonical_metric_name(name: str) -> str:
+def canonical_metric_name(name: str) -> CanonicalMetricName:
     """Resolve a metric alias to its canonical registered name.
 
     Callers must agree on one spelling of a metric, because the validation
@@ -187,7 +200,7 @@ def canonical_metric_name(name: str) -> str:
 
     Returns
     -------
-    str
+    CanonicalMetricName
         The canonical name for a registered alias, otherwise *name*
         unchanged. Passing through unknown names keeps this safe to apply to
         custom metrics resolved by a caller's own ``validate_fn``.
@@ -196,7 +209,7 @@ def canonical_metric_name(name: str) -> str:
     --------
     resolve_metrics : Resolve names to metric callables.
     """
-    return _ALIASES.get(name, name)
+    return CanonicalMetricName(_ALIASES.get(name, name))
 
 
 def producer_for_key(key: str) -> str | None:
