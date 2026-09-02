@@ -7,6 +7,7 @@ import pytest
 from optuna.trial import TrialState
 
 from bayesflow_hpo.optimization.validation_callback import (
+    DEFAULT_PRUNING_N_STARTUP_TRIALS,
     PeriodicValidationCallback,
 )
 from bayesflow_hpo.validation.data import ValidationDataset
@@ -530,3 +531,48 @@ class TestStrategyValidation:
                 validation_data=_DUMMY_VALIDATION_DATA,
                 pruning_strategy=("dominance", "metric"),
             )
+
+
+class TestStartupTrialsNeverNone:
+    """``n_startup_trials`` must reach the pruning strategies as an int.
+
+    ``ObjectiveConfig.pruning_n_startup_trials`` defaults to ``None`` and is
+    auto-detected from the sampler by ``optimize()``. Building an objective
+    directly skips that resolution, so the ``None`` was passed straight
+    through to ``should_prune_dominance``, which compares it with
+    ``n_startup_trials < 1`` and raises ``TypeError``. The trial handler turns
+    that into a training-failure penalty, so the trial looked merely bad
+    rather than broken -- and ``pruning_strategy`` defaults to
+    ``"dominance"``, so this was the default path.
+    """
+
+    def test_none_resolves_to_the_documented_default(self):
+        study = _make_study()
+        callback = PeriodicValidationCallback(
+            trial=study.ask(),
+            approximator=None,
+            validation_data=_DUMMY_VALIDATION_DATA,
+            n_startup_trials=None,
+        )
+        assert callback.n_startup_trials == DEFAULT_PRUNING_N_STARTUP_TRIALS
+        assert isinstance(callback.n_startup_trials, int)
+
+    def test_an_explicit_value_still_wins(self):
+        study = _make_study()
+        callback = PeriodicValidationCallback(
+            trial=study.ask(),
+            approximator=None,
+            validation_data=_DUMMY_VALIDATION_DATA,
+            n_startup_trials=17,
+        )
+        assert callback.n_startup_trials == 17
+
+    def test_the_pruning_strategies_reject_none(self):
+        """Why the resolution has to happen before the strategies see it."""
+        from bayesflow_hpo.optimization.pruning_strategies import (
+            should_prune_dominance,
+        )
+
+        study = _make_study()
+        with pytest.raises(TypeError):
+            should_prune_dominance(study.ask(), {"m1": 0.1, "m2": 0.2}, 1, None)

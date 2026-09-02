@@ -348,6 +348,10 @@ class BaseSearchSpace:
                     log=dim.log,
                 )
             elif isinstance(dim, CategoricalDimension):
+                if dim.choices is None:  # pragma: no cover - see __post_init__
+                    raise TypeError(
+                        f"Categorical dimension {dim.name!r} has no choices."
+                    )
                 params[dim.name] = trial.suggest_categorical(
                     dim.name, list(dim.choices)
                 )

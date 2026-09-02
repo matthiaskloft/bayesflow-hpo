@@ -488,7 +488,7 @@ def plot_metric_panels(
 
     n = len(metrics)
     if n == 0:
-        fig, ax = plt.subplots()
+        _fig, ax = plt.subplots()
         ax.text(0.5, 0.5, "No metrics found",
                 ha="center", va="center", transform=ax.transAxes)
         return ax
@@ -880,7 +880,7 @@ def plot_parallel_coordinates(
     else:
         normed_colors = np.zeros_like(color_vals)
 
-    cmap = plt.cm.viridis_r
+    cmap = plt.get_cmap("viridis_r")
     x_ticks = np.arange(n_axes)
 
     for row_idx in range(len(trained)):
@@ -1031,7 +1031,7 @@ def plot_study(
             ax.remove()
         fig.set_size_inches(figsize[0], figsize[1] * 2 / 3)
 
-    fig.tight_layout(rect=[0.03, 0, 1, 1] if row_labels else None)
+    fig.tight_layout(rect=(0.03, 0.0, 1.0, 1.0) if row_labels else None)
 
     # --- Row labels (placed after tight_layout so positions are final) ---
     if row_labels:
