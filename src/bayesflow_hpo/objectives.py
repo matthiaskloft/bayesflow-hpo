@@ -301,6 +301,15 @@ METRIC_DIRECTIONS: dict[str, MetricDirection] = {
     ),
 }
 
+#: Version of the objective-value encoding written into a study.
+#:
+#: Bumped when a change alters the NUMBERS stored for a trial rather than the
+#: code that computes them. Version 2 negates ``log_gamma`` so that every
+#: objective is minimize-is-better; version 1 stored it raw. Trials from the
+#: two cannot be compared, so a resumed study has to be checked rather than
+#: assumed compatible -- see :func:`bayesflow_hpo.api.optimize`.
+OBJECTIVE_ENCODING_VERSION = 2
+
 #: Mutable set of higher-is-better metric names, kept as a live extension
 #: point rather than a derived view.
 #:
@@ -358,7 +367,19 @@ def _direction_for(key: str) -> MetricDirection | None:
     direction = METRIC_DIRECTIONS.get(key)
     if direction is not None:
         if direction.higher_is_better and key not in HIGHER_IS_BETTER:
+            # Removed from the legacy set: honour the removal.
             return None
+        if not direction.higher_is_better and key in HIGHER_IS_BETTER:
+            # ADDED to the legacy set for a metric the table calls
+            # lower-is-better. Before `calibration_error`, `nrmse` and `rmse`
+            # were registered explicitly, adding one of those names selected
+            # the historical `1 - value` conversion; registering them must not
+            # quietly take that away from a consumer who reinterprets one.
+            return MetricDirection(
+                higher_is_better=True,
+                to_minimize=lambda v: 1.0 - v,
+                worst_raw=0.0,
+            )
         return direction
     if key in HIGHER_IS_BETTER:
         # Added to the legacy set only: historical `1 - value` behaviour.

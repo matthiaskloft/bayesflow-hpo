@@ -29,8 +29,10 @@ os.environ.setdefault("KERAS_BACKEND", "torch")
 import optuna
 import pytest
 
+from bayesflow_hpo.api import _guard_resumed_study
 from bayesflow_hpo.objectives import (
     FAILED_TRIAL_COST,
+    OBJECTIVE_ENCODING_VERSION,
     extract_multi_objective_values,
     worst_objective_value,
 )
@@ -237,3 +239,96 @@ def test_infinite_penalties_do_not_break_the_sampler() -> None:
     values = [t.values[0] for t in study.trials if t.values]
     assert any(math.isinf(v) for v in values)
     assert study.best_trials, "the study produced no Pareto front at all"
+
+
+class TestResumeGuards:
+    """Resuming is where the encoding change bites, and it bites silently."""
+
+    def _study(self, tmp_path, directions: list[str], *, with_trial: bool):
+        import optuna as _optuna
+
+        url = "sqlite:///" + str(tmp_path / "s.db").replace("\\", "/")
+        study = _optuna.create_study(
+            study_name="s", storage=url, directions=directions
+        )
+        if with_trial:
+            study.add_trial(
+                _optuna.trial.create_trial(
+                    params={}, distributions={}, values=[1.5, 0.2, 0.5]
+                )
+            )
+        return _optuna.create_study(
+            study_name="s", storage=url,
+            directions=["minimize"] * 3, load_if_exists=True,
+        )
+
+    def test_optuna_keeps_the_stored_directions_on_load(self, tmp_path) -> None:
+        """The premise of the guard, asserted rather than assumed.
+
+        `create_study(load_if_exists=True)` does not adopt the directions
+        passed here; it returns the stored study unchanged. That is why a
+        pre-change `maximize` study never reaches `_derive_directions`.
+        """
+        study = self._study(
+            tmp_path, ["maximize", "minimize", "minimize"], with_trial=False
+        )
+        assert study.directions[0] == optuna.study.StudyDirection.MAXIMIZE
+
+    def test_a_maximize_study_is_refused(self, tmp_path) -> None:
+        study = self._study(
+            tmp_path, ["maximize", "minimize", "minimize"], with_trial=False
+        )
+        with pytest.raises(ValueError, match="minimize-is-better"):
+            _guard_resumed_study(study, ["log_gamma", "nrmse"])
+
+    def test_pre_encoding_trials_are_refused_for_a_flipped_metric(
+        self, tmp_path
+    ) -> None:
+        """Old raw log_gamma and new negated log_gamma cannot share a front."""
+        study = self._study(
+            tmp_path, ["minimize"] * 3, with_trial=True
+        )
+        with pytest.raises(ValueError, match="opposite scales"):
+            _guard_resumed_study(study, ["log_gamma", "nrmse"])
+
+    def test_pre_encoding_trials_are_fine_when_no_metric_flipped(
+        self, tmp_path
+    ) -> None:
+        """`calibration_error` and `nrmse` store the same numbers as before,
+        so an old study stays comparable and must not be refused."""
+        study = self._study(tmp_path, ["minimize"] * 3, with_trial=True)
+        _guard_resumed_study(study, ["calibration_error", "nrmse"])
+
+    def test_a_stamped_study_resumes(self, tmp_path) -> None:
+        study = self._study(tmp_path, ["minimize"] * 3, with_trial=True)
+        study.set_user_attr(
+            "bayesflow_hpo_objective_encoding", OBJECTIVE_ENCODING_VERSION
+        )
+        _guard_resumed_study(study, ["log_gamma", "nrmse"])
+
+    def test_a_fresh_study_is_stamped(self, tmp_path) -> None:
+        study = self._study(tmp_path, ["minimize"] * 3, with_trial=False)
+        _guard_resumed_study(study, ["log_gamma", "nrmse"])
+        assert (
+            study.user_attrs["bayesflow_hpo_objective_encoding"]
+            == OBJECTIVE_ENCODING_VERSION
+        )
+
+
+def test_a_legacy_set_addition_still_flips_a_registered_lower_metric() -> None:
+    """Registering the error metrics must not remove the old override.
+
+    Before `calibration_error` / `nrmse` / `rmse` were registered explicitly,
+    `HIGHER_IS_BETTER.add("rmse")` selected the historical `1 - value`
+    conversion. Registering them made `_direction_for` return the table entry
+    unconditionally, silently taking that away.
+    """
+    from bayesflow_hpo.objectives import HIGHER_IS_BETTER, _metric_to_minimize
+
+    assert _metric_to_minimize("rmse", 0.8) == pytest.approx(0.8)
+    HIGHER_IS_BETTER.add("rmse")
+    try:
+        assert _metric_to_minimize("rmse", 0.8) == pytest.approx(0.2)
+    finally:
+        HIGHER_IS_BETTER.discard("rmse")
+    assert _metric_to_minimize("rmse", 0.8) == pytest.approx(0.8)

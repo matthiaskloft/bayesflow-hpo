@@ -9,6 +9,10 @@ from typing import Any, Literal
 import bayesflow as bf
 import optuna
 
+from bayesflow_hpo.objectives import (
+    OBJECTIVE_ENCODING_VERSION,
+    _direction_for,
+)
 from bayesflow_hpo.optimization.checkpoint_pool import CheckpointPool
 from bayesflow_hpo.optimization.constraints import (
     MetricConstraintSpec,
@@ -28,7 +32,10 @@ from bayesflow_hpo.validation.data import (
     ValidationDataset,
     generate_validation_dataset,
 )
-from bayesflow_hpo.validation.registry import validate_objective_metric_kinds
+from bayesflow_hpo.validation.registry import (
+    canonical_metric_name,
+    validate_objective_metric_kinds,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -410,6 +417,13 @@ def optimize(
     """
     if objective_metrics is None:
         objective_metrics = ["calibration_error", "nrmse"]
+    # Canonicalize at the PUBLIC boundary, before anything downstream sees the
+    # names. Doing it inside ObjectiveConfig was too late: `check_pipeline`
+    # already ran pre-flight against the caller's spelling, so
+    # `objective_metrics=["cal_error"]` either failed pre-flight (the default
+    # validator emits `calibration_error`) or passed pre-flight and then had
+    # every trial penalized at runtime, depending on which validator was used.
+    objective_metrics = [canonical_metric_name(m) for m in objective_metrics]
     validate_objective_metric_kinds(objective_metrics)
 
     # --- Early validation ---
@@ -646,6 +660,79 @@ def _build_objective(
     )
 
 
+def _guard_resumed_study(
+    study: optuna.Study, objective_metrics: list[str]
+) -> None:
+    """Refuse to continue a study whose stored values use another encoding.
+
+    Two hazards, both silent, and both specific to *resuming*.
+
+    Optuna's ``create_study(load_if_exists=True)`` returns the stored study and
+    keeps ITS directions, ignoring the ones requested here -- verified, not
+    assumed. So a study created before objective values became minimize-space
+    retains its ``maximize`` direction, never reaches
+    :func:`_derive_directions` (the caller passes ``directions=None``), and
+    then maximizes the newly negated values: the search would prefer the worst
+    model available.
+
+    Separately, trials stored under an older encoding hold raw values for a
+    metric this version negates, so old and new trials in one study are on
+    opposite scales. The sampler and the Pareto computation would compare them
+    directly.
+
+    Neither is repairable in place, so both refuse rather than warn.
+
+    Parameters
+    ----------
+    study
+        The study just created or loaded.
+    objective_metrics
+        Canonical objective metric names for this run.
+
+    Raises
+    ------
+    ValueError
+        If the study carries a non-minimize direction, or holds trials written
+        under an older objective encoding while an encoding-sensitive metric
+        is in use.
+    """
+    if any(d != optuna.study.StudyDirection.MINIMIZE for d in study.directions):
+        raise ValueError(
+            f"Study {study.study_name!r} was created with directions "
+            f"{[d.name.lower() for d in study.directions]}, but this version "
+            "returns minimize-is-better objective values for every metric. "
+            "Optuna keeps a loaded study's own directions, so continuing "
+            "would maximize already-negated values and select the worst "
+            "model. Start a new study."
+        )
+
+    encoding = study.user_attrs.get("bayesflow_hpo_objective_encoding")
+    if encoding == OBJECTIVE_ENCODING_VERSION:
+        return
+
+    has_trials = any(
+        t.state == optuna.trial.TrialState.COMPLETE for t in study.trials
+    )
+    # Only metrics whose stored numbers changed make old trials incomparable.
+    sensitive = [
+        m for m in objective_metrics
+        if (_direction_for(m) or None) is not None
+        and _direction_for(m).higher_is_better
+    ]
+    if has_trials and encoding is None and sensitive:
+        raise ValueError(
+            f"Study {study.study_name!r} holds trials written before objective "
+            f"values were normalized to minimize-is-better, and this run "
+            f"optimizes {sensitive!r}, whose stored values changed sign. Old "
+            "and new trials would sit on opposite scales in one Pareto front. "
+            "Start a new study, or drop the affected metric from "
+            "objective_metrics."
+        )
+    study.set_user_attr(
+        "bayesflow_hpo_objective_encoding", OBJECTIVE_ENCODING_VERSION
+    )
+
+
 def _derive_directions(
     *,
     objective: GenericObjective,
@@ -741,6 +828,7 @@ def _create_and_run_study(
         warm_start_top_k=warm_start_top_k,
         qmc_startup_trials=qmc_startup_trials,
     )
+    _guard_resumed_study(study, objective.config.objective_metrics)
 
     # Auto-detect n_startup_trials from sampler if not set explicitly.
     cfg = objective.config
