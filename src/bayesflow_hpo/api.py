@@ -357,7 +357,8 @@ def optimize(
         Optimization directions.  Default ``None`` (auto-derived as
         ``["minimize"] * n_objectives``).
 
-        Every entry must be ``"minimize"``; anything else raises. The
+        An explicit list must have exactly ``n_objectives`` entries, and
+        every entry must be ``"minimize"``; anything else raises. The
         objective already converts each metric to minimize-is-better through
         :data:`bayesflow_hpo.objectives.METRIC_DIRECTIONS`, and the failure
         penalties are in minimize space too, so a ``"maximize"`` entry inverts

@@ -70,6 +70,40 @@ _METRIC_NAME_FIELDS = {
     "metric_constraints_soft",
 }
 
+# Every other field of ObjectiveConfig. Listing these is what makes the
+# inventory exhaustive: a newly added field belongs to exactly one of the two
+# sets, and `test_inventory_partitions_the_dataclass` fails until someone says
+# which. `cost_metric` sits here deliberately -- "inference_time" is measured
+# by the objective itself and is not a registry metric.
+_NON_METRIC_FIELDS = {
+    "adapter",
+    "build_approximator_fn",
+    "checkpoint_pool",
+    "cost_metric",
+    "early_stopping_patience",
+    "early_stopping_window",
+    "epochs",
+    "intermediate_validation_interval",
+    "intermediate_validation_warmup",
+    "lr_warmup_epochs",
+    "lr_warmup_fraction",
+    "lr_warmup_steps",
+    "max_memory_mb",
+    "max_param_count",
+    "n_intermediate_posterior_samples",
+    "n_posterior_samples",
+    "num_batches",
+    "objective_mode",
+    "pruning_n_startup_trials",
+    "report_frequency",
+    "search_space",
+    "simulator",
+    "train_fn",
+    "training_mode",
+    "validate_fn",
+    "validation_data",
+}
+
 # One registered alias and the canonical name it must resolve to.
 _ALIAS = "cal_error"
 _CANONICAL = "calibration_error"
@@ -88,19 +122,33 @@ def _config(**overrides) -> ObjectiveConfig:
     return ObjectiveConfig(**base)
 
 
-def test_inventory_matches_the_dataclass():
-    """Fail when a field is added that this file has not classified.
+def test_inventory_partitions_the_dataclass():
+    """Every field must be classified as metric-bearing or not.
 
-    This is the part that makes the inventory self-maintaining. Without it the
-    file only ever tests the fields someone remembered to list, which is the
-    same weakness that let the defect recur.
+    This is what makes the inventory self-maintaining, and the first version
+    of this test did not deliver it: asserting `_METRIC_NAME_FIELDS - known`
+    is empty catches a field that was *removed*, while a newly added
+    metric-bearing field simply grows `known` and leaves the difference empty.
+    The test therefore advertised a guarantee it did not provide -- the same
+    shape of mistake as the defect it guards, a claim that reads as checked
+    and is not.
+
+    An exhaustive partition fails in both directions: a new field belongs to
+    exactly one set, and until someone says which, this fails.
     """
     known = {f.name for f in dataclasses.fields(ObjectiveConfig)}
-    unknown = _METRIC_NAME_FIELDS - known
-    assert not unknown, (
-        f"Fields listed here no longer exist on ObjectiveConfig: {unknown}. "
-        "Update the inventory."
+    classified = _METRIC_NAME_FIELDS | _NON_METRIC_FIELDS
+
+    assert not (classified - known), (
+        f"Fields listed here no longer exist on ObjectiveConfig: "
+        f"{sorted(classified - known)}. Update the inventory."
     )
+    assert not (known - classified), (
+        f"Unclassified ObjectiveConfig fields: {sorted(known - classified)}. "
+        "Add each to _METRIC_NAME_FIELDS (and canonicalize it in "
+        "__post_init__) or to _NON_METRIC_FIELDS."
+    )
+    assert not (_METRIC_NAME_FIELDS & _NON_METRIC_FIELDS)
 
 
 @pytest.mark.parametrize("field_name", sorted(_METRIC_NAME_FIELDS))
