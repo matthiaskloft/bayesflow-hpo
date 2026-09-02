@@ -110,6 +110,7 @@ def default_validate_fn(
     approximator: Any,
     validation_data: ValidationDataset,
     n_posterior_samples: int,
+    objective_metrics: list[str] | None = None,
 ) -> dict[str, float]:
     """Run the built-in validation pipeline and return metric dict.
 
@@ -124,6 +125,14 @@ def default_validate_fn(
         Pre-generated validation dataset.
     n_posterior_samples
         Number of posterior draws per simulation.
+    objective_metrics
+        Metrics this run optimizes.  Every registered name here is computed in
+        addition to :data:`DEFAULT_METRICS`.  Leaving it ``None`` computes
+        ``DEFAULT_METRICS`` alone, which is why callers must thread it
+        through: ``log_gamma``, ``sbc_ks`` and ``sbc_chi2`` are registered but
+        *not* default, so pre-flight reported them as missing keys and
+        rejected the run before training started -- the headline metric could
+        not be optimized through the public workflow at all.
 
     Returns
     -------
@@ -136,6 +145,7 @@ def default_validate_fn(
         approximator=approximator,
         validation_data=validation_data,
         n_posterior_samples=n_posterior_samples,
+        metrics=_pipeline_metrics(objective_metrics or []),
     )
     return dict(result.summary)
 
@@ -163,7 +173,12 @@ def _validate_metric_keys(
 
     Returns a cleaned copy of the dict.
     """
-    cleaned = dict(raw)
+    # `objective_metrics` was canonicalized at the public boundary, but a
+    # custom hook returns whatever spelling its author used -- and the
+    # documented contract is that it returns the keys the caller *asked* for.
+    # Comparing literally would penalize every trial of a hook that honoured
+    # that contract with an alias. Canonicalize both sides so they meet.
+    cleaned = {canonical_metric_name(k): v for k, v in raw.items()}
     for key in objective_metrics:
         # The penalty is inserted BEFORE direction conversion, so it must be a
         # raw-space value. A flat 1.0 is not: for `log_gamma` it converts to
@@ -442,6 +457,25 @@ class ObjectiveConfig:
             self.early_stopping_monitor = canonical_metric_name(
                 self.early_stopping_monitor
             )
+        # Every OTHER field naming a metric has to be canonicalized in the same
+        # place, or it reads a key nothing writes. These are not hypothetical:
+        # `("primary", "cal_error")` made PeriodicValidationCallback index a
+        # dict keyed `calibration_error`, raising KeyError at each intermediate
+        # validation and converting the trial into a training-failure penalty;
+        # a constraint spec naming an alias silently never matched, so a hard
+        # constraint skipped it and a soft one read zero violation. See
+        # `tests/test_optimization/test_metric_name_inventory.py`, which fails
+        # if a future field joins this set without joining this block.
+        if isinstance(self.pruning_strategy, tuple):
+            self.pruning_strategy = (
+                self.pruning_strategy[0],
+                canonical_metric_name(self.pruning_strategy[1]),
+            )
+        if self.metric_constraints_hard is not None:
+            self.metric_constraints_hard = [
+                (canonical_metric_name(name), threshold, direction)
+                for name, threshold, direction in self.metric_constraints_hard
+            ]
         if self.training_mode not in ("fixed_budget", "open_ended"):
             raise ValueError(
                 f"Unknown training_mode: {self.training_mode!r}. "

@@ -314,6 +314,75 @@ class TestResumeGuards:
             == OBJECTIVE_ENCODING_VERSION
         )
 
+    def test_an_in_flight_trial_blocks_the_stamp(self, tmp_path) -> None:
+        """Shared storage: another worker may be mid-trial on the old version.
+
+        Counting only COMPLETE trials let a new worker declare the study
+        re-encoded while an old worker still held a RUNNING `log_gamma` trial.
+        That trial's raw value then landed in a study stamped as fully
+        negated -- encodings mixed behind a guard that had already passed.
+        """
+        import optuna as _optuna
+
+        url = "sqlite:///" + str(tmp_path / "s.db").replace("\\", "/")
+        study = _optuna.create_study(
+            study_name="s", storage=url, directions=["minimize"] * 3
+        )
+        study.ask()  # RUNNING, no values stored yet
+        reloaded = _optuna.create_study(
+            study_name="s", storage=url,
+            directions=["minimize"] * 3, load_if_exists=True,
+        )
+        with pytest.raises(ValueError, match="opposite scales"):
+            _guard_resumed_study(reloaded, ["log_gamma", "nrmse"])
+        assert "bayesflow_hpo_objective_encoding" not in reloaded.user_attrs
+
+    def test_a_warm_started_study_inherits_the_source_encoding(
+        self, tmp_path
+    ) -> None:
+        """Copied trials carry their encoding, so provenance must copy too.
+
+        `create_study(warm_start_from=...)` copies COMPLETE trials into a
+        fresh study. Without inheriting the stamp the target looks exactly
+        like a legacy study -- completed trials, no encoding attribute -- so
+        the guard refused a warm start from an already-valid v2 source.
+        """
+        from bayesflow_hpo.optimization.study import create_study
+
+        source = self._study(tmp_path, ["minimize"] * 3, with_trial=True)
+        source.set_user_attr(
+            "bayesflow_hpo_objective_encoding", OBJECTIVE_ENCODING_VERSION
+        )
+        target = create_study(
+            study_name="target",
+            directions=["minimize"] * 3,
+            storage=None,
+            warm_start_from=source,
+            warm_start_top_k=1,
+        )
+        _guard_resumed_study(target, ["log_gamma", "nrmse"])
+
+    def test_a_warm_start_from_a_legacy_source_is_still_refused(
+        self, tmp_path
+    ) -> None:
+        """Inheriting provenance must not degrade into inheriting nothing.
+
+        An unstamped source holds pre-encoding values, so copying its trials
+        copies the incompatibility along with them.
+        """
+        from bayesflow_hpo.optimization.study import create_study
+
+        source = self._study(tmp_path, ["minimize"] * 3, with_trial=True)
+        target = create_study(
+            study_name="target_legacy",
+            directions=["minimize"] * 3,
+            storage=None,
+            warm_start_from=source,
+            warm_start_top_k=1,
+        )
+        with pytest.raises(ValueError, match="opposite scales"):
+            _guard_resumed_study(target, ["log_gamma", "nrmse"])
+
 
 def test_a_legacy_set_addition_still_flips_a_registered_lower_metric() -> None:
     """Registering the error metrics must not remove the old override.

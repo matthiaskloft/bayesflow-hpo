@@ -425,6 +425,15 @@ def optimize(
     # every trial penalized at runtime, depending on which validator was used.
     objective_metrics = [canonical_metric_name(m) for m in objective_metrics]
     validate_objective_metric_kinds(objective_metrics)
+    # Soft constraints bypass ObjectiveConfig entirely -- they are handed
+    # straight to `create_study` -- so they are canonicalized here or nowhere.
+    # An aliased name never matches the pipeline's key, and a soft constraint
+    # reads a missing key as zero violation: silently inactive, no error.
+    if metric_constraints_soft is not None:
+        metric_constraints_soft = [
+            (canonical_metric_name(name), threshold, direction)
+            for name, threshold, direction in metric_constraints_soft
+        ]
 
     # --- Early validation ---
     if report_frequency < 1:
@@ -710,9 +719,25 @@ def _guard_resumed_study(
     if encoding == OBJECTIVE_ENCODING_VERSION:
         return
 
-    has_trials = any(
-        t.state == optuna.trial.TrialState.COMPLETE for t in study.trials
-    )
+    # COMPLETE trials hold stored objective values. RUNNING and WAITING ones
+    # will hold them shortly, and under shared storage they may belong to a
+    # worker on an older version: counting only COMPLETE let a new worker stamp
+    # the study while an old worker's `log_gamma` trial was still in flight,
+    # and its raw value then landed in a study marked as fully re-encoded.
+    # FAILED and PRUNED trials store no objective values, so they neither
+    # block nor need protecting.
+    settled = [
+        t for t in study.trials
+        if t.state == optuna.trial.TrialState.COMPLETE
+    ]
+    active = [
+        t for t in study.trials
+        if t.state in (
+            optuna.trial.TrialState.RUNNING,
+            optuna.trial.TrialState.WAITING,
+        )
+    ]
+    has_trials = bool(settled or active)
     # Only metrics whose stored numbers changed make old trials incomparable.
     # Read from an explicit record, not inferred from `higher_is_better`:
     # `contraction` is higher-is-better AND a usable objective, but its

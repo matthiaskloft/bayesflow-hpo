@@ -607,6 +607,18 @@ def create_study(
             source_study=warm_start_from,
             top_k=warm_start_top_k,
         )
+        # Copying trials copies their encoding with them, so the target must
+        # inherit the source's provenance. Without this the target holds
+        # COMPLETE trials with no encoding attribute, which is exactly the
+        # signature of a legacy study -- and the resume guard would reject a
+        # perfectly valid warm start from an already-re-encoded study.
+        source_encoding = warm_start_from.user_attrs.get(
+            "bayesflow_hpo_objective_encoding"
+        )
+        if source_encoding is not None:
+            study.set_user_attr(
+                "bayesflow_hpo_objective_encoding", source_encoding
+            )
     return study
 
 
