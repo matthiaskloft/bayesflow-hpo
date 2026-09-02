@@ -19,7 +19,7 @@ This module manages the Optuna study lifecycle.  Key design decisions:
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any
 
 import optuna
@@ -243,7 +243,7 @@ def _resolve_sampler(
 
     def _make_auto() -> optuna.samplers.BaseSampler:
         try:
-            from optuna.samplers import AutoSampler
+            from optuna.samplers import AutoSampler  # type: ignore[attr-defined]
         except ImportError:
             raise ImportError(
                 'Sampler preset "auto" requires a newer version of Optuna '
@@ -424,7 +424,9 @@ class QMCWarmupSampler(optuna.samplers.BaseSampler):
         study: optuna.Study,
         trial: optuna.trial.FrozenTrial,
         state: optuna.trial.TrialState,
-        values: list[float] | None,
+        # BaseSampler promises Sequence[float]; narrowing to list would break
+        # on any sequence Optuna chooses to pass.
+        values: Sequence[float] | None,
     ) -> None:
         was_qmc_trial = trial.number in self._pending_qmc_trials
         if was_qmc_trial:

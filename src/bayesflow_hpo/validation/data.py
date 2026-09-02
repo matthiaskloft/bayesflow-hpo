@@ -150,7 +150,9 @@ def save_validation_dataset(dataset: ValidationDataset, path: str | Path) -> Non
         for key, value in batch.items():
             arrays[f"b{batch_idx}__{key}"] = np.asarray(value)
 
-    np.savez_compressed(out_dir / "arrays.npz", **arrays)
+    # numpy's stub declares savez_compressed(file, *args, allow_pickle, **kwds),
+    # so an unpacked str-keyed dict is checked against `allow_pickle: bool`.
+    np.savez_compressed(out_dir / "arrays.npz", **arrays)  # type: ignore[arg-type]
 
 
 def make_condition_grid(

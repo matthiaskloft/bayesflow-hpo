@@ -20,6 +20,20 @@ jobs:
       - run: pip install ruff
       - run: ruff check src/ tests/
 
+  types:
+    runs-on: ubuntu-latest
+    env:
+      KERAS_BACKEND: torch
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - run: pip install -e ".[dev]"
+      # Paths come from [tool.mypy] files in pyproject.toml.
+      - run: mypy
+
   test:
     runs-on: ubuntu-latest
     strategy:

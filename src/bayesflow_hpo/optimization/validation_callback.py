@@ -44,6 +44,12 @@ logger = logging.getLogger(__name__)
 
 _VALID_STRATEGIES = {"none", "dominance", "mo-sha", "primary"}
 
+#: Fallback used when ``ObjectiveConfig.pruning_n_startup_trials`` is left
+#: unresolved. ``optimize()`` normally auto-detects it from the sampler, but
+#: building an objective directly bypasses that, and the pruning strategies
+#: compare this against an int.
+DEFAULT_PRUNING_N_STARTUP_TRIALS = 5
+
 
 class PeriodicValidationCallback(Callback):
     """Run validation every *interval* epochs and report to Optuna.
@@ -74,7 +80,11 @@ class PeriodicValidationCallback(Callback):
         Default 250.
     n_startup_trials
         Minimum completed trials before multi-objective pruning
-        activates.  Default 5.
+        activates.  ``None`` (the default) resolves to
+        :data:`DEFAULT_PRUNING_N_STARTUP_TRIALS`, because
+        ``ObjectiveConfig.pruning_n_startup_trials`` is auto-detected by
+        ``optimize()`` and stays ``None`` when an objective is built
+        directly.
     validate_fn
         Optional custom validation function with signature
         ``(approximator, validation_data, n_posterior_samples) ->
@@ -110,7 +120,7 @@ class PeriodicValidationCallback(Callback):
         interval: int = 10,
         warmup: int = 10,
         n_posterior_samples: int = 250,
-        n_startup_trials: int = 5,
+        n_startup_trials: int | None = None,
         validate_fn: ValidateFn | None = None,
         pruning_strategy: str | tuple[str, str] = "dominance",
         objective_metrics: list[str] | None = None,
@@ -125,7 +135,14 @@ class PeriodicValidationCallback(Callback):
         self.interval = interval
         self.warmup = warmup
         self.n_posterior_samples = n_posterior_samples
-        self.n_startup_trials = n_startup_trials
+        # `optimize()` auto-detects this from the sampler, but building an
+        # objective directly leaves it None, and every pruning strategy
+        # compares it against an int.
+        self.n_startup_trials = (
+            DEFAULT_PRUNING_N_STARTUP_TRIALS
+            if n_startup_trials is None
+            else n_startup_trials
+        )
         self.validate_fn = validate_fn
         self._step = 0  # monotonic step counter for Optuna
         self._consecutive_failures = 0
@@ -154,7 +171,7 @@ class PeriodicValidationCallback(Callback):
                     f"('primary', metric_name), got {pruning_strategy!r}"
                 )
             self._strategy_name = "primary"
-            self._primary_metric = pruning_strategy[1]
+            self._primary_metric: str | None = pruning_strategy[1]
         else:
             if pruning_strategy not in _VALID_STRATEGIES:
                 raise ValueError(
@@ -293,6 +310,10 @@ class PeriodicValidationCallback(Callback):
                 self.trial, scores, self._step, self.n_startup_trials
             )
         if self._strategy_name == "primary":
+            if self._primary_metric is None:  # pragma: no cover - set together
+                raise RuntimeError(
+                    'pruning_strategy "primary" without a metric name.'
+                )
             primary_score = scores[self._primary_metric]
             return should_prune_primary(
                 self.trial,
