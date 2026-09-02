@@ -349,6 +349,34 @@ ENCODING_CHANGED_AT_V2: frozenset[str] = frozenset(
     {"log_gamma", "correlation", "sbc_chi2", "mae"}
 )
 
+#: Built-in metrics audited against the pre-change rule and found to store the
+#: same numbers before and after encoding 2. This is a FROZEN list, not a query
+#: against the live registry: `list_metrics()` also returns custom metrics
+#: installed through `register_metric()`, whose penalty moved from a finite 1.0
+#: to +inf exactly like an unregistered name's. Treating "registered" as
+#: "audited" therefore let a populated pre-v2 study with a custom objective
+#: resume, leaving its old failures dominant over valid new values above 1.
+#: Together with ENCODING_CHANGED_AT_V2 this partitions every built-in a study
+#: could store an objective column for -- NOT every registered name: `sbc` is a
+#: deprecated diagnostic shim that produces `sbc_ks` and `sbc_chi2` rather than
+#: a column of its own, so it belongs to neither set. Both the disjointness and
+#: the coverage of that candidate set are asserted by
+#: TestEncodingChangeSetIsDerived.
+ENCODING_UNCHANGED_AT_V2: frozenset[str] = frozenset(
+    {
+        "calibration_error",
+        "rmse",
+        "nrmse",
+        "contraction",
+        "z_score",
+        "sbc_ks",
+        "coverage",
+        "coverage_left",
+        "coverage_right",
+        "bias",
+    }
+)
+
 #: Mutable set of higher-is-better metric names, kept as a live extension
 #: point rather than a derived view.
 #:
@@ -627,3 +655,40 @@ def mean_objective_score(values: list[float] | tuple[float, ...]) -> float:
     if len(values) > 1:
         return float(np.mean(values[:-1]))
     return float(values[0])
+
+
+def normalize_schema_entry(entry: str) -> str:
+    """Put a ``mean(...)`` objective column into an order-independent form.
+
+    Mean mode stores a single arithmetic mean, so the order of the metrics
+    inside the name carries no meaning and two spellings of the same objective
+    must compare equal. Sorting only where the name is built would not be
+    enough: a study stamped by an earlier build holds the members in whatever
+    order that run requested them.
+
+    Pareto columns are returned unchanged -- there order IS meaning, because
+    Optuna addresses objectives by position: ``directions`` is a sequence, and
+    ``FrozenTrial.values`` is indexed positionally against it (Optuna docs,
+    ``optuna.study.create_study`` and ``optuna.trial.FrozenTrial``).
+    """
+    if not (entry.startswith("mean(") and entry.endswith(")")):
+        return entry
+    members = entry[len("mean(") : -1].split("+")
+    return "mean(" + "+".join(sorted(members)) + ")"
+
+
+def schema_matches(stored: list[str], current: list[str]) -> bool:
+    """Compare two objective schemas, tolerating mean-mode member order.
+
+    A stored schema arrives from ``user_attrs``, which is caller-writable and
+    round-trips through JSON, so its members are checked rather than assumed
+    to be strings: a non-string member would otherwise raise ``AttributeError``
+    out of the normalizer instead of producing a clean refusal.
+    """
+    if len(stored) != len(current):
+        return False
+    if not all(isinstance(e, str) for e in (*stored, *current)):
+        return False
+    return [normalize_schema_entry(e) for e in stored] == [
+        normalize_schema_entry(e) for e in current
+    ]

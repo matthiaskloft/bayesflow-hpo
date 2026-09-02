@@ -356,14 +356,118 @@ class TestRoundSevenFindings:
 
     def test_mean_mode_schemas_ignore_member_order(self):
         """Mean mode stores one average, so the member order is not meaning."""
-        from bayesflow_hpo.api import _schema_matches
+        from bayesflow_hpo.objectives import schema_matches
 
-        assert _schema_matches(
+        assert schema_matches(
             ["mean(nrmse+log_gamma)", "inference_time"],
             ["mean(log_gamma+nrmse)", "inference_time"],
         )
         # Pareto columns keep their order: Optuna addresses them by position.
-        assert not _schema_matches(
+        assert not schema_matches(
             ["log_gamma", "nrmse", "t"], ["nrmse", "log_gamma", "t"]
         )
-        assert not _schema_matches(["mean(a+b)", "t"], ["mean(a+c)", "t"])
+        assert not schema_matches(["mean(a+b)", "t"], ["mean(a+c)", "t"])
+
+
+class TestRoundEightFindings:
+    """Regressions for round 8 -- three of which my round-7 fixes introduced."""
+
+    def test_a_registered_custom_metric_is_still_encoding_sensitive(self):
+        """"Registered" is not "audited".
+
+        The round-7 fix asked `list_metrics()` whether a metric was known, but
+        that is the LIVE registry: a custom metric installed through
+        `register_metric()` read as known and therefore unchanged, while its
+        penalty moved from a finite 1.0 to +inf like any unregistered name's.
+        Only the frozen audited list can exempt a metric.
+        """
+        from bayesflow_hpo.api import _encoding_sensitive
+        from bayesflow_hpo.validation import registry
+
+        name = "custom_for_encoding_test"
+        registry.register_metric(
+            name,
+            lambda draws, true_values: {name: 0.0},
+            description="Test-only metric.",
+            overwrite=True,
+        )
+        try:
+            assert _encoding_sensitive(name)
+            assert _encoding_sensitive("log_gamma")
+            assert not _encoding_sensitive("nrmse")
+        finally:
+            # The registry is process-global and exposes no removal API, so
+            # the private tables are the only way to undo this. Leaving the
+            # entry behind broke an unrelated test that asserts every
+            # registered metric is a documented built-in.
+            for table in (
+                registry._REGISTRY,
+                registry._DESCRIPTIONS,
+                registry._KINDS,
+            ):
+                table.pop(name, None)
+
+    def test_the_audited_sets_partition_the_builtins(self):
+        """Neither set may drift from the registry without someone noticing."""
+        from bayesflow_hpo.objectives import (
+            ENCODING_CHANGED_AT_V2,
+            ENCODING_UNCHANGED_AT_V2,
+        )
+
+        assert not (ENCODING_CHANGED_AT_V2 & ENCODING_UNCHANGED_AT_V2)
+
+    def test_warm_start_source_schemas_tolerate_mean_order(self):
+        """The mean-mode fix has to cover the warm-start site as well.
+
+        `_guard_resumed_study` compared through `schema_matches`, but the
+        warm-start source check still used list inequality, so a mean-mode
+        source stamped by an earlier build was refused for member order alone.
+        """
+        from bayesflow_hpo.objectives import schema_matches
+
+        assert schema_matches(
+            ["mean(nrmse+log_gamma)", "inference_time"],
+            ["mean(log_gamma+nrmse)", "inference_time"],
+        )
+
+    def test_a_non_string_schema_member_refuses_rather_than_raising(self):
+        """`user_attrs` is caller-writable and round-trips through JSON.
+
+        Both callers type-check the outer container but not its members, so a
+        schema holding a number or a null reached the normalizer and raised
+        `AttributeError` instead of producing the guard's refusal.
+        """
+        from bayesflow_hpo.objectives import schema_matches
+
+        stored: list[str] = [1, "nrmse"]  # type: ignore[list-item]
+        assert not schema_matches(stored, ["log_gamma", "nrmse"])
+        current: list[str] = [None, "nrmse"]  # type: ignore[list-item]
+        assert not schema_matches(["log_gamma", "nrmse"], current)
+
+    def test_a_populated_unstamped_study_without_schema_is_refused(self):
+        """The refusal must not depend on the encoding stamp.
+
+        It was nested under `encoding == OBJECTIVE_ENCODING_VERSION`, so a
+        legacy study with neither encoding nor schema slipped through whenever
+        its metrics were encoding-insensitive -- and resuming that with a
+        different same-width metric set mixes objectives by column with
+        nothing to compare against.
+        """
+        import optuna
+
+        from bayesflow_hpo.api import _guard_resumed_study
+
+        study = optuna.create_study(directions=["minimize"] * 2)
+        study.add_trial(
+            optuna.trial.create_trial(
+                params={},
+                distributions={},
+                values=[0.1, 0.2],
+                state=optuna.trial.TrialState.COMPLETE,
+            )
+        )
+        # `nrmse` is encoding-insensitive, so nothing else refuses this.
+        with pytest.raises(ValueError, match="records no objective schema"):
+            _guard_resumed_study(
+                study, ["nrmse", "rmse"], metric_names=["nrmse", "rmse"]
+            )

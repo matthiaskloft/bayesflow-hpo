@@ -26,7 +26,7 @@ from typing import Any
 import optuna
 from optuna.trial import TrialState
 
-from bayesflow_hpo.objectives import mean_objective_score
+from bayesflow_hpo.objectives import mean_objective_score, schema_matches
 from bayesflow_hpo.optimization.constraints import MetricConstraintSpec
 from bayesflow_hpo.results.extraction import _objective_column_names
 
@@ -602,7 +602,43 @@ def create_study(
     # real API is `Study.set_metric_names` (Optuna >= 3.2), which persists to
     # storage and survives a reload, so column provenance is recoverable
     # rather than lost the moment the process exits.
-    if metric_names:
+    # An existing target may already be stamped with a different schema. Both
+    # the relabelling below and any warm-start copy would mutate it before
+    # `_guard_resumed_study()` ever runs, so the mismatch is caught here: a
+    # rejected resume must not leave the study's columns renamed, nor leave
+    # copied trials persisted under the previous schema for a later run to
+    # accept as its own.
+    target_schema = study.user_attrs.get("bayesflow_hpo_objective_schema")
+    if isinstance(target_schema, (list, tuple)) and metric_names is not None:
+        if not schema_matches(list(target_schema), list(metric_names)):
+            raise ValueError(
+                f"Study {study.study_name!r} stores objectives "
+                f"{list(target_schema)!r}, but this run produces "
+                f"{list(metric_names)!r}. Optuna addresses objectives by "
+                "position, so continuing would compare one metric against "
+                "another in the same column. Start a new study, or restore "
+                "the original objective_metrics, objective_mode and "
+                "cost_metric."
+            )
+
+    # Only label a study that holds no objective values yet. `set_metric_names`
+    # overwrites, and `results/extraction.py` trusts the result, so labelling on
+    # every call let a resume that `_guard_resumed_study()` goes on to REJECT
+    # permanently rename the existing columns -- attributing stored values to
+    # metrics that never produced them.
+    #
+    # The predicate is the guard's, not `not study.trials`: FAILED and PRUNED
+    # trials store no objective values, so they have no column meaning to
+    # protect. Requiring an empty trial list left a study whose early trials
+    # all failed unlabelled forever, and `_objective_column_names` then fell
+    # back to `objective_0`, `objective_1`, ... for every later real trial.
+    unlabellable = any(
+        t.state in (
+            TrialState.COMPLETE, TrialState.RUNNING, TrialState.WAITING,
+        )
+        for t in study.trials
+    )
+    if metric_names and not unlabellable:
         try:
             with warnings.catch_warnings():
                 # set_metric_names is flagged experimental; the alternative is
@@ -634,18 +670,33 @@ def create_study(
             source_schema = list(source_schema)
         else:
             source_schema = None
-        if (
-            source_schema is not None
-            and metric_names is not None
-            and source_schema != list(metric_names)
-        ):
-            raise ValueError(
-                f"Cannot warm-start from study "
-                f"{warm_start_from.study_name!r}: it stores objectives "
-                f"{source_schema!r}, but this run produces "
-                f"{list(metric_names)!r}. Its trials would be copied into "
-                "columns that mean something else."
-            )
+        # Scoped to `metric_names is not None` on purpose, mirroring
+        # `_guard_resumed_study`: a caller that declares no names is never
+        # checked against a schema, so a schema-less copy strands nothing.
+        if metric_names is not None:
+            if source_schema is None:
+                # Reaching here means the source HAS completed trials to copy
+                # (`will_copy`). Copying them leaves the target populated and
+                # unstamped -- the one state that guard refuses outright -- so
+                # accepting silently mutates a persistent target into
+                # something that can never be resumed.
+                raise ValueError(
+                    f"Cannot warm-start from study "
+                    f"{warm_start_from.study_name!r}: it holds completed "
+                    "trials but records no objective schema, so the metric "
+                    "behind each of its columns cannot be verified. Set that "
+                    "study's 'bayesflow_hpo_objective_schema' user attribute "
+                    "to the names it was actually run with, or start without "
+                    "a warm start."
+                )
+            if not schema_matches(source_schema, list(metric_names)):
+                raise ValueError(
+                    f"Cannot warm-start from study "
+                    f"{warm_start_from.study_name!r}: it stores objectives "
+                    f"{source_schema!r}, but this run produces "
+                    f"{list(metric_names)!r}. Its trials would be copied into "
+                    "columns that mean something else."
+                )
 
         warm_start_study(
             target_study=study,

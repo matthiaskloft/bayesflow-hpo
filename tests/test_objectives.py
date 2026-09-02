@@ -510,6 +510,54 @@ class TestEncodingChangeSetIsDerived:
             f"{sorted(set(ENCODING_CHANGED_AT_V2) - computed)}."
         )
 
+    def test_the_audited_sets_cover_every_objective_capable_builtin(
+        self,
+    ) -> None:
+        """Disjointness alone let an omission pass unnoticed.
+
+        The round-8 test asserted only that the two sets do not overlap, so a
+        built-in in NEITHER set was silent -- and anything omitted is treated
+        as encoding-sensitive, blocking legacy studies that are in fact
+        comparable. This asserts coverage over the same candidate set the
+        derivation above uses: names a study could store a column for.
+        """
+        from bayesflow_hpo.objectives import (
+            ENCODING_CHANGED_AT_V2,
+            ENCODING_UNCHANGED_AT_V2,
+            METRIC_DIRECTIONS,
+        )
+        from bayesflow_hpo.validation.registry import _KINDS
+
+        candidates = {
+            name for name, kind in _KINDS.items() if kind == "objective"
+        } | set(METRIC_DIRECTIONS)
+        audited = ENCODING_CHANGED_AT_V2 | ENCODING_UNCHANGED_AT_V2
+
+        assert not (candidates - audited), (
+            "These objective-capable built-ins are in neither audited set, so "
+            "they are silently treated as encoding-sensitive: "
+            f"{sorted(candidates - audited)}."
+        )
+
+    def test_the_deprecated_sbc_shim_is_deliberately_unaudited(self) -> None:
+        """It produces no column of its own, so it needs no verdict.
+
+        `sbc` is registered but delegates to `sbc_ks` and `sbc_chi2`, which
+        are audited separately (and land in opposite sets). Pinning its kind
+        keeps the coverage test above honest: if `sbc` ever became an
+        objective, that test would start demanding a verdict for it.
+        """
+        from bayesflow_hpo.objectives import (
+            ENCODING_CHANGED_AT_V2,
+            ENCODING_UNCHANGED_AT_V2,
+        )
+        from bayesflow_hpo.validation.registry import _KINDS
+
+        assert _KINDS["sbc"] == "diagnostic"
+        assert "sbc" not in (ENCODING_CHANGED_AT_V2 | ENCODING_UNCHANGED_AT_V2)
+        assert "sbc_ks" in ENCODING_UNCHANGED_AT_V2
+        assert "sbc_chi2" in ENCODING_CHANGED_AT_V2
+
     def test_contraction_is_excluded_for_the_right_reason(self) -> None:
         """Not merely absent -- absent because nothing about it moved."""
         from bayesflow_hpo.objectives import (
