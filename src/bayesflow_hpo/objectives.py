@@ -24,9 +24,9 @@ from __future__ import annotations
 import importlib.util
 import logging
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, NewType
+from typing import TYPE_CHECKING, Any, NewType, TypeVar
 
 import numpy as np
 
@@ -47,6 +47,8 @@ RawScore = NewType("RawScore", float)
 #: Optuna. Must never be passed through :func:`_metric_to_minimize` again --
 #: double conversion re-inverts every higher-is-better metric.
 MinimizeScore = NewType("MinimizeScore", float)
+
+_V = TypeVar("_V")
 
 if TYPE_CHECKING:
     # Import-time only: `bayesflow_hpo.validation.__init__` pulls in
@@ -545,22 +547,27 @@ def worst_objective_value(key: CanonicalMetricName) -> MinimizeScore:
     return _metric_to_minimize(key, worst_raw_value(key))
 
 
-def _canonical_summary(summary: dict[str, Any]) -> dict[str, Any]:
-    """Re-key a validation summary by canonical metric name.
+def canonical_summary(summary: Mapping[str, _V]) -> dict[str, _V]:
+    """Re-key a metric mapping by canonical metric name.
 
     The pipeline emits canonical names, but a caller's own ``validate_fn``
-    emits whatever spelling its author used, and both reach these extractors.
+    emits whatever spelling its author used, and both reach the extractors.
     Resolving only the requested name would therefore fix one shape and break
     the other.
 
     Unknown names pass through unchanged, so non-metric entries are kept. A
-    summary carrying BOTH spellings of one metric keeps the canonical value:
+    mapping carrying BOTH spellings of one metric keeps the canonical value:
     that is what the pipeline itself wrote, and dropping it in favour of an
     alias would let a caller's spelling override the measurement.
+
+    Use this rather than ``{canonical_metric_name(k): v for k, v in ...}``.
+    That comprehension is last-write-wins, so a hook emitting both spellings
+    resolved to whichever came last -- making the score depend on dict
+    insertion order, silently and differently at each boundary.
     """
     from bayesflow_hpo.validation.registry import canonical_metric_name
 
-    out: dict[str, Any] = {}
+    out: dict[str, _V] = {}
     for key, value in summary.items():
         canonical = canonical_metric_name(key)
         if canonical != key and canonical in summary:
@@ -616,7 +623,7 @@ def extract_objective_values(
     # breaking an alias-keyed summary read with that same alias -- a shape the
     # previous contract accepted, because a caller's own `validate_fn` emits
     # whatever spelling its author chose.
-    summary = _canonical_summary(metrics.get("summary", metrics))
+    summary = canonical_summary(metrics.get("summary", metrics))
     objective_metric = canonical_metric_name(objective_metric)
     if objective_metric not in summary:
         logger.warning(
@@ -672,7 +679,7 @@ def extract_multi_objective_values(
             f"Expected 'mean' or 'pareto'."
         )
 
-    summary = _canonical_summary(metrics.get("summary", metrics))
+    summary = canonical_summary(metrics.get("summary", metrics))
 
     raw_values: list[float] = []
     # Both sides, for the reason given in `extract_objective_values`.

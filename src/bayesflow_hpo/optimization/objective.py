@@ -44,6 +44,7 @@ from bayesflow_hpo.objectives import (
     FAILED_TRIAL_COST,
     MAX_PARAM_COUNT,
     _direction_for,
+    canonical_summary,
     compute_inference_time_per_dataset,
     extract_multi_objective_values,
     get_param_count,
@@ -181,9 +182,11 @@ def _validate_metric_keys(
     # documented contract is that it returns the keys the caller *asked* for.
     # Comparing literally would penalize every trial of a hook that honoured
     # that contract with an alias. Canonicalize both sides so they meet.
-    cleaned: dict[str, float] = {
-        canonical_metric_name(k): v for k, v in raw.items()
-    }
+    # Not a comprehension: that is last-write-wins, so a hook emitting BOTH
+    # spellings of one metric resolved to whichever came last and the trial's
+    # score depended on dict insertion order. `canonical_summary` keeps the
+    # canonical entry, which is the same rule the extractors apply.
+    cleaned: dict[str, float] = canonical_summary(raw)
     for key in objective_metrics:
         # The penalty is inserted BEFORE direction conversion, so it must be a
         # raw-space value. A flat 1.0 is not: for `log_gamma` it converts to

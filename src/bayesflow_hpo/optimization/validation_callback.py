@@ -31,7 +31,11 @@ import numpy as np
 import optuna
 from keras.callbacks import Callback
 
-from bayesflow_hpo.objectives import RawScore, _metric_to_minimize
+from bayesflow_hpo.objectives import (
+    RawScore,
+    _metric_to_minimize,
+    canonical_summary,
+)
 from bayesflow_hpo.optimization.pruning_strategies import (
     should_prune_dominance,
     should_prune_mo_sha,
@@ -364,9 +368,6 @@ class PeriodicValidationCallback(Callback):
         """Compute objective_metrics via validation pipeline."""
         try:
             if self.validate_fn is not None:
-                from bayesflow_hpo.validation.registry import (
-                    canonical_metric_name,
-                )
 
                 raw_result = self.validate_fn(
                     self.approximator,
@@ -380,10 +381,10 @@ class PeriodicValidationCallback(Callback):
                 # validation read as "missing", disabling pruning and -- in
                 # open_ended mode -- validation early stopping and best-weight
                 # restoration, behind nothing louder than a warning log.
-                result_dict = {
-                    canonical_metric_name(k): v
-                    for k, v in raw_result.items()
-                }
+                # Collision-aware, for the reason given in
+                # `_validate_metric_keys`: a comprehension here made pruning
+                # read whichever spelling the hook happened to emit last.
+                result_dict = canonical_summary(raw_result)
                 # Validate that all objective_metrics are present.
                 missing = [
                     k for k in self.objective_metrics

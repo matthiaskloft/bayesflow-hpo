@@ -751,11 +751,56 @@ class TestBothSpellingsOfASummaryResolve:
 
     def test_non_metric_entries_survive_the_rekeying(self) -> None:
         """Unknown names pass through, so a summary is not filtered."""
-        from bayesflow_hpo.objectives import _canonical_summary
+        from bayesflow_hpo.objectives import canonical_summary
 
-        out = _canonical_summary(
+        out = canonical_summary(
             {"cal_error": 0.02, "n_datasets": 500, "some_note": "x"}
         )
         assert out == {
             "calibration_error": 0.02, "n_datasets": 500, "some_note": "x"
         }
+
+
+class TestCollisionResolutionIsUniformAndOrderFree:
+    """Every boundary that re-keys must use the same rule.
+
+    `canonical_summary` resolved a both-spellings collision to the canonical
+    entry, but two earlier boundaries -- `_validate_metric_keys` and the
+    periodic-validation callback -- used a plain comprehension, which is
+    last-write-wins. In the real optimization path those run FIRST, so the
+    advertised rule did not hold and the trial's score depended on the
+    insertion order of a hook's output dict.
+    """
+
+    _CANONICAL_FIRST = {
+        "calibration_error": 0.02, "cal_error": 0.99, "nrmse": 0.1,
+    }
+    _ALIAS_FIRST = {
+        "cal_error": 0.99, "calibration_error": 0.02, "nrmse": 0.1,
+    }
+
+    @pytest.mark.parametrize("order", ["canonical_first", "alias_first"])
+    def test_validate_metric_keys_is_order_independent(
+        self, order: str
+    ) -> None:
+        from bayesflow_hpo.optimization.objective import _validate_metric_keys
+
+        raw = (
+            self._CANONICAL_FIRST if order == "canonical_first"
+            else self._ALIAS_FIRST
+        )
+        cleaned = _validate_metric_keys(
+            dict(raw), ["calibration_error", "nrmse"]
+        )
+        assert cleaned["calibration_error"] == 0.02
+
+    @pytest.mark.parametrize("order", ["canonical_first", "alias_first"])
+    def test_the_extractor_agrees_with_it(self, order: str) -> None:
+        """The two boundaries must not disagree about the same input."""
+        from bayesflow_hpo.objectives import canonical_summary
+
+        raw = (
+            self._CANONICAL_FIRST if order == "canonical_first"
+            else self._ALIAS_FIRST
+        )
+        assert canonical_summary(raw)["calibration_error"] == 0.02
