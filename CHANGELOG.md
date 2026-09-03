@@ -95,6 +95,23 @@ learning-rate schedule all changed, and each moves scores on its own.
   only objective keys are required of the hook, so a constrained key it omits
   is still skipped or read as zero violation. Custom hooks must return every
   constrained key themselves.
+- **Aliased constraint names now match.** A constraint written as
+  `metric_constraints_hard=[("cal_error", 0.05, "above")]`, or its soft
+  equivalent, was compared literally against the canonical trial attribute, so
+  the hard path skipped it and the soft path read zero violation — configured,
+  inactive and silent. `ObjectiveConfig` canonicalizes both constraint lists
+  and `optimize()` canonicalizes the soft list before it reaches
+  `create_study`, so the same configuration now affects feasibility and
+  sampling.
+- **Sampled training budgets take precedence over the config fallbacks.**
+  0.1.0 overwrote `epochs` and `num_batches` unconditionally with the
+  `ObjectiveConfig` values, so a search space emitting either — including a
+  `DerivedDimension` computing one — was silently ignored and every trial ran
+  the same fixed budget. Both are now applied with `setdefault()`, and the
+  optimizer schedule and `train_fn` are built from the resulting values. Such
+  a search space therefore moves from one fixed budget to trial-specific ones,
+  changing both scores and cost; a sampled budget below 1 is now rejected as
+  `invalid_training_budget` rather than silently replaced.
 - **`GenericObjective` built directly resolves `pruning_n_startup_trials`.**
   Left at `None`, the default dominance pruner raised `TypeError`, which the
   trial handler converted into a failure penalty. It now resolves to 5, so
