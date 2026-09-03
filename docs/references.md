@@ -13,6 +13,7 @@ Feature implementations and their backing references.
 |---------|--------|-----------|
 | Optuna framework | `optimization/study.py` | Akiba et al. (2019) |
 | Objective column ordering | `objectives.py` | Optuna 4.9.0 docs |
+| Categorical choice-order identity | `search_spaces/base.py` | Optuna 4.9.0 docs |
 | `CanonicalMetricName` type | `validation/registry.py` | PEP 484 |
 | `RawScore` / `MinimizeScore` types | `objectives.py` | PEP 484 |
 | TPE sampler preset | `optimization/study.py` | Bergstra et al. (2011) |
@@ -341,6 +342,19 @@ that `CanonicalMetricName`, `RawScore` and `MinimizeScore` cost no wrapper
 object: the stored values are a plain `str` and plain `float`s. Verified
 directly by construction, since the runtime behaviour is the load-bearing part
 of the claim.
+
+**Optuna developers. (2025). `optuna.distributions.CategoricalDistribution`.**
+Optuna 4.9.0 API reference.
+https://optuna.readthedocs.io/en/v4.9.0/reference/generated/optuna.distributions.CategoricalDistribution.html
+
+Backs the 0.2.0 changelog's warning that `FlowMatchingSpace.quality()` breaks
+resume for a 0.1.0 study. `choices` is stored as an ordered tuple and forms
+part of the distribution's identity, so reordering it makes the stored and
+requested distributions unequal and Optuna refuses the parameter as a dynamic
+value space. Verified against the installed 4.9.0 rather than from the
+documentation alone: `CategoricalDistribution([False, True]) !=
+CategoricalDistribution([True, False])`, with `.choices` round-tripping as
+`(False, True)` and `(True, False)` respectively.
 
 **Optuna developers. (2025). `optuna.study.create_study` and
 `optuna.trial.FrozenTrial`.** Optuna 4.9.0 API reference.

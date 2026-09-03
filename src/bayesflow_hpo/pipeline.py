@@ -18,6 +18,7 @@ from bayesflow_hpo.builders.workflow import (
     _make_cosine_decay_optimizer,
     build_continuous_approximator,
 )
+from bayesflow_hpo.objectives import canonical_summary
 from bayesflow_hpo.optimization.objective import default_train_fn, default_validate_fn
 from bayesflow_hpo.search_spaces.composite import CompositeSearchSpace
 from bayesflow_hpo.types import BuildApproximatorFn, TrainFn, ValidateFn
@@ -353,7 +354,13 @@ def check_pipeline(
     # A custom hook returns the spelling its caller asked for, which may be an
     # alias; `objective_metrics` is already canonical. Meet in canonical space
     # so pre-flight does not reject a hook honouring the documented contract.
-    result = {canonical_metric_name(k): v for k, v in result.items()}
+    #
+    # `canonical_summary`, not a comprehension: a comprehension is
+    # last-write-wins, so a hook emitting both spellings of one metric -- one
+    # finite, one not -- passed pre-flight or was rejected by it depending on
+    # nothing but insertion order. This was the fourth such boundary; the other
+    # three were fixed together and this one was missed.
+    result = canonical_summary(result)
 
     missing_keys = set(objective_metrics) - set(result.keys())
     if missing_keys:

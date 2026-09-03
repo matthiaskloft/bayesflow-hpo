@@ -429,15 +429,19 @@ def test_a_legacy_set_addition_still_flips_a_registered_lower_metric() -> None:
     assert _metric_to_minimize("rmse", 0.8) == pytest.approx(0.8)
 
 
-def test_contraction_studies_still_resume(tmp_path: Path) -> None:
-    """A false refusal is a real cost, not a safe default.
+def test_contraction_studies_are_refused(tmp_path: Path) -> None:
+    """`contraction` was minimized RAW at released 0.1.0.
 
-    `contraction` is higher-is-better AND a usable objective, but its
-    conversion (`1 - value`) is identical to before this change, so its stored
-    values never moved. Inferring encoding-sensitivity from `higher_is_better`
-    would refuse a study that is perfectly comparable and force the user to
-    throw away completed trials for nothing. Only `log_gamma` actually
-    changed.
+    This test previously asserted the opposite, on the premise that
+    contraction's `1 - value` conversion predated the change. It did not: the
+    0.1.0 higher-is-better set held `correlation` alone. The premise came from
+    reading a mid-series commit, which is also what put `contraction` in
+    `ENCODING_UNCHANGED_AT_V2` -- so a legacy study resumed and mixed raw
+    values with converted ones in one column.
+
+    A false refusal is still a real cost, so the second half checks that a
+    genuinely unchanged metric is not swept up, and that passing the guard
+    does not stamp a study this encoding did not write.
     """
     url = "sqlite:///" + str(tmp_path / "c.db").replace("\\", "/")
     study = optuna.create_study(
@@ -452,7 +456,11 @@ def test_contraction_studies_still_resume(tmp_path: Path) -> None:
         study_name="c", storage=url,
         directions=["minimize"] * 3, load_if_exists=True,
     )
-    _guard_resumed_study(resumed, ["contraction", "nrmse"])
+    with pytest.raises(ValueError, match="different scales"):
+        _guard_resumed_study(resumed, ["contraction", "nrmse"])
+
+    # Unchanged metrics still resume -- the guard must not over-refuse.
+    _guard_resumed_study(resumed, ["calibration_error", "nrmse"])
 
     # And passing it must NOT have stamped the study. The stamp asserts every
     # trial was written by this encoding; these were not. Stamping here would

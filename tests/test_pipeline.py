@@ -1,5 +1,7 @@
 """Tests for check_pipeline() pre-flight validation."""
 
+from typing import Any
+
 import pytest
 from conftest import canonical_adapter
 
@@ -324,3 +326,103 @@ class TestTrackingDict:
     def test_values_returns_correct_values(self):
         td = _TrackingDict({"a": 1, "b": 2})
         assert sorted(td.values()) == [1, 2]
+
+
+def _build_fake(hparams: Any) -> _FakeApproximator:
+    """Typed stand-in for the untyped lambda the older tests use."""
+    return _FakeApproximator()
+
+
+def _train_noop(approx: Any, sim: Any, hp: Any, cb: Any) -> None:
+    """Typed no-op trainer."""
+    return None
+
+
+class TestPreflightCollisionResolutionIsOrderFree:
+    """`check_pipeline` re-keys the hook's summary, and it was the fourth
+    such boundary — the other three were made collision-aware together and
+    this one stayed a last-write-wins comprehension.
+
+    Its failure mode is a rejection rather than a misranking. A hook emitting
+    both spellings of one metric, one finite and one not, made pre-flight
+    accept or refuse the whole run on nothing but the insertion order of a
+    dict the hook happened to build.
+
+    This drives `check_pipeline` rather than `canonical_summary`, so a revert
+    to the comprehension fails here.
+    """
+
+    @pytest.mark.parametrize("order", ["canonical_first", "alias_first"])
+    def test_a_finite_canonical_value_is_accepted_in_either_order(
+        self, order: str
+    ) -> None:
+        pairs = [("calibration_error", 0.02), ("cal_error", float("nan"))]
+        if order == "alias_first":
+            pairs.reverse()
+
+        def colliding_validate(
+            approx: Any, vd: Any, n: int
+        ) -> dict[str, float]:
+            return dict(pairs)
+
+        # No PipelineError: the canonical entry wins regardless of order.
+        check_pipeline(
+            simulator=_FakeSimulator(),
+            adapter=canonical_adapter(),
+            search_space=_FakeSearchSpace(),
+            build_approximator_fn=_build_fake,
+            train_fn=_train_noop,
+            validate_fn=colliding_validate,
+            objective_metrics=["calibration_error"],
+        )
+
+    @pytest.mark.parametrize("order", ["canonical_first", "alias_first"])
+    def test_a_non_finite_canonical_value_is_refused_in_either_order(
+        self, order: str
+    ) -> None:
+        """The rule is "canonical wins", not "the finite one wins"."""
+        pairs = [("calibration_error", float("nan")), ("cal_error", 0.02)]
+        if order == "alias_first":
+            pairs.reverse()
+
+        def colliding_validate(
+            approx: Any, vd: Any, n: int
+        ) -> dict[str, float]:
+            return dict(pairs)
+
+        with pytest.raises(PipelineError, match="non-finite"):
+            check_pipeline(
+                simulator=_FakeSimulator(),
+                adapter=canonical_adapter(),
+                search_space=_FakeSearchSpace(),
+                build_approximator_fn=lambda hp: _FakeApproximator(),
+                train_fn=lambda approx, sim, hp, cb: None,
+                validate_fn=colliding_validate,
+                objective_metrics=["calibration_error"],
+            )
+
+    def test_an_alias_only_hook_is_accepted(self) -> None:
+        """Collision cases alone do not pin the re-keying.
+
+        Every collision case above also contains the literal
+        `calibration_error` key, so they all still pass if the re-keying is
+        deleted outright, or replaced with logic that merely drops aliases:
+        the later lookup finds the canonical key either way. A hook returning
+        only the documented alias is what distinguishes those implementations
+        from one that actually resolves names.
+        """
+
+        def alias_only_validate(
+            approx: Any, vd: Any, n: int
+        ) -> dict[str, float]:
+            return {"cal_error": 0.02}
+
+        check_pipeline(
+            simulator=_FakeSimulator(),
+            adapter=canonical_adapter(),
+            search_space=_FakeSearchSpace(),
+            build_approximator_fn=_build_fake,
+            train_fn=_train_noop,
+            validate_fn=alias_only_validate,
+            objective_metrics=["calibration_error"],
+        )
