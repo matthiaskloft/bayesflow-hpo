@@ -3,7 +3,7 @@
 ## 0.2.0
 
 Not a patch release. Re-running an unchanged configuration can produce
-different scores, some 0.1.0 studies are refused rather than resumed, and four
+different scores, some 0.1.0 studies are refused rather than resumed, and five
 previously accepted API usages now raise. Each is deliberate; the alternative
 was continuing to rank silently wrong.
 
@@ -38,9 +38,13 @@ learning-rate schedule all changed, and each moves scores on its own.
   so pre-flight compared it against the emitted `calibration_error` key and
   rejected the whole run before any trial. `optimize()` now canonicalizes
   first. `extract_objective_values` and `extract_multi_objective_values` had
-  the same gap downstream, where the alias returned `inf`; since `inf` is the
-  unregistered-name penalty, every trial tied at the worst possible score and
-  the objective went flat with nothing logged. A directly constructed
+  the same gap downstream, though 0.1.0's failure there was quieter than a
+  flat `inf`: both fell back to the reported `calibration_error`, so
+  `cal_error` came out *right by accident* while `corr` silently returned
+  calibration_error's value in correlation's place, and the multi-objective
+  form returned the flat `1.0` default. (The `inf` arises only once
+  cross-metric substitution is removed — see the penalty entry above.) A
+  directly constructed
   `PeriodicValidationCallback` failed differently rather than identically: its
   lightweight validation found no literal key, logged the miss and returned
   `None`, silently disabling that pruning step — or, for an aliased
@@ -65,6 +69,15 @@ learning-rate schedule all changed, and each moves scores on its own.
   gave the clamped loss. This changes stored scores and Pareto membership for
   failed trials. `rmse` and `nrmse` still accept the proxy — see **Known
   limitations**.
+- **The trial-*failure* penalty is per-metric.** Distinct from the two
+  penalties above: this is what a trial stores when it never reaches
+  validation at all — a failed build, a rejected compile, a param-count or
+  memory rejection, or the new invalid-budget rejections. 0.1.0 wrote a flat
+  `1.0` into every objective slot; each slot now takes that metric's own
+  worst objective value. For `log_gamma`, `mae` and `sbc_chi2` the stored
+  value moves from `1.0` to `+inf`, and for `correlation` from `1.0` to
+  `2.0`, so failed trials stop looking ordinary to the sampler. Default
+  objectives (`calibration_error`, `nrmse`) are unaffected.
 - **`denormalize_param_count()` round-trips with `normalize_param_count()`.**
   With a custom `max_count` below one million and the default `min_count`,
   0.1.0 skipped the auto-tightened lower bound that the forward direction
@@ -191,6 +204,15 @@ learning-rate schedule all changed, and each moves scores on its own.
   sampling — so a standalone custom space that 0.1.0 accepted can now raise on
   its own. **Migration:** give every dimension a unique name.
 
+- **`register_metric(kind=...)` validates its argument.** 0.1.0 stored
+  whatever string it was given, so a typo such as `kind="diagnostics"` made
+  the metric neither objective nor diagnostic and behaved unpredictably at
+  the kind checks. Anything but `"objective"` or `"diagnostic"` now raises.
+
+Note that the diagnostic-kind rejection above fires from `check_pipeline()`
+as well as `optimize()`, so a direct pre-flight call with a diagnostic
+objective raises too.
+
 ### Resume safety
 
 `create_study` and the resume guard refuse studies whose stored values cannot
@@ -230,12 +252,30 @@ spellings are *not* normalized in schema comparison: a stored
 `mean(cal_error+nrmse)` does not match a current `mean(calibration_error+nrmse)`
 and is refused.
 
+### Public constants
+
+- **`HIGHER_IS_BETTER` holds different names.** The set is now derived from
+  `METRIC_DIRECTIONS`, so it contains `correlation`, `contraction` and
+  `log_gamma` where 0.1.0 held `correlation` alone. It remains the documented
+  mutation point for custom metrics, and removal now has defined semantics:
+  `HIGHER_IS_BETTER.discard("contraction")` suppresses the conversion rather
+  than being overridden by the table. Code that iterates or copies this set
+  sees three entries where it saw one.
+
 ### Result analysis
 
 - **`select_best_trial()` restricts selection to the Pareto front.** Its final
   mean-rank tiebreak previously ran over all surviving candidates and could
   return a dominated trial. The same stored study can now yield a different
   best trial.
+- **A resumed study may lose its objective column labels.** 0.1.0 stamped
+  `metric_names` unconditionally; labelling is now skipped when the study
+  already holds trials, because relabelling a populated study would silently
+  reinterpret its stored columns. If such a study recorded its provenance in
+  the `bayesflow_hpo_objective_schema` user attribute rather than in Optuna's
+  own `metric_names`, result tables and plots fall back to `objective_0`,
+  `objective_1`, … where 0.1.0 showed metric names. The values are unchanged;
+  only the column headings are.
 - **The checkpoint pool ranks by the mean of all metric objectives** excluding
   cost, previously by the first objective alone. Multi-objective runs may
   retain and evict different weights, so a bounded pool can hold different
