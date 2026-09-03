@@ -37,11 +37,14 @@ learning-rate schedule all changed, and each moves scores on its own.
   registered, documented alias — reached `check_pipeline()` un-canonicalized,
   so pre-flight compared it against the emitted `calibration_error` key and
   rejected the whole run before any trial. `optimize()` now canonicalizes
-  first. The same gap existed downstream in `extract_objective_values`,
-  `extract_multi_objective_values` and a directly constructed
-  `PeriodicValidationCallback`, where the alias returned `inf`; since `inf` is
-  the unregistered-name penalty, every trial tied at the worst possible score
-  and the objective went flat with nothing logged.
+  first. `extract_objective_values` and `extract_multi_objective_values` had
+  the same gap downstream, where the alias returned `inf`; since `inf` is the
+  unregistered-name penalty, every trial tied at the worst possible score and
+  the objective went flat with nothing logged. A directly constructed
+  `PeriodicValidationCallback` failed differently rather than identically: its
+  lightweight validation found no literal key, logged the miss and returned
+  `None`, silently disabling that pruning step — or, for an aliased
+  `("primary", ...)` target, raised `KeyError`.
 - **Collision handling no longer depends on dict ordering.** A `validate_fn`
   emitting both spellings of one metric resolved to whichever came last, so a
   trial's score — and, through the periodic-validation callback, its pruning —
@@ -55,10 +58,13 @@ learning-rate schedule all changed, and each moves scores on its own.
 - **The failed-validation fallback is restricted.** When final validation
   raises, the clamped training loss is substituted only for metrics whose
   recorded direction is lower-is-better with a unit worst case. `log_gamma`,
-  `correlation`, `contraction`, `sbc_chi2` and every unregistered custom
-  metric now receive their worst objective value instead. This changes stored
-  scores and Pareto membership for failed trials. `rmse` and `nrmse` still
-  accept the proxy — see **Known limitations**.
+  `correlation`, `contraction` and `sbc_chi2` now receive their worst
+  objective value instead. So do `mae` and any *registered* custom metric
+  with no `METRIC_DIRECTIONS` entry, not only unregistered names: absence of
+  a recorded direction refuses the substitution and yields `+inf` where 0.1.0
+  gave the clamped loss. This changes stored scores and Pareto membership for
+  failed trials. `rmse` and `nrmse` still accept the proxy — see **Known
+  limitations**.
 - **`denormalize_param_count()` round-trips with `normalize_param_count()`.**
   With a custom `max_count` below one million and the default `min_count`,
   0.1.0 skipped the auto-tightened lower bound that the forward direction
@@ -105,10 +111,13 @@ learning-rate schedule all changed, and each moves scores on its own.
   sampling.
 - **Sampled training budgets take precedence over the config fallbacks.**
   0.1.0 overwrote `epochs` and `num_batches` unconditionally with the
-  `ObjectiveConfig` values, so a search space emitting either — including a
-  `DerivedDimension` computing one — was silently ignored and every trial ran
-  the same fixed budget. Both are now applied with `setdefault()`, and the
-  optimizer schedule and `train_fn` are built from the resulting values. Such
+  `ObjectiveConfig` values, so a custom search space that already
+  returned either had it silently discarded and every trial ran the same fixed
+  budget. (`DerivedDimension` is new in 0.2.0, not a 0.1.0 facility whose
+  behaviour changed; it is a beneficiary of the new precedence, letting a
+  budget be computed from other sampled values.) Both are now applied with
+  `setdefault()`, and the optimizer schedule and `train_fn` are built from the
+  resulting values. Such
   a search space therefore moves from one fixed budget to trial-specific ones,
   changing both scores and cost; a sampled budget below 1 is now rejected as
   `invalid_training_budget` rather than silently replaced.
@@ -117,6 +126,15 @@ learning-rate schedule all changed, and each moves scores on its own.
   trial handler converted into a failure penalty. It now resolves to 5, so
   trials that were being penalized train normally. Only affects direct
   construction, not `optimize()`.
+- **`FlowMatchingSpace.quality()` reverses a categorical's choice order.**
+  `fm_use_optimal_transport` moved from `CategoricalDimension(choices=[False,
+  True])` to the new `BoolDimension`, which suggests over `[True, False]`.
+  Optuna stores choice *order* as part of a categorical distribution and
+  refuses a changed sequence as a dynamic value space, so a 0.1.0 study built
+  from this profile raises as soon as a new trial is suggested — the guard
+  does not catch it first, because nothing about the objective encoding
+  changed. Start a new study, or pin the dimension back to
+  `CategoricalDimension("fm_use_optimal_transport", choices=[False, True])`.
 - **`TimeSeriesTransformerSpace` builds at every layer count.** 0.1.0 sized
   `embed_dims`, `num_heads` and `mlp_widths` to the sampled `num_layers` while
   leaving `mlp_depths` at length two, so any sampled layer count other than
@@ -136,7 +154,10 @@ learning-rate schedule all changed, and each moves scores on its own.
 - **Diagnostic-kind metrics are rejected as objectives.** `optimize()` raises
   for `correlation` (and its `corr` alias), `bias`, `z_score`, `coverage` (and
   its `coverage_two_sided` alias), `coverage_left`, `coverage_right`, and the
-  deprecated `sbc` producer. All are still computed and reported. Correlation
+  deprecated `sbc` producer. They remain *available*, but are not all computed
+  automatically: the built-in pipeline runs `DEFAULT_METRICS` plus the
+  producers of your objectives and constrained keys, and only `correlation`
+  and `coverage` are defaults. Correlation
   measures linear association rather than agreement (Bland & Altman, 1986), so
   it rewards a model whose estimates are perfectly correlated with the truth
   and systematically wrong; signed `bias` has its optimum at zero rather than
@@ -144,9 +165,13 @@ learning-rate schedule all changed, and each moves scores on its own.
   severe underestimation. An old study optimizing any of these cannot be
   resumed through `optimize()`. **Migration:** optimize `nrmse` (or `mae`,
   `sbc_ks`, `calibration_error`) and read the diagnostic outputs — the
-  `coverage_*` and `*_mean_cal_error` keys, `mean_z_score`,
-  `mean_abs_z_score` — as reported values. Prefer `nrmse` over `rmse`, and see
-  **Known limitations** before making either an objective.
+  `coverage_*` keys with `mean_cal_error`, the `left_*`/`right_*` keys with
+  `left_mean_cal_error`/`right_mean_cal_error`, and `mean_z_score` /
+  `mean_abs_z_score`. To get a diagnostic that is not a default —
+  `bias`, `z_score`, `coverage_left`, `coverage_right` — name one of its
+  output keys in a constraint so the producer is scheduled, or return it from
+  your own `validate_fn`. Prefer `nrmse` over `rmse`, and see **Known
+  limitations** before making either an objective.
 - **`early_stopping_patience` is rejected in fixed-budget mode.** Because
   `fixed_budget` is now the default, a previously ordinary call such as
   `optimize(..., early_stopping_patience=5)` raises from `ObjectiveConfig`:
@@ -158,11 +183,13 @@ learning-rate schedule all changed, and each moves scores on its own.
   after a one-epoch warmup and stops on periodically evaluated validation
   objectives, which can give materially different update counts, stopping
   times and restored weights.
-- **Duplicate dimension names across sub-spaces raise.** `CompositeSearchSpace`
-  and `BaseSearchSpace` reject a parameter name reused across the inference,
-  summary and training components, which 0.1.0 accepted with later
-  dictionaries silently overwriting earlier values. **Migration:** give each
-  dimension a unique name.
+- **Duplicate dimension names raise.** `CompositeSearchSpace` rejects a
+  parameter name reused across the inference, summary and training
+  components, which 0.1.0 accepted with later dictionaries silently
+  overwriting earlier values. `BaseSearchSpace.dimensions` additionally
+  rejects two fields of a *single* space sharing one `Dimension.name`, before
+  sampling — so a standalone custom space that 0.1.0 accepted can now raise on
+  its own. **Migration:** give every dimension a unique name.
 
 ### Resume safety
 
@@ -170,7 +197,13 @@ learning-rate schedule all changed, and each moves scores on its own.
 be shown to mean what this run produces, rather than silently mixing scales or
 columns:
 
-- A study whose metrics changed encoding at 0.2.0 is refused.
+- A study whose metrics changed encoding at 0.2.0 is refused: `log_gamma`,
+  `correlation`, `sbc_chi2`, `mae` and `contraction`. `contraction` was
+  wrongly classed as encoding-unchanged until this release — the audit that
+  derives the classification was anchored to a mid-series commit in which it
+  had *already* been given its direction, so a legacy study could resume and
+  mix raw values with `1 - value` in one column. The audit is now anchored to
+  released 0.1.0.
 - A study whose objective schema differs from the current run is refused;
   Optuna addresses objectives by position, so continuing would compare one
   metric against another in the same column.
@@ -183,9 +216,13 @@ columns:
 - A warm-start source is validated before its trials are copied — **when
   `metric_names` is supplied**. `create_study(warm_start_from=...)` defaults
   `metric_names` to `None`, and the schema-less-source rejection is guarded on
-  it, so that call can still copy trials from a source recording no schema;
-  source *encoding* is checked later, by `optimize()`, after copying.
-  `optimize()` supplies `metric_names`, so its paths are validated pre-copy.
+  it, so that call can still copy trials from a source recording no schema.
+  Only the **schema** is validated pre-copy, never the encoding: a
+  schema-matching legacy source is copied into the target first, and
+  `_guard_resumed_study` rejects it afterwards — leaving the target already
+  mutated. This applies through `optimize()` too, which supplies
+  `metric_names`. Warm-start from a study you know carries the current
+  encoding, or into a throwaway target.
 
 Mean-mode objective columns compare independently of **member order**, so a
 study stamped by an earlier build is not refused for ordering alone. Alias
@@ -221,8 +258,11 @@ and is refused.
   raises, which can promote a failed trial over a valid one. `rmse` is in
   parameter units and unbounded; `nrmse` is range-normalized but can still
   exceed 1 when prediction error exceeds the normalization range. `nrmse` is a
-  default objective, so this applies to standard configurations. Only `sbc_ks`
-  is genuinely bounded by its `1.0` worst case. Ensure your validation hook
+  default objective, so this applies to standard configurations. Among the
+  unit-worst metrics only `rmse` and `nrmse` are unbounded this way;
+  `calibration_error` (a mean absolute deviation between probabilities) and
+  `sbc_ks` (a supremum of a CDF difference) genuinely are bounded by `1.0`,
+  so the penalty and the proxy are sound for them. Ensure your validation hook
   reliably produces every objective metric.
 - **Concurrent workers can stamp conflicting schemas.** The schema read and
   the schema write are not a single transaction and there is no storage lock

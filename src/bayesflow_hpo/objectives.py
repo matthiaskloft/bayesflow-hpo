@@ -378,7 +378,7 @@ OBJECTIVE_ENCODING_VERSION = 2
 #: `tests/test_objectives.py` derives this set by computing old and new values
 #: for every registered metric, so it cannot drift from the code again.
 ENCODING_CHANGED_AT_V2: frozenset[str] = frozenset(
-    {"log_gamma", "correlation", "sbc_chi2", "mae"}
+    {"log_gamma", "correlation", "sbc_chi2", "mae", "contraction"}
 )
 
 #: Built-in metrics audited against the pre-change rule and found to store the
@@ -399,7 +399,6 @@ ENCODING_UNCHANGED_AT_V2: frozenset[str] = frozenset(
         "calibration_error",
         "rmse",
         "nrmse",
-        "contraction",
         "z_score",
         "sbc_ks",
         "coverage",

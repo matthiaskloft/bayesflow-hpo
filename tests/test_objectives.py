@@ -464,10 +464,20 @@ class TestEncodingChangeSetIsDerived:
     it through. Reading the diff is exactly what failed; this computes it.
     """
 
-    # The pre-change rule, reproduced from `git show b93501b~1`: conversion was
-    # `1 - value` for these two names and pass-through otherwise, and the
+    # The pre-change rule, reproduced from `git show d2e1d47`, the last commit
+    # carrying the RELEASED 0.1.0 behaviour: conversion was `1 - value` for the
+    # names in `HIGHER_IS_BETTER` and pass-through otherwise, and the
     # missing-metric substitute was `0.0 if key in HIGHER_IS_BETTER else 1.0`.
-    _OLD_HIGHER_IS_BETTER = {"correlation", "contraction"}
+    #
+    # This previously read `{"correlation", "contraction"}`, taken from
+    # `b93501b~1` -- a commit that is NOT an ancestor of `main` and that sits
+    # PART-WAY through the correction series, after `contraction` had already
+    # been given its direction. Anchoring here made the derivation model
+    # contraction as already-converted, compute "unchanged", and file it under
+    # `ENCODING_UNCHANGED_AT_V2` -- so a real 0.1.0 contraction study passed
+    # the resume guard and mixed raw values with `1 - value` in one column.
+    # The baseline has to be the released version, not a waypoint.
+    _OLD_HIGHER_IS_BETTER = {"correlation"}
 
     def _old_penalty(self, name: str) -> float:
         raw = 0.0 if name in self._OLD_HIGHER_IS_BETTER else 1.0
@@ -558,21 +568,21 @@ class TestEncodingChangeSetIsDerived:
         assert "sbc_ks" in ENCODING_UNCHANGED_AT_V2
         assert "sbc_chi2" in ENCODING_CHANGED_AT_V2
 
-    def test_contraction_is_excluded_for_the_right_reason(self) -> None:
-        """Not merely absent -- absent because nothing about it moved."""
+    def test_contraction_is_included_for_the_right_reason(self) -> None:
+        """It was excluded because the baseline was a mid-series waypoint.
+
+        Against released 0.1.0, `contraction` had no direction: it was
+        minimized raw. Converting it to `1 - value` moves every stored number,
+        so a legacy study's column is not comparable with a new one.
+        """
         from bayesflow_hpo.objectives import (
             ENCODING_CHANGED_AT_V2,
             _metric_to_minimize,
-            worst_objective_value,
         )
 
-        assert "contraction" not in ENCODING_CHANGED_AT_V2
-        assert self._old_penalty("contraction") == worst_objective_value(
-            "contraction"
-        )
-        assert self._old_conversion("contraction", 0.3) == pytest.approx(
-            _metric_to_minimize("contraction", 0.3)
-        )
+        assert "contraction" in ENCODING_CHANGED_AT_V2
+        assert self._old_conversion("contraction", 0.3) == pytest.approx(0.3)
+        assert _metric_to_minimize("contraction", 0.3) == pytest.approx(0.7)
 
 
 class TestAliasesReachTheSummary:

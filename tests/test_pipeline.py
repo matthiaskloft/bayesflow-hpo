@@ -384,3 +384,27 @@ class TestPreflightCollisionResolutionIsOrderFree:
                 validate_fn=colliding_validate,
                 objective_metrics=["calibration_error"],
             )
+
+    def test_an_alias_only_hook_is_accepted(self) -> None:
+        """Collision cases alone do not pin the re-keying.
+
+        Every collision case above also contains the literal
+        `calibration_error` key, so they all still pass if the re-keying is
+        deleted outright, or replaced with logic that merely drops aliases:
+        the later lookup finds the canonical key either way. A hook returning
+        only the documented alias is what distinguishes those implementations
+        from one that actually resolves names.
+        """
+
+        def alias_only_validate(approx, vd, n):
+            return {"cal_error": 0.02}
+
+        check_pipeline(
+            simulator=_FakeSimulator(),
+            adapter=canonical_adapter(),
+            search_space=_FakeSearchSpace(),
+            build_approximator_fn=lambda hp: _FakeApproximator(),
+            train_fn=lambda approx, sim, hp, cb: None,
+            validate_fn=alias_only_validate,
+            objective_metrics=["calibration_error"],
+        )
