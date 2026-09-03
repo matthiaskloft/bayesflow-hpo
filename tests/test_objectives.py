@@ -804,3 +804,24 @@ class TestCollisionResolutionIsUniformAndOrderFree:
             else self._ALIAS_FIRST
         )
         assert canonical_summary(raw)["calibration_error"] == 0.02
+
+    @pytest.mark.parametrize("order", ["canonical_first", "alias_first"])
+    def test_the_preflight_boundary_agrees_too(self, order: str) -> None:
+        """`check_pipeline` was the fourth boundary, and it was missed.
+
+        Three re-keying sites were made collision-aware together; this one
+        stayed a last-write-wins comprehension. Its failure mode is a rejection
+        rather than a misranking: with a hook emitting a finite canonical value
+        and a non-finite alias value, pre-flight passed or refused the whole
+        run depending on nothing but insertion order.
+        """
+        from bayesflow_hpo.objectives import canonical_summary
+
+        raw = (
+            {"calibration_error": 0.02, "cal_error": math.nan}
+            if order == "canonical_first"
+            else {"cal_error": math.nan, "calibration_error": 0.02}
+        )
+        resolved = canonical_summary(raw)["calibration_error"]
+        assert resolved == 0.02
+        assert math.isfinite(resolved)
