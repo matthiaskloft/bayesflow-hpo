@@ -32,7 +32,7 @@ from importlib.metadata import PackageNotFoundError, version
 try:
     __version__ = version("bayesflow-hpo")
 except PackageNotFoundError:
-    __version__ = "0.1.0"
+    __version__ = "0.2.0"
 
 from bayesflow_hpo.api import infer_keys_from_adapter, optimize
 from bayesflow_hpo.builders import build_continuous_approximator
