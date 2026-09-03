@@ -573,3 +573,234 @@ class TestEncodingChangeSetIsDerived:
         assert self._old_conversion("contraction", 0.3) == pytest.approx(
             _metric_to_minimize("contraction", 0.3)
         )
+
+
+class TestAliasesReachTheSummary:
+    """The public extractors are keyed by canonical name.
+
+    Found by giving `canonical_metric_name` a `NewType` return and letting
+    mypy report every site that fed it a bare `str`. Both functions are
+    exported in `__all__`, and both looked an alias up directly in a summary
+    that is emitted under canonical names: the lookup missed and the
+    worst-case penalty stood in for the real value, with no error raised.
+    For an unregistered spelling that penalty is `+inf`, so every trial tied
+    at the worst possible score and the objective went flat.
+    """
+
+    _SUMMARY = {"calibration_error": 0.02, "nrmse": 0.1}
+
+    def test_the_single_extractor_resolves_an_alias(self) -> None:
+        from bayesflow_hpo.objectives import extract_objective_values
+
+        canonical = extract_objective_values(
+            self._SUMMARY, 1.0, "calibration_error"
+        )
+        alias = extract_objective_values(self._SUMMARY, 1.0, "cal_error")
+        assert alias == canonical
+        assert math.isfinite(alias[0])
+
+    def test_the_multi_extractor_resolves_an_alias(self) -> None:
+        from bayesflow_hpo.objectives import extract_multi_objective_values
+
+        canonical = extract_multi_objective_values(
+            self._SUMMARY, 1.0, ["calibration_error", "nrmse"], "pareto"
+        )
+        alias = extract_multi_objective_values(
+            self._SUMMARY, 1.0, ["cal_error", "nrmse"], "pareto"
+        )
+        assert alias == canonical
+        assert all(math.isfinite(v) for v in alias)
+
+    def test_an_unknown_name_still_takes_the_penalty(self) -> None:
+        """Resolving aliases must not turn into accepting anything."""
+        from bayesflow_hpo.objectives import extract_objective_values
+
+        value, _ = extract_objective_values(
+            self._SUMMARY, 1.0, "not_a_metric_at_all"
+        )
+        assert value == math.inf
+
+
+class TestTheScoreSpacesCannotBeMixed:
+    """The raw/minimize distinction is enforced statically, not by review.
+
+    Eight review rounds caught instances of this pair being confused by
+    reading the code. The two spaces are indistinguishable at runtime -- both
+    are plain floats -- so nothing raises when they are swapped; a
+    higher-is-better metric simply ranks backwards. These `NewType`s make the
+    swap a type error, and this test is what fails if either signature is
+    later widened back to a bare `float`.
+    """
+
+    _SNIPPET = """
+from bayesflow_hpo.objectives import (
+    _metric_to_minimize,
+    worst_objective_value,
+    worst_raw_value,
+)
+from bayesflow_hpo.validation.registry import canonical_metric_name
+
+k = canonical_metric_name("log_gamma")
+_metric_to_minimize(k, worst_raw_value(k))
+_metric_to_minimize(k, worst_objective_value(k))
+"""
+
+    def _run_mypy(self, tmp_path):
+        import subprocess
+        import sys
+
+        src = tmp_path / "snippet.py"
+        src.write_text(self._SNIPPET, encoding="utf-8")
+        # `--python-version` must match the interpreter running the tests, NOT
+        # the project's pinned 3.11. Inheriting the pin made mypy parse this
+        # interpreter's own numpy stubs under 3.11 rules, and on 3.12+ those
+        # use `type` statements: mypy aborted with a syntax error before it
+        # reached the snippet, and the test read that empty result as "the bad
+        # call was accepted".
+        version = f"{sys.version_info.major}.{sys.version_info.minor}"
+        return subprocess.run(
+            [
+                sys.executable, "-m", "mypy",
+                "--no-error-summary", f"--python-version={version}", str(src),
+            ],
+            capture_output=True, text=True,
+        )
+
+    def test_a_minimize_value_in_a_raw_slot_is_a_type_error(
+        self, tmp_path
+    ) -> None:
+        """The round-2 P1 on PR #72, now unrepresentable.
+
+        `worst_objective_value` is minimize-space; the second argument of
+        `_metric_to_minimize` is consumed before conversion. Feeding one to
+        the other double-converts it, which for `log_gamma` turned a penalty
+        into a value that beat every genuine result.
+        """
+        pytest.importorskip("mypy")
+        result = self._run_mypy(tmp_path)
+
+        # Exit 2 is a mypy crash or config error, not a clean verdict. Without
+        # this the test passes vacuously whenever mypy fails to run at all.
+        assert result.returncode == 1, (
+            "expected mypy to report type errors (exit 1), not to fail to "
+            f"run (exit {result.returncode}):\n{result.stdout}{result.stderr}"
+        )
+        assert "[syntax]" not in result.stdout, (
+            f"mypy could not parse its inputs:\n{result.stdout}"
+        )
+
+        # Line 10 is the worst_raw_value call (correct); line 11 the
+        # worst_objective_value one (the bug).
+        assert "snippet.py:11" in result.stdout, (
+            "expected the minimize-space argument to be rejected; got:\n"
+            f"{result.stdout}{result.stderr}"
+        )
+        assert "snippet.py:10" not in result.stdout, (
+            "the raw-space call is correct and must still type-check; got:\n"
+            f"{result.stdout}{result.stderr}"
+        )
+
+
+class TestBothSpellingsOfASummaryResolve:
+    """Canonicalizing one side alone fixes one shape and breaks another.
+
+    The pipeline emits canonical names, but a caller's own `validate_fn`
+    emits whatever spelling its author used -- and both reach these
+    extractors. Resolving only the requested name made an alias-keyed summary
+    read with that same alias miss, which had worked before.
+    """
+
+    _CANONICAL = {"calibration_error": 0.02, "nrmse": 0.1}
+    _ALIASED = {"cal_error": 0.02, "nrmse": 0.1}
+
+    @pytest.mark.parametrize("summary_style", ["canonical", "aliased"])
+    @pytest.mark.parametrize("requested", ["calibration_error", "cal_error"])
+    def test_every_spelling_combination_finds_the_value(
+        self, summary_style: str, requested: str
+    ) -> None:
+        from bayesflow_hpo.objectives import extract_objective_values
+
+        summary = (
+            self._CANONICAL if summary_style == "canonical" else self._ALIASED
+        )
+        value, _ = extract_objective_values(summary, 1.0, requested)
+        assert value == 0.02
+
+    @pytest.mark.parametrize("requested", ["calibration_error", "cal_error"])
+    def test_the_multi_extractor_too(self, requested: str) -> None:
+        from bayesflow_hpo.objectives import extract_multi_objective_values
+
+        values = extract_multi_objective_values(
+            self._ALIASED, 1.0, [requested, "nrmse"], "pareto"
+        )
+        assert values[0] == 0.02
+
+    def test_a_summary_holding_both_keeps_the_canonical_value(self) -> None:
+        """The pipeline's own measurement wins over a caller's spelling.
+
+        Re-keying by canonical name collides when a summary carries both. The
+        canonical entry is what the pipeline wrote, so letting the alias
+        overwrite it would let a spelling override a measurement.
+        """
+        from bayesflow_hpo.objectives import extract_objective_values
+
+        both = {"calibration_error": 0.02, "cal_error": 0.99, "nrmse": 0.1}
+        for requested in ("calibration_error", "cal_error"):
+            value, _ = extract_objective_values(both, 1.0, requested)
+            assert value == 0.02
+
+    def test_non_metric_entries_survive_the_rekeying(self) -> None:
+        """Unknown names pass through, so a summary is not filtered."""
+        from bayesflow_hpo.objectives import canonical_summary
+
+        out = canonical_summary(
+            {"cal_error": 0.02, "n_datasets": 500, "some_note": "x"}
+        )
+        assert out == {
+            "calibration_error": 0.02, "n_datasets": 500, "some_note": "x"
+        }
+
+
+class TestCollisionResolutionIsUniformAndOrderFree:
+    """Every boundary that re-keys must use the same rule.
+
+    `canonical_summary` resolved a both-spellings collision to the canonical
+    entry, but two earlier boundaries -- `_validate_metric_keys` and the
+    periodic-validation callback -- used a plain comprehension, which is
+    last-write-wins. In the real optimization path those run FIRST, so the
+    advertised rule did not hold and the trial's score depended on the
+    insertion order of a hook's output dict.
+    """
+
+    _CANONICAL_FIRST = {
+        "calibration_error": 0.02, "cal_error": 0.99, "nrmse": 0.1,
+    }
+    _ALIAS_FIRST = {
+        "cal_error": 0.99, "calibration_error": 0.02, "nrmse": 0.1,
+    }
+
+    @pytest.mark.parametrize("order", ["canonical_first", "alias_first"])
+    def test_validate_metric_keys_is_order_independent(
+        self, order: str
+    ) -> None:
+        from bayesflow_hpo.optimization.objective import _validate_metric_keys
+
+        raw = (
+            self._CANONICAL_FIRST if order == "canonical_first"
+            else self._ALIAS_FIRST
+        )
+        cleaned = _validate_metric_keys(
+            dict(raw), ["calibration_error", "nrmse"]
+        )
+        assert cleaned["calibration_error"] == 0.02
+
+    @pytest.mark.parametrize("order", ["canonical_first", "alias_first"])
+    def test_the_extractor_agrees_with_it(self, order: str) -> None:
+        """The two boundaries must not disagree about the same input."""
+        from bayesflow_hpo.objectives import canonical_summary
+
+        raw = (
+            self._CANONICAL_FIRST if order == "canonical_first"
+            else self._ALIAS_FIRST
+        )
+        assert canonical_summary(raw)["calibration_error"] == 0.02

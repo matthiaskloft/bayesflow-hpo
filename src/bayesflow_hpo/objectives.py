@@ -24,11 +24,43 @@ from __future__ import annotations
 import importlib.util
 import logging
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any, NewType, TypeVar
 
 import numpy as np
+
+#: A metric value as the validation pipeline reported it, before any
+#: direction conversion. Higher may be better or worse depending on the
+#: metric.
+#:
+#: Distinct from :data:`MinimizeScore` at type-check time only; both are plain
+#: floats at runtime, since a `NewType` constructor returns its argument
+#: unchanged (PEP 484 "NewType"). The pair exists because the two spaces are
+#: indistinguishable by inspection and mixing them is silent: the round-2 P1
+#: on PR #72 fed a minimize-space penalty into a slot consumed BEFORE
+#: conversion, so a flat 1.0 for `log_gamma` became -1.0 and a trial that
+#: failed to report the metric outranked one reporting a good value. Nothing
+#: raised; the ranking simply inverted.
+RawScore = NewType("RawScore", float)
+
+#: A metric value already converted so that lower is better, ready to hand to
+#: Optuna, which minimizes every objective declared ``minimize`` and compares
+#: them positionally (Optuna 4.9.0, `optuna.study.create_study`).
+#:
+#: Must never be passed through :func:`_metric_to_minimize` again -- double
+#: conversion re-inverts every higher-is-better metric.
+MinimizeScore = NewType("MinimizeScore", float)
+
+_V = TypeVar("_V")
+
+if TYPE_CHECKING:
+    # Import-time only: `bayesflow_hpo.validation.__init__` pulls in
+    # `optimization`, which imports this module back. Annotations are strings
+    # under `from __future__ import annotations`, so the type costs nothing at
+    # runtime; the runtime helper is imported inside the functions that need
+    # it, matching `register_metric_direction` below.
+    from bayesflow_hpo.validation.registry import CanonicalMetricName
 
 logger = logging.getLogger(__name__)
 
@@ -440,7 +472,7 @@ def register_metric_direction(
 _LEGACY_WORST_RAW = -math.inf
 
 
-def _direction_for(key: str) -> MetricDirection | None:
+def _direction_for(key: CanonicalMetricName) -> MetricDirection | None:
     """Resolve a metric's direction, honouring both compatibility mutations.
 
     :data:`HIGHER_IS_BETTER` used to control conversion by its contents, so a
@@ -478,15 +510,19 @@ def _direction_for(key: str) -> MetricDirection | None:
     return None
 
 
-def _metric_to_minimize(key: str, value: float) -> float:
+def _metric_to_minimize(
+    key: CanonicalMetricName, value: RawScore
+) -> MinimizeScore:
     """Convert a raw metric value to a minimize-is-better scalar."""
     direction = _direction_for(key)
     if direction is None:
-        return value
-    return direction.to_minimize(value)
+        # No recorded direction: lower-is-better is assumed, so the raw value
+        # already IS the minimize-space one.
+        return MinimizeScore(value)
+    return MinimizeScore(direction.to_minimize(value))
 
 
-def worst_raw_value(key: str) -> float:
+def worst_raw_value(key: CanonicalMetricName) -> RawScore:
     """Raw-space value representing the worst case for *key*.
 
     This is what a *penalty injected before conversion* must use. Injecting a
@@ -502,17 +538,46 @@ def worst_raw_value(key: str) -> float:
     """
     direction = _direction_for(key)
     if direction is not None:
-        return direction.worst_raw
-    return math.inf
+        return RawScore(direction.worst_raw)
+    return RawScore(math.inf)
 
 
-def worst_objective_value(key: str) -> float:
+def worst_objective_value(key: CanonicalMetricName) -> MinimizeScore:
     """Minimize-space value standing in for a metric missing from a summary.
 
     Returned already converted, so callers must not pass it through
     :func:`_metric_to_minimize` again.
     """
     return _metric_to_minimize(key, worst_raw_value(key))
+
+
+def canonical_summary(summary: Mapping[str, _V]) -> dict[str, _V]:
+    """Re-key a metric mapping by canonical metric name.
+
+    The pipeline emits canonical names, but a caller's own ``validate_fn``
+    emits whatever spelling its author used, and both reach the extractors.
+    Resolving only the requested name would therefore fix one shape and break
+    the other.
+
+    Unknown names pass through unchanged, so non-metric entries are kept. A
+    mapping carrying BOTH spellings of one metric keeps the canonical value:
+    that is what the pipeline itself wrote, and dropping it in favour of an
+    alias would let a caller's spelling override the measurement.
+
+    Use this rather than ``{canonical_metric_name(k): v for k, v in ...}``.
+    That comprehension is last-write-wins, so a hook emitting both spellings
+    resolved to whichever came last -- making the score depend on dict
+    insertion order, silently and differently at each boundary.
+    """
+    from bayesflow_hpo.validation.registry import canonical_metric_name
+
+    out: dict[str, _V] = {}
+    for key, value in summary.items():
+        canonical = canonical_metric_name(key)
+        if canonical != key and canonical in summary:
+            continue
+        out[canonical] = value
+    return out
 
 
 def compute_inference_time_per_dataset(
@@ -552,9 +617,18 @@ def extract_objective_values(
         ``inference_time_s`` (seconds per dataset) or
         ``normalized_param_count``.
     objective_metric
-        Key to look up inside the summary dict.
+        Key to look up inside the summary dict. Resolved through
+        :func:`canonical_metric_name`, so a registered alias works here.
     """
-    summary = metrics.get("summary", metrics)
+    from bayesflow_hpo.validation.registry import canonical_metric_name
+
+    # BOTH sides, as `_validate_metric_keys` already does. Canonicalizing only
+    # the requested name fixes a canonical summary read with an alias while
+    # breaking an alias-keyed summary read with that same alias -- a shape the
+    # previous contract accepted, because a caller's own `validate_fn` emits
+    # whatever spelling its author chose.
+    summary = canonical_summary(metrics.get("summary", metrics))
+    objective_metric = canonical_metric_name(objective_metric)
     if objective_metric not in summary:
         logger.warning(
             "Metric key %r not found in validation summary. "
@@ -563,7 +637,7 @@ def extract_objective_values(
         )
     if objective_metric in summary:
         objective_value = _metric_to_minimize(
-            objective_metric, float(summary[objective_metric])
+            objective_metric, RawScore(float(summary[objective_metric]))
         )
     else:
         # No cross-metric substitution. This used to fall back to
@@ -594,22 +668,26 @@ def extract_multi_objective_values(
         ``inference_time_s`` (seconds per dataset) or
         ``normalized_param_count``.
     objective_metrics
-        List of metric keys to optimize.
+        List of metric keys to optimize. Each is resolved through
+        :func:`canonical_metric_name`, so registered aliases work here.
     objective_mode
         ``"mean"`` — return ``(mean_of_metrics, cost_score)`` (2 values).
         ``"pareto"`` — return ``(*metric_values, cost_score)``
         (one value per metric + cost).
     """
+    from bayesflow_hpo.validation.registry import canonical_metric_name
+
     if objective_mode not in ("mean", "pareto"):
         raise ValueError(
             f"Unknown objective_mode: {objective_mode!r}. "
             f"Expected 'mean' or 'pareto'."
         )
 
-    summary = metrics.get("summary", metrics)
+    summary = canonical_summary(metrics.get("summary", metrics))
 
     raw_values: list[float] = []
-    for key in objective_metrics:
+    # Both sides, for the reason given in `extract_objective_values`.
+    for key in map(canonical_metric_name, objective_metrics):
         if key not in summary:
             logger.warning(
                 "Metric key %r not found in validation summary. "
@@ -617,7 +695,9 @@ def extract_multi_objective_values(
                 key, list(summary.keys()),
             )
         if key in summary:
-            raw_values.append(_metric_to_minimize(key, float(summary[key])))
+            raw_values.append(
+                _metric_to_minimize(key, RawScore(float(summary[key])))
+            )
         else:
             # Already in minimize space -- do not convert it again.
             raw_values.append(worst_objective_value(key))

@@ -51,6 +51,7 @@ from bayesflow_hpo.optimization.objective import (
     _training_loss_fallback,
     _validate_metric_keys,
 )
+from bayesflow_hpo.validation.registry import canonical_metric_name
 
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
@@ -79,7 +80,17 @@ def _run_study(
 
     ``None`` stands for a trial whose validation failed, so the failure paths
     are exercised by the same machinery rather than asserted separately.
+
+    Two lists on purpose. `ObjectiveConfig.__post_init__` canonicalizes before
+    any internal helper sees a name, so `_training_loss_fallback` and
+    `_validate_metric_keys` -- which take `list[CanonicalMetricName]` -- get
+    the canonical one here too. Passing them an alias diverges: `cal_error`
+    has no recorded direction, so it fails `_accepts_training_loss_proxy` and
+    takes `+inf` where `calibration_error` takes the 0.1 proxy. The EXTRACTOR
+    keeps the caller's spelling, because resolving it there is the public
+    behaviour the alias test exists to check.
     """
+    canonical = [canonical_metric_name(m) for m in objective_metrics]
     n_obj = len(objective_metrics) + 1
     study = optuna.create_study(
         directions=directions or ["minimize"] * n_obj,
@@ -91,12 +102,12 @@ def _run_study(
         raw = trial_metrics[idx]
         if raw is None:
             return _training_loss_fallback(
-                0.1, objective_metrics, "pareto", 50_000, 1_000_000,
+                0.1, canonical, "pareto", 50_000, 1_000_000,
                 "param_count",
-                tuple(worst_objective_value(m) for m in objective_metrics)
+                tuple(worst_objective_value(m) for m in canonical)
                 + (FAILED_TRIAL_COST,),
             )
-        cleaned = _validate_metric_keys(dict(raw), objective_metrics)
+        cleaned = _validate_metric_keys(dict(raw), canonical)
         return extract_multi_objective_values(
             {"summary": cleaned}, 0.5, objective_metrics,
             objective_mode="pareto",
@@ -195,8 +206,6 @@ def test_an_alias_objective_scores_the_reported_value() -> None:
     lookup missed and inserted 1.0 for every trial -- no error, just a study
     in which nothing could be distinguished.
     """
-    from bayesflow_hpo.validation.registry import canonical_metric_name
-
     # What ObjectiveConfig now does at its boundary; asserted directly there
     # in test_objective.py, applied here to check the study that results.
     requested = ["cal_error", "nrmse"]
@@ -210,17 +219,21 @@ def test_an_alias_objective_scores_the_reported_value() -> None:
     )
     assert _selected(study) == {0}
 
-    # Without canonicalization the lookup misses and every trial ties at the
-    # penalty, so nothing is distinguishable -- the failure this guards.
-    tied = _run_study(
+    # This half used to assert the OPPOSITE: that passing the alias straight
+    # through tied every trial at the penalty, demonstrating the hazard the
+    # boundary canonicalization protects against. It no longer can, because
+    # `extract_multi_objective_values` now resolves aliases itself. Its own
+    # failure message anticipated this ("the alias reaches the summary by
+    # another route"), and that route is deliberate: the alias must now score
+    # identically to the canonical spelling, not merely be corrected earlier.
+    direct = _run_study(
         [{"calibration_error": 0.02, "nrmse": 0.2},
          {"calibration_error": 0.40, "nrmse": 0.2}],
         requested,
     )
-    assert len(_selected(tied)) == 2, (
-        "expected the un-canonicalized form to be indistinguishable; if this "
-        "now discriminates, the alias reaches the summary by another route "
-        "and this test no longer demonstrates the hazard"
+    assert _selected(direct) == _selected(study), (
+        "an alias must select the same trial as its canonical spelling; a "
+        "difference means one of the two routes stopped resolving it"
     )
 
 

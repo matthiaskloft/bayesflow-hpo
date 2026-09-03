@@ -471,3 +471,39 @@ class TestRoundEightFindings:
             _guard_resumed_study(
                 study, ["nrmse", "rmse"], metric_names=["nrmse", "rmse"]
             )
+
+
+class TestCanonicalObjectiveMetricsResolves:
+    """The accessor must resolve, not merely assert what `__post_init__` did.
+
+    `ObjectiveConfig` is a mutable dataclass, so assignment or `.append()`
+    after construction never reaches `__post_init__`. A `cast` there would
+    label those strings canonical for exactly the failure and rejection paths
+    that trust the label -- `_penalty`, `_metric_penalty_map`,
+    `_validate_metric_keys`, `_training_loss_fallback` -- which is worse than
+    having no type at all.
+    """
+
+    def test_construction_resolves_aliases(self):
+        config = _config(objective_metrics=[_ALIAS, "nrmse"])
+        assert config.canonical_objective_metrics == [_CANONICAL, "nrmse"]
+
+    def test_reassignment_after_construction_is_resolved_too(self):
+        config = _config()
+        config.objective_metrics = [_ALIAS, "corr"]
+        assert config.canonical_objective_metrics == [
+            _CANONICAL, "correlation",
+        ]
+
+    def test_an_appended_alias_is_resolved_too(self):
+        config = _config()
+        config.objective_metrics.append("corr")
+        assert config.canonical_objective_metrics == [
+            _CANONICAL, "nrmse", "correlation",
+        ]
+
+    def test_an_unknown_name_passes_through(self):
+        """Resolving must not become validating -- custom metrics are legal."""
+        config = _config()
+        config.objective_metrics = ["my_custom_metric"]
+        assert config.canonical_objective_metrics == ["my_custom_metric"]
