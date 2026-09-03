@@ -146,7 +146,9 @@ learning-rate schedule all changed, and each moves scores on its own.
   refuses a changed sequence as a dynamic value space, so a 0.1.0 study built
   from this profile raises as soon as a new trial is suggested — the guard
   does not catch it first, because nothing about the objective encoding
-  changed. Start a new study, or pin the dimension back to
+  changed. (Verified against Optuna 4.9.0:
+  `CategoricalDistribution([False, True]) != CategoricalDistribution([True,
+  False])`; see `docs/references.md`.) Start a new study, or pin the dimension back to
   `CategoricalDimension("fm_use_optimal_transport", choices=[False, True])`.
 - **`TimeSeriesTransformerSpace` builds at every layer count.** 0.1.0 sized
   `embed_dims`, `num_heads` and `mlp_widths` to the sampled `num_layers` while
@@ -171,7 +173,8 @@ learning-rate schedule all changed, and each moves scores on its own.
   automatically: the built-in pipeline runs `DEFAULT_METRICS` plus the
   producers of your objectives and constrained keys, and only `correlation`
   and `coverage` are defaults. Correlation
-  measures linear association rather than agreement (Bland & Altman, 1986), so
+  measures linear association rather than agreement (Bland & Altman, 1986;
+  see `docs/references.md`), so
   it rewards a model whose estimates are perfectly correlated with the truth
   and systematically wrong; signed `bias` has its optimum at zero rather than
   at negative infinity, so minimizing it drives the search toward ever more
@@ -302,8 +305,11 @@ and is refused.
   unit-worst metrics only `rmse` and `nrmse` are unbounded this way;
   `calibration_error` (a mean absolute deviation between probabilities) and
   `sbc_ks` (a supremum of a CDF difference) genuinely are bounded by `1.0`,
-  so the penalty and the proxy are sound for them. Ensure your validation hook
-  reliably produces every objective metric.
+  which makes their *penalty* sound. It does not make the proxy safe: those
+  two accept it as well, so a failed trial storing a clamped `0.1` still
+  outranks a valid `0.5`. Every metric that takes the proxy can promote a
+  failed trial; the bound only settles what a *missing* value is worth.
+  Ensure your validation hook reliably produces every objective metric.
 - **Concurrent workers can stamp conflicting schemas.** The schema read and
   the schema write are not a single transaction and there is no storage lock
   around them, so two workers starting the same empty shared-storage study
