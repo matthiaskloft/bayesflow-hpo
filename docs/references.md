@@ -12,8 +12,8 @@ Feature implementations and their backing references.
 | Feature | Module | Reference |
 |---------|--------|-----------|
 | Optuna framework | `optimization/study.py` | Akiba et al. (2019) |
-| End-to-end objective ranking | `tests/test_end_to_end/` | Akiba et al. (2019) |
-| End-to-end `log_gamma` direction | `tests/test_end_to_end/` | Modrak et al. (2025), Eq. 7 |
+| End-to-end objective ranking | `tests/test_end_to_end/` | Optuna docs; Deb et al. (2002) |
+| End-to-end `log_gamma` direction | `tests/test_end_to_end/` | Sailynoja et al. (2022); Modrak et al. (2025), Sec. 4.1 |
 | Objective column ordering | `objectives.py` | Optuna 4.9.0 docs |
 | Categorical choice-order identity | `search_spaces/base.py` | Optuna 4.9.0 docs |
 | `CanonicalMetricName` type | `validation/registry.py` | PEP 484 |
@@ -188,6 +188,22 @@ https://doi.org/10.48550/arXiv.2306.03580
 
 Reference-free local posterior diagnostic using joint samples p(theta, x).
 Implementation: `bayesflow_hpo.validation.c2st.lc2st()`.
+
+### Säilynoja, T., Bürkner, P.-C., & Vehtari, A. (2022)
+
+Graphical test for discrete uniformity and its applications in goodness-of-fit
+evaluation and multiple sample comparison. *Statistics and Computing, 32*(2).
+https://doi.org/10.1007/s11222-022-10090-6
+
+Introduces the gamma discrepancy: the probability, under uniform ranks, of
+observing the most extreme point of the empirical rank CDF, together with
+methods for evaluating its null distribution for given `M` and `S`. Modrák et
+al. (2025) attribute the statistic to this paper ("This metric was introduced
+in a paper by Säilynoja et al. (2022)", Section 4.1) and define the log ratio
+against its 5th percentile that BayesFlow's `calibration_log_gamma` reports.
+
+Verified via the OpenAlex API (DOI 10.1007/s11222-022-10090-6; *Statistics and
+Computing*, volume 32, issue 2, 2022).
 
 ### Modrák, M., Moon, A. H., Kim, S., Bürkner, P.-C., Huurre, N., Faltejsková, K., Gelman, A., & Vehtari, A. (2025)
 

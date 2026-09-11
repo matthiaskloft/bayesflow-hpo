@@ -21,14 +21,13 @@
   configurations and failed on real ones.
   ([#84](https://github.com/matthiaskloft/bayesflow-hpo/issues/84))
 
-  The gamma discrepancy is Equation 7 of Modrák, M., Moon, A. H., Kim, S.,
-  Bürkner, P., Huurre, N., Faltejsková, K., Gelman, A., & Vehtari, A. (2025).
-  Simulation-based calibration checking for Bayesian computation: The choice of
-  test quantities shapes sensitivity. *Bayesian Analysis, 20*(2), 461–488.
-  https://doi.org/10.1214/23-BA1404 — the probability, under uniform ranks, of
-  the most extreme point of the observed rank ECDF. BayesFlow's
-  `calibration_log_gamma` reports `log(gamma / null_quantile)` against that
-  paper, so ranks extreme enough to drive `gamma` to `0.0` give `-inf`.
+  The gamma discrepancy — the probability, under uniform ranks, of the most
+  extreme point of the observed rank ECDF — is Säilynoja et al. (2022).
+  Modrák et al. (2025) adopt it in Section 4.1 and define the quantity
+  BayesFlow's `calibration_log_gamma` reports, `log(gamma / gamma_bar)` with
+  `gamma_bar` the 5th percentile of the null distribution, so ranks extreme
+  enough to drive `gamma` to `0.0` give `-inf`. Both are recorded in
+  `docs/references.md`.
 
 ### Changed
 

@@ -23,14 +23,20 @@ each fixture; the short version of the traps it avoids:
   silently skips soft constraints when given one (``api.py:478``).
 
 Sources for the contracts asserted here, all recorded in
-``docs/references.md``. The ``log_gamma`` direction is BayesFlow's:
-``calibration_log_gamma`` reports ``log(gamma / null_quantile)``, the gamma
-discrepancy of Modrak et al. (2025), *Bayesian Analysis* 20(2), 461-488,
-Equation 7, with ``log_gamma < 0`` rejecting rank uniformity -- so larger is
-better and its minimize-form is negation. The ranking and Pareto claims are
-Optuna's (Akiba et al., 2019): every objective whose direction is ``minimize``
-is minimized, and a trial is non-dominated when no other trial is at least as
-good on every objective and strictly better on one -- which is why the
+``docs/references.md``.
+
+The ``log_gamma`` direction: the gamma discrepancy -- the probability, under
+uniform ranks, of the most extreme point of the observed rank ECDF -- is
+Sailynoja et al. (2022). Modrak et al. (2025) adopt it in Section 4.1 and
+define the quantity BayesFlow reports, ``log(gamma / gamma_bar)`` with
+``gamma_bar`` the 5th percentile of the null distribution, stating that
+``log(gamma / gamma_bar) < 0`` implies rejection of uniform ranks at the 5%
+level. Larger is therefore better, and its minimize-form is negation.
+
+The ranking claims are Optuna's documented semantics: every objective whose
+direction is ``minimize`` is minimized. The non-dominance rule a trial must
+satisfy to sit on the Pareto front -- no other trial at least as good on every
+objective and strictly better on one -- is Deb et al. (2002); it is why the
 selection tests hold the cost coordinate equal.
 """
 

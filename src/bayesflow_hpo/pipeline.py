@@ -55,15 +55,20 @@ def _declares_infinity(key: str, value: float) -> bool:
 
     References
     ----------
-    The gamma discrepancy is Equation 7 of Modrák, M., Moon, A. H., Kim, S.,
-    Bürkner, P., Huurre, N., Faltejsková, K., Gelman, A., & Vehtari, A. (2025).
-    Simulation-based calibration checking for Bayesian computation: The choice
-    of test quantities shapes sensitivity. *Bayesian Analysis, 20*(2), 461-488.
-    https://doi.org/10.1214/23-BA1404 — the probability, under uniform ranks,
-    of the most extreme point of the observed rank ECDF. BayesFlow's
-    ``calibration_log_gamma`` reports ``log(gamma / null_quantile)`` against
-    that paper, so a rank distribution extreme enough to drive ``gamma`` to
-    ``0.0`` yields ``-inf``.
+    The gamma discrepancy — the probability, under uniform ranks, of the most
+    extreme point of the observed rank ECDF — is Säilynoja, T., Bürkner, P.-C.,
+    & Vehtari, A. (2022). Graphical test for discrete uniformity and its
+    applications in goodness-of-fit evaluation and multiple sample comparison.
+    *Statistics and Computing, 32*(2). https://doi.org/10.1007/s11222-022-10090-6
+
+    Modrák, M., Moon, A. H., Kim, S., Bürkner, P., Huurre, N., Faltejsková, K.,
+    Gelman, A., & Vehtari, A. (2025). Simulation-based calibration checking for
+    Bayesian computation: The choice of test quantities shapes sensitivity.
+    *Bayesian Analysis, 20*(2), 461-488. https://doi.org/10.1214/23-BA1404
+    adopt it in Section 4.1 and define the quantity BayesFlow's
+    ``calibration_log_gamma`` reports, ``log(gamma / gamma_bar)`` with
+    ``gamma_bar`` the 5th percentile of the null distribution. A rank
+    distribution extreme enough to drive ``gamma`` to ``0.0`` yields ``-inf``.
     """
     direction = _direction_for(canonical_metric_name(key))
     if direction is None:
