@@ -160,9 +160,14 @@ def optimize(
     warm_start_from: Any | None = None,
     warm_start_top_k: int = 25,
     qmc_startup_trials: int = 0,
-    sampler_n_startup_trials: int | None = None,
     checkpoint_pool: CheckpointPool | None = None,
     show_progress_bar: bool = True,
+    # Appended after show_progress_bar and made keyword-only on purpose.
+    # optimize() has no keyword-only separator, so every parameter above is
+    # positionally bindable and inserting into the middle would silently
+    # rebind a caller's trailing positional arguments.
+    *,
+    sampler_n_startup_trials: int | None = None,
 ) -> optuna.Study:
     """Run HPO with a high-level convenience API.
 
@@ -451,6 +456,20 @@ def optimize(
     if report_frequency < 1:
         raise ValueError(
             f"report_frequency must be >= 1, got {report_frequency}."
+        )
+    # Startup counts are validated HERE, not only where they are consumed.
+    # create_study() checks them too, but by then _create_and_run_study() has
+    # already called optuna.delete_study() for a non-resumed run: a malformed
+    # option would destroy the previous study and its trials before failing,
+    # and leave no replacement behind.
+    if qmc_startup_trials < 0:
+        raise ValueError(
+            f"qmc_startup_trials must be >= 0, got {qmc_startup_trials}"
+        )
+    if sampler_n_startup_trials is not None and sampler_n_startup_trials < 0:
+        raise ValueError(
+            "sampler_n_startup_trials must be >= 0, "
+            f"got {sampler_n_startup_trials}"
         )
 
     # Step 1: Infer keys

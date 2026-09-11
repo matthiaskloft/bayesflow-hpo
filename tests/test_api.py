@@ -910,3 +910,79 @@ def test_optimize_warns_soft_constraints_with_custom_sampler(caplog):
         "metric_constraints_soft was provided with a user-supplied sampler "
         "instance" in caplog.text
     )
+
+
+class TestSamplerNStartupTrialsSignature:
+    """Regressions for how the override entered ``optimize()``'s signature."""
+
+    def test_old_positional_tail_keeps_its_bindings(self):
+        """The parameter must not sit between the pre-existing trailing ones.
+
+        ``optimize()`` has no keyword-only separator, so every parameter
+        before the new one is positionally bindable. Inserting into the
+        middle would rebind a caller's ``checkpoint_pool`` and
+        ``show_progress_bar`` without any error at the call site.
+        """
+        import inspect
+
+        params = list(inspect.signature(optimize).parameters.values())
+        names = [p.name for p in params]
+
+        assert names.index("sampler_n_startup_trials") > names.index(
+            "show_progress_bar"
+        )
+        assert (
+            params[names.index("sampler_n_startup_trials")].kind
+            is inspect.Parameter.KEYWORD_ONLY
+        )
+        for name in ("qmc_startup_trials", "checkpoint_pool",
+                     "show_progress_bar"):
+            assert (
+                params[names.index(name)].kind
+                is inspect.Parameter.POSITIONAL_OR_KEYWORD
+            )
+
+    @pytest.mark.parametrize(
+        ("kwargs", "match"),
+        [
+            ({"sampler_n_startup_trials": -1},
+             "sampler_n_startup_trials must be >= 0"),
+            ({"qmc_startup_trials": -1}, "qmc_startup_trials must be >= 0"),
+        ],
+    )
+    def test_negative_startup_count_does_not_destroy_an_existing_study(
+        self, tmp_path, kwargs, match
+    ):
+        """Rejection must happen before ``optuna.delete_study()`` runs.
+
+        ``create_study()`` validates these too, but by then a non-resumed
+        run has already deleted the previous study: the caller would lose
+        real trials to a typo and get no replacement.
+        """
+        storage = f"sqlite:///{tmp_path / 'existing.db'}"
+        study = optuna.create_study(
+            study_name="keepme", storage=storage,
+            directions=["minimize", "minimize"],
+        )
+        study.add_trial(
+            optuna.trial.create_trial(
+                params={}, distributions={}, values=[1.0, 2.0],
+            )
+        )
+
+        with patch("bayesflow_hpo.api.check_pipeline") as pipeline, \
+                patch("optuna.delete_study") as delete:
+            with pytest.raises(ValueError, match=match):
+                optimize(
+                    adapter=canonical_adapter(),
+                    simulator=MagicMock(),
+                    search_space=_make_fake_search_space(),
+                    study_name="keepme",
+                    storage=storage,
+                    **kwargs,
+                )
+            pipeline.assert_not_called()
+            delete.assert_not_called()
+
+        survivor = optuna.load_study(study_name="keepme", storage=storage)
+        assert [t.values for t in survivor.trials] == [[1.0, 2.0]]

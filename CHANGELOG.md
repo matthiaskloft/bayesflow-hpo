@@ -22,6 +22,18 @@
   `max(qmc_quota, main_startup)`, so pruning alignment does not inherit the
   lowered number.
 
+  The parameter is keyword-only and appended after `show_progress_bar`:
+  `optimize()` has no keyword-only separator, so inserting it among the
+  existing parameters would have silently rebound the trailing positional
+  arguments of any caller passing `checkpoint_pool` or `show_progress_bar`
+  positionally.
+
+  Both startup counts are now validated at the top of `optimize()` rather than
+  only where they are consumed. `create_study()` checked them, but by then a
+  non-resumed run had already called `optuna.delete_study()` — so a negative
+  value destroyed the previous study and its trials before raising, leaving no
+  replacement. This also fixes that pre-existing hole for `qmc_startup_trials`.
+
   The override is ignored, with a warning, when `sampler` is a sampler instance
   rather than a preset name — the same restriction `metric_constraints_soft`
   already documents, for the same reason.
