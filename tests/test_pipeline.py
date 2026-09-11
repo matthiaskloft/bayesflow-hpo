@@ -113,7 +113,7 @@ def test_check_pipeline_validate_fn_non_finite_raises():
         )
 
 
-def test_check_pipeline_accepts_an_infinity_a_metric_declares_as_its_worst():
+def test_check_pipeline_accepts_an_infinity_a_metric_declares_as_its_worst() -> None:
     """-inf passes for log_gamma, whose registered worst_raw is -inf.
 
     The pre-flight validates at ``n_posterior_samples=2`` on a barely-trained
@@ -124,7 +124,7 @@ def test_check_pipeline_accepts_an_infinity_a_metric_declares_as_its_worst():
     gamma to zero, so the pre-flight passed on toy configurations.
     """
 
-    def neg_inf_validate(approx, vd, n):
+    def neg_inf_validate(approx: Any, vd: Any, n: int) -> dict[str, float]:
         return {"log_gamma": float("-inf")}
 
     check_pipeline(
@@ -138,10 +138,10 @@ def test_check_pipeline_accepts_an_infinity_a_metric_declares_as_its_worst():
     )
 
 
-def test_check_pipeline_still_refuses_an_infinity_for_a_bounded_metric():
+def test_check_pipeline_still_refuses_an_infinity_for_a_bounded_metric() -> None:
     """calibration_error declares worst_raw=1.0, so an infinity is a defect."""
 
-    def inf_validate(approx, vd, n):
+    def inf_validate(approx: Any, vd: Any, n: int) -> dict[str, float]:
         return {"calibration_error": float("inf")}
 
     with pytest.raises(PipelineError, match="non-finite"):
@@ -156,7 +156,31 @@ def test_check_pipeline_still_refuses_an_infinity_for_a_bounded_metric():
         )
 
 
-def test_check_pipeline_still_refuses_nan_for_an_unbounded_metric():
+def test_check_pipeline_refuses_the_infinity_a_metric_does_not_declare() -> None:
+    """+inf is refused for log_gamma, which registers -inf as its worst.
+
+    ``log(gamma / null_quantile)`` with ``gamma`` a probability is unbounded
+    below, not above, so a ``+inf`` is an arithmetic fault rather than a very
+    bad model. Allowing any infinity for a metric that declares one would have
+    let it through.
+    """
+
+    def pos_inf_validate(approx: Any, vd: Any, n: int) -> dict[str, float]:
+        return {"log_gamma": float("inf")}
+
+    with pytest.raises(PipelineError, match="non-finite"):
+        check_pipeline(
+            simulator=_FakeSimulator(),
+            adapter=canonical_adapter(),
+            search_space=_FakeSearchSpace(),
+            build_approximator_fn=lambda hp: _FakeApproximator(),
+            train_fn=lambda approx, sim, hp, cb: None,
+            validate_fn=pos_inf_validate,
+            objective_metrics=["log_gamma"],
+        )
+
+
+def test_check_pipeline_still_refuses_nan_for_an_unbounded_metric() -> None:
     """NaN is refused even where an infinity is allowed.
 
     No metric declares NaN meaningful; it is the signature of an arithmetic
@@ -164,7 +188,7 @@ def test_check_pipeline_still_refuses_nan_for_an_unbounded_metric():
     must not widen it for NaN.
     """
 
-    def nan_validate(approx, vd, n):
+    def nan_validate(approx: Any, vd: Any, n: int) -> dict[str, float]:
         return {"log_gamma": float("nan")}
 
     with pytest.raises(PipelineError, match="non-finite"):

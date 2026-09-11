@@ -31,10 +31,16 @@ from bayesflow_hpo.validation.registry import (
 logger = logging.getLogger(__name__)
 
 
-def _has_finite_worst_case(key: str) -> bool:
-    """Whether *key*'s registered direction calls a finite value its worst.
+def _declares_infinity(key: str, value: float) -> bool:
+    """Whether *key*'s registered direction declares *value* as its worst case.
 
-    ``True`` for an unregistered metric: nothing declares that an infinity is
+    Only an infinity that **matches the registered** ``worst_raw`` exactly is
+    declared. ``log_gamma`` registers ``worst_raw=-math.inf``, so ``-inf`` is
+    declared and ``+inf`` is not: the metric is ``log(gamma / null_quantile)``
+    with ``gamma`` a probability, so it is unbounded *below* and a ``+inf``
+    would be an arithmetic fault rather than a bad model.
+
+    ``False`` for an unregistered metric: nothing declares that an infinity is
     meaningful for it, so the pre-flight keeps refusing one. Resolution goes
     through :func:`~bayesflow_hpo.objectives._direction_for` rather than
     :data:`~bayesflow_hpo.objectives.METRIC_DIRECTIONS` directly, so a metric
@@ -46,11 +52,23 @@ def _has_finite_worst_case(key: str) -> bool:
     costs nothing -- but it keeps the raw/canonical distinction that
     :class:`~bayesflow_hpo.types.CanonicalMetricName` exists to enforce from
     depending on where the helper is called from.
+
+    References
+    ----------
+    The gamma discrepancy is Equation 7 of Modrák, M., Moon, A. H., Kim, S.,
+    Bürkner, P., Huurre, N., Faltejsková, K., Gelman, A., & Vehtari, A. (2025).
+    Simulation-based calibration checking for Bayesian computation: The choice
+    of test quantities shapes sensitivity. *Bayesian Analysis, 20*(2), 461-488.
+    https://doi.org/10.1214/23-BA1404 — the probability, under uniform ranks,
+    of the most extreme point of the observed rank ECDF. BayesFlow's
+    ``calibration_log_gamma`` reports ``log(gamma / null_quantile)`` against
+    that paper, so a rank distribution extreme enough to drive ``gamma`` to
+    ``0.0`` yields ``-inf``.
     """
     direction = _direction_for(canonical_metric_name(key))
     if direction is None:
-        return True
-    return math.isfinite(direction.worst_raw)
+        return False
+    return value == direction.worst_raw
 
 
 class PipelineError(Exception):
@@ -397,12 +415,12 @@ def check_pipeline(
             raise PipelineError(
                 f"validate_fn returned non-finite value for {key!r}: {val}"
             )
-        # An infinity is refused only for a metric whose registered direction
-        # calls a finite value its worst. For ``log_gamma`` the table says the
-        # opposite -- ``worst_raw=-math.inf``, on the reasoning that the metric
-        # is unbounded below and no finite constant is defensibly its worst --
-        # so refusing -inf here rejected the very value the objective is built
-        # to represent.
+        # An infinity is allowed only where it matches the metric's registered
+        # ``worst_raw`` exactly. ``log_gamma`` registers ``-math.inf``, on the
+        # reasoning that the metric is unbounded below and no finite constant
+        # is defensibly its worst -- so refusing -inf here rejected the very
+        # value the objective is built to represent. ``+inf`` for that same
+        # metric stays refused: it is unbounded below, not above.
         #
         # It rejected it exactly where the pre-flight is meant to help. This
         # runs at ``n_posterior_samples=2`` on a barely-trained model, where
@@ -416,7 +434,7 @@ def check_pipeline(
         #
         # NaN stays refused above: no metric declares it, and it is the
         # signature of an arithmetic mistake rather than of a bad model.
-        if math.isinf(val) and _has_finite_worst_case(key):
+        if math.isinf(val) and not _declares_infinity(key, val):
             raise PipelineError(
                 f"validate_fn returned non-finite value for {key!r}: {val}"
             )
