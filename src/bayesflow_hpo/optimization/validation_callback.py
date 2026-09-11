@@ -11,12 +11,15 @@ does not support ``trial.report()`` (Issue #3450, open since April
 2022).  Instead, one of three custom pruning strategies is applied:
 
 - ``"dominance"`` — per-objective normalized median check (AND rule).
-  Simplified adaptation of MO-ASHA's dominance-based promotion
-  (Schmucker et al., 2021).
+  Simplified adaptation of the dominance-based selection idea in
+  MO-ASHA's Algorithm 1 selector (Schmucker et al., 2021); the median
+  rule itself is ours, not the paper's.
 - ``"mo-sha"`` — non-dominated sorting at each step, bottom-fraction
   pruning per MO-ASHA Algorithm 2 (Schmucker et al., 2021).
 - ``"primary"`` — single-metric median pruning on a user-chosen
-  objective (equivalent to Optuna's MedianPruner; Akiba et al., 2019).
+  objective (equivalent to Optuna's ``MedianPruner``; Optuna API
+  reference, not Akiba et al., 2019 -- see
+  :mod:`~bayesflow_hpo.optimization.pruning_strategies`).
 
 Strategy implementations live in
 :mod:`bayesflow_hpo.optimization.pruning_strategies`.

@@ -1,0 +1,13 @@
+# Exact dependency versions CI installs, so every run resolves the same code
+# and a local environment can be made to match with:
+#
+#     pip install -e ".[dev]" -c .github/ci-constraints.txt
+#
+# pyproject.toml declares the supported *range*; this file picks the single
+# version CI actually tests against. Bump it deliberately, after running the
+# suite on the new release -- not implicitly on whatever the resolver picks.
+#
+# optuna: 5.0 changed get_param_importances() to return an empty mapping where
+# it previously raised, which plot_param_importance depended on. An unpinned CI
+# picked that up on release day while local environments stayed on 4.x.
+optuna==5.0.0

@@ -30,7 +30,7 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install torch --index-url https://download.pytorch.org/whl/cpu
-      - run: pip install -e ".[dev]"
+      - run: pip install -e ".[dev]" -c .github/ci-constraints.txt
       # Paths come from [tool.mypy] files in pyproject.toml.
       - run: mypy
 
@@ -48,7 +48,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: pip install torch --index-url https://download.pytorch.org/whl/cpu
-      - run: pip install -e ".[dev]" pytest-cov
+      - run: pip install -e ".[dev]" pytest-cov -c .github/ci-constraints.txt
       - run: pytest tests/ -v --cov=bayesflow_hpo --cov-report=xml --cov-report=term
       - name: Upload coverage to Codecov
         if: matrix.python-version == '3.13'

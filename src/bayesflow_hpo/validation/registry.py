@@ -547,7 +547,9 @@ def _sbc_ranks(
 ) -> tuple[np.ndarray, int]:
     """Compute SBC ranks shared by all SBC metrics."""
     n_posterior_samples = draws.shape[1]
-    # Talts et al. (2018), Theorem 2: ranks uniform iff posterior correct
+    # Talts et al. (2018), Theorem 1: exact posterior samples imply
+    # uniform ranks. The converse does not hold, so uniformity is a
+    # necessary but not sufficient condition.
     ranks = np.sum(draws < true_values[:, None], axis=1)
     return ranks, n_posterior_samples
 
@@ -665,7 +667,9 @@ def make_coverage_metric(
 
     def metric_fn(draws: np.ndarray, true_values: np.ndarray) -> dict[str, float]:
         n_sims, n_samples = draws.shape
-        # Talts et al. (2018), Theorem 2: ranks uniform iff posterior correct
+        # Talts et al. (2018), Theorem 1: exact posterior samples imply
+        # uniform ranks. The converse does not hold, so uniformity is a
+        # necessary but not sufficient condition.
         ranks = np.sum(draws < true_values[:, None], axis=1)
         # continuity correction, standard practice
         normalized_ranks = (ranks + 0.5) / (n_samples + 1)
@@ -678,7 +682,7 @@ def make_coverage_metric(
 
             if side == "two-sided":
                 alpha = 1 - level
-                # Talts et al. (2018), Sec. 4: credible interval calibration
+                # Talts et al. (2018), Sec. 4.1: rank-based calibration
                 lo = alpha / 2
                 hi = 1 - alpha / 2
                 in_interval = (normalized_ranks >= lo) & (normalized_ranks <= hi)

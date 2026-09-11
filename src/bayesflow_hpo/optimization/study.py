@@ -125,8 +125,12 @@ def _resolve_pruner(name: str) -> optuna.pruners.BasePruner:
     Li, L., Jamieson, K., DeSalvo, G., Rostamizadeh, A., & Talwalkar, A.
         (2018). Hyperband: A novel bandit-based approach to hyperparameter
         optimization. *JMLR*, *18*(185), 1--52.
-        Section 3.6: η=3 convention.
-    Akiba, T., et al. (2019). Optuna. *Proc. 25th ACM SIGKDD*.
+        Algorithm 1 takes ``η`` as an input with "default η = 3"; Section
+        3.6 ("Setting η") recommends 3 or 4 in practice and notes the
+        theoretical optimum is ``e ≈ 2.718``.  Optuna's
+        ``HyperbandPruner`` likewise defaults to ``reduction_factor=3``.
+    Optuna API reference: ``optuna.pruners.MedianPruner``,
+        ``optuna.pruners.HyperbandPruner``.
     """
     presets = {
         "median": lambda: optuna.pruners.MedianPruner(
@@ -350,8 +354,15 @@ class QMCWarmupSampler(optuna.samplers.BaseSampler):
         Computing*, *30*(5), 2635-2654.
         https://doi.org/10.1137/070709359
 
-    Optuna PR #2423: Sobol outperforms Halton in benchmarks.
-    Optuna Issue #1797: QMCSampler significantly better than RandomSampler.
+    SciPy API reference: ``scipy.stats.qmc.Sobol``, which Optuna's
+        ``QMCSampler`` wraps.  It takes its direction numbers from Joe &
+        Kuo (2008) and documents that Sobol' points "lose their balance
+        properties if one uses a sample size that is not a power of 2".
+
+    Optuna PR #2423 and Issue #1797 are cited upstream as the benchmark
+        discussion motivating ``QMCSampler``.  Not verified here: the
+        audit had no access to the issue tracker, so treat these as
+        pointers rather than as established results.
     """
 
     def __init__(
@@ -620,7 +631,9 @@ def create_study(
         )
     if qmc_startup_trials > 0:
         if not _is_power_of_two(qmc_startup_trials):
-            # Sobol' (1967): optimal discrepancy at 2^m points
+            # SciPy `stats.qmc.Sobol` docs: Sobol' points "lose their
+            # balance properties if one uses a sample size that is not a
+            # power of 2". Optuna's QMCSampler wraps that implementation.
             logger.warning(
                 "qmc_startup_trials=%d is not a power of 2. Sobol's "
                 "low-discrepancy guarantee is optimal at n = 2^m "

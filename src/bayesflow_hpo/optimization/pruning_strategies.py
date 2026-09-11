@@ -11,12 +11,16 @@ Four strategies are available via ``pruning_strategy`` in ``optimize()``:
 - ``"none"`` — disable intermediate pruning entirely (no callback created).
 - ``"dominance"`` — per-objective normalized median check (AND rule).
   Prunes only if the trial is worse than the median on ALL objectives.
-  Simplified adaptation of MO-ASHA's dominance-based promotion
-  (Schmucker et al., 2021, Algorithm 1).
-- ``"mo-sha"`` — non-dominated sorting at each step; prunes trials in
-  the bottom fraction per MO-ASHA Algorithm 2 (Schmucker et al., 2021).
+  Simplified adaptation of the dominance-based selection in MO-ASHA's
+  Algorithm 1 selector (Schmucker et al., 2021); the median rule itself is
+  ours, not the paper's.
+- ``"mo-sha"`` — non-dominated sorting at each step; prunes trials in the
+  bottom fraction. The rung structure is MO-ASHA Algorithm 2 and the sorting
+  is its Algorithm 1 selector (Schmucker et al., 2021).
 - ``"primary"`` — single-metric median pruning on a user-chosen
-  objective, equivalent to Optuna's MedianPruner (Akiba et al., 2019).
+  objective, equivalent to Optuna's ``MedianPruner`` (Optuna API
+  reference). Not Akiba et al. (2019): that paper's Algorithm 1 is
+  Optuna's Successive Halving pruner and states no median rule.
 
 References
 ----------
@@ -38,6 +42,9 @@ Akiba, T., Sano, S., Yanase, T., Ohta, T., & Koyama, M. (2019).
     Optuna: A next-generation hyperparameter optimization framework.
     In *Proc. 25th ACM SIGKDD* (pp. 2623--2631).
     https://doi.org/10.1145/3292500.3330701
+    Cited for Optuna itself.  Its Algorithm 1 is the Successive Halving
+    pruner; the ``MedianPruner`` that ``"primary"`` mirrors is documented
+    in the Optuna API reference, not in this paper.
 """
 
 from __future__ import annotations
@@ -118,7 +125,10 @@ def should_prune_dominance(
     norm_current = (current - mins) / safe_ranges
     medians = np.median(norm_ref, axis=0)
 
-    # Schmucker et al. (2021), Algorithm 1, per-objective median AND rule
+    # Per-objective median AND rule. This is OUR simplification, not the
+    # paper's: Schmucker et al. (2021) Algorithm 1 is the selector
+    # (non-dominated sorting, eps-net, NSGA-II crowding) and states no
+    # median rule. Only the dominance-based selection idea is theirs.
     return bool(np.all(norm_current > medians))
 
 
@@ -201,8 +211,10 @@ def should_prune_primary(
 ) -> bool:
     """Single-metric median pruning.
 
-    Equivalent to Optuna's ``MedianPruner`` (Akiba et al., 2019)
-    applied to a single user-chosen objective.  Reads per-metric user
+    Equivalent to Optuna's ``MedianPruner`` (Optuna API reference)
+    applied to a single user-chosen objective.  The Optuna paper is
+    deliberately not cited here: its Algorithm 1 is the Successive
+    Halving pruner, and it describes no median-based rule.  Reads per-metric user
     attributes (``val_{metric}_step_{N}``) from completed trials.
 
     Parameters

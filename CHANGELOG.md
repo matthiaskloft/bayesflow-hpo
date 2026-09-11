@@ -61,14 +61,122 @@
   configurations and failed on real ones.
   ([#84](https://github.com/matthiaskloft/bayesflow-hpo/issues/84))
 
-  The gamma discrepancy is Equation 7 of Modrák, M., Moon, A. H., Kim, S.,
-  Bürkner, P., Huurre, N., Faltejsková, K., Gelman, A., & Vehtari, A. (2025).
-  Simulation-based calibration checking for Bayesian computation: The choice of
-  test quantities shapes sensitivity. *Bayesian Analysis, 20*(2), 461–488.
-  https://doi.org/10.1214/23-BA1404 — the probability, under uniform ranks, of
-  the most extreme point of the observed rank ECDF. BayesFlow's
-  `calibration_log_gamma` reports `log(gamma / null_quantile)` against that
-  paper, so ranks extreme enough to drive `gamma` to `0.0` give `-inf`.
+  The gamma discrepancy — the probability, under uniform ranks, of the most
+  extreme point of the observed rank ECDF — is Säilynoja et al. (2022).
+  Modrák et al. (2025) adopt it in Section 4.1 and define the quantity
+  BayesFlow's `calibration_log_gamma` reports, `log(gamma / gamma_bar)` with
+  `gamma_bar` the 5th percentile of the null distribution, so ranks extreme
+  enough to drive `gamma` to `0.0` give `-inf`. Both are recorded in
+  `docs/references.md`.
+
+### Changed
+
+- **`optuna` now requires `>=5.0.0,<6.0.0`.** It was `>=4.0.0`, so a local
+  environment on 4.9.0 and a fresh CI install on 5.0.0 ran different code —
+  and optuna 5.0 already changed behaviour this package depends on.
+  Measurements taken locally were therefore not measurements of what CI runs.
+
+  The behaviour change, observed directly on both released versions rather
+  than taken from release notes — for a study with no completed trials, and
+  for one with a single trial and no varying parameters:
+
+  | | `optuna.importance.get_param_importances(study)` |
+  |---|---|
+  | 4.9.0 | raises `ValueError`: "Cannot evaluate parameter importances without completed trials." / "…with only a single trial." |
+  | 5.0.0 | returns `{}` |
+
+  `plot_param_importance` treated "did not raise" as success, so on 5.0 it
+  drew an empty chart and returned a figure where its contract says `None`
+  (fixed in #85).
+
+  The #85 fix is **not** what forces the floor, and an earlier draft of this
+  entry wrongly said it was. `plot_param_importance()` handles both
+  signals -- the 4.x raise, via `except Exception`, and the 5.0 empty
+  mapping, via the branch #85 added -- so it works unchanged on either
+  major version. Both branches now have regression tests that stub
+  `get_param_importances`, so neither depends on which optuna is
+  installed.
+
+  The floor is a deliberate **support-policy decision**: testing one
+  optuna major rather than two keeps local measurements and CI results
+  comparable, which the version split had already broken. It does mean
+  `bayesflow-hpo` can no longer be installed alongside an application
+  pinned to optuna 4. The range stays a range so that installing
+  `bayesflow-hpo` alongside other optuna-dependent packages does not force a
+  resolver conflict; the single version CI actually tests is pinned exactly in
+  `.github/ci-constraints.txt`. To reproduce a CI environment locally:
+
+  ```bash
+  pip install -e ".[dev]" -c .github/ci-constraints.txt
+  ```
+
+### Documentation
+
+- **Citation audit: six more claims corrected against full texts.** A
+  systematic sweep of every implementation-backing citation in `src/`,
+  `docs/references.md` and `docs/references/`, following the four errors
+  found earlier in this release. Nothing here changes behaviour; all of it
+  changes what the code claims its behaviour is grounded in.
+
+  - The SBC rank-uniformity result is Talts et al. (2018) **Theorem 1**
+    (Sec. 4.1, p. 6), not Theorem 2, and it states that exact posterior
+    samples *imply* uniform ranks — not the equivalence that three code
+    comments asserted with "iff". SBC is a necessary, not sufficient, check,
+    which the paper says explicitly.
+  - Median pruning is no longer attributed to Akiba et al. (2019). That
+    paper's Algorithm 1 is the Successive Halving pruner and specifies no
+    median rule; `MedianPruner` is documented only in the Optuna API
+    reference, which is now what `"primary"` cites.
+  - Hyperband's `eta = 3` default is in **Algorithm 1**'s input line.
+    Section 3.6, cited previously, recommends "3 or 4" and gives the
+    theoretical optimum as `e ≈ 2.718` — a different claim.
+  - Emmerich & Deutz (2018) was cited for "non-dominated sorting
+    (Eqs. 3--4)" and "complexity bounds (Props. 7, 9)". Neither exists as
+    described; those propositions develop cone orders. Definition 5, Pareto
+    dominance, was the one correct locator and is what we keep.
+  - The power-of-two warning in `optimize()`'s QMC warm-up now cites the
+    SciPy `qmc.Sobol` documentation, which states the property and which
+    Optuna's `QMCSampler` actually wraps, rather than Sobol' (1967) — whose
+    indexed copy is the Russian original and could not support the locator.
+  - `validation_callback.py` still described `"dominance"` as MO-ASHA's
+    promotion rule, without the correction already applied to
+    `pruning_strategies.py`.
+
+  Verified and left alone: Deb et al.'s O(MN^2) sorting, Talts's Algorithm 1,
+  Linhart's Algorithms 1--2, Li et al.'s Section 6 Sobol suggestion, Joe &
+  Kuo as SciPy's direction-number source, and — re-executed on 5.0.0 rather
+  than assumed — that `Trial.report()` still raises `NotImplementedError` for
+  multi-objective studies, which is the premise the whole pruning module
+  rests on.
+
+  `docs/references/*.md` is now marked unreliable: spot checks found
+  misidentified definitions, Hyperband's Algorithm 1 labelled "Successive
+  Halving" with pseudocode that is not the paper's, and a cited "ASHA (Li et
+  al., 2016), JMLR 17(142)" that does not appear to exist. No code path
+  depends on those summaries. `docs/references.md` records what remains
+  unverified.
+
+### Testing
+
+- **`tests/test_end_to_end/` runs real `optimize()` studies.** Until now
+  nothing in `tests/` ran one: `test_api.py` patches out `GenericObjective`,
+  `create_study`, `optimize_until`, `check_pipeline` and
+  `generate_validation_dataset`, and `test_direction_end_to_end.py` drives a
+  real Optuna study over hand-fed metric values without building an
+  approximator. Both #72 defects were integration failures in the seam neither
+  covers. The new directory builds real approximators and runs the real
+  validation pipeline against a tiny Gaussian model.
+
+  These tests import BayesFlow and Keras, which
+  `docs/plans/plan-testing-gaps-done.md` had ruled out for `tests/`. Both are
+  already hard runtime dependencies and `tests/test_builders/test_workflow.py`
+  already imports Keras, so this widens an existing precedent rather than
+  adding a dependency.
+
+  They add ~210s to the suite and are marked `endtoend`; deselect them with
+  `pytest -m "not endtoend"`. They do **not** cover pruning, intermediate
+  validation, open-ended stopping (unreachable at two epochs) or
+  persistence/resume (studies run in memory).
 
 ## 0.2.0
 

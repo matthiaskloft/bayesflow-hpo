@@ -18,6 +18,35 @@ Suggested execution order: I, then research follow-ups A2/A3.
 
 ---
 
+### Package L: End-to-End `optimize()` Tests
+
+Tracked in [issue #76](https://github.com/matthiaskloft/bayesflow-hpo/issues/76).
+Shipped: `tests/test_end_to_end/` runs real `optimize()` studies against real
+approximators and the real validation pipeline (19 tests, ~210s, marked
+`endtoend`). Plan and measurements in
+[`docs/plans/plan-end-to-end-optimize-tests.md`](plans/plan-end-to-end-optimize-tests.md).
+
+Convention change: that directory may import BayesFlow and Keras, which
+`plan-testing-gaps-done.md` had ruled out for `tests/`. The rest of `tests/`
+keeps the old rule.
+
+The two research claims the suite rests on — `log_gamma`'s direction and
+Optuna's non-dominance semantics — are recorded in
+[`docs/references.md`](references.md) and cited in the plan's References
+section. Every other claim in this entry is about this repository's own code.
+
+Remaining, deliberately not covered by this suite:
+
+1. Pruning, intermediate validation and open-ended stopping — unreachable at
+   two epochs (`validation_callback.py:236` warmup). Needs its own targeted
+   test at a higher epoch count.
+2. Persistence, resume and serialization — these studies run in memory.
+3. The concurrent-initialization race in
+   [issue #77](https://github.com/matthiaskloft/bayesflow-hpo/issues/77), which
+   now has somewhere to live.
+
+---
+
 ### Package K: Training Search-Space Follow-up
 
 Tracked in [issue #69](https://github.com/matthiaskloft/bayesflow-hpo/issues/69).
@@ -108,11 +137,18 @@ Completed all three sub-tasks for documentation-backed implementation.
 All 16 reference summaries exist with extensive method details, algorithm
 citations, and implementation notes.
 
+> **Superseded 2026-09-11.** "Exist" was the only claim verified. The
+> 2026-09-11 audit found several of these summaries carry wrong locators
+> and at least one citation to a work that does not appear to exist; the
+> directory is now marked unreliable. See the "Audit status" section of
+> [`references.md`](references.md).
+
 #### Sub-task 2: Docstring citations
 
 Added References sections to module docstrings:
-- `validation/sbc_tests.py` — Talts et al. (2018), Theorem 2
-- `validation/registry.py` — Talts et al. (2018), Section 4
+- `validation/sbc_tests.py` — Talts et al. (2018), ~~Theorem 2~~ Theorem 1
+  (corrected 2026-09-11)
+- `validation/registry.py` — Talts et al. (2018), ~~Section 4~~ Section 4.1
 - `optimization/pruning_strategies.py` — Schmucker et al. (2021), Emmerich & Deutz (2018), Deb et al. (2002)
 - `optimization/study.py` — Sobol' (1967), Joe & Kuo (2008)
 - `results/extraction.py` — Deb et al. (2002)

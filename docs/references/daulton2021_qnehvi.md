@@ -81,7 +81,10 @@ where:
 qNEHVI(X) ≈ (1/S) Σ_s HV(F ∪ {f^(s)(X)}, F_ref)
 ```
 
-**Page reference:** Section 3.2, Equation 7
+**Page reference:** Sections 5.1-5.2, equations (2)-(3). (This file read
+"Section 3.2, Equation 7" until checked against the full text: NEHVI and its
+MC estimator are Section 5.1 referring to equation (3), and qNEHVI is defined
+in Section 5.2, "Parallel Noisy Expected Hypervolume Improvement".)
 
 ### Differentiability
 

@@ -3,6 +3,107 @@
 Checked against the OpenAlex API, with version exceptions documented below.
 APA 7 format.
 
+## Audit status (2026-09-11)
+
+Two passes. The first was prompted by three inherited, unchecked citations
+found during PR #86, two of which were wrong. The second was a systematic
+sweep of every implementation-backing claim in `src/`, this file, and
+`docs/references/`.
+
+**Method.** A claim counts as verified only if it was read back against the
+full text of the work it cites, or -- for library behaviour -- executed
+against the installed version. Metadata was checked separately via the
+OpenAlex API. Claims are grouped below by what actually happened to them.
+
+### Corrected (first pass)
+
+| Claim | Was | Is |
+|---|---|---|
+| Schmucker et al. (2021) algorithm numbers | "Alg. 1: dominance-based promotion, Alg. 2: non-dominated sorting" | Reversed. Alg. 1 is the selector, Alg. 2 is MO-ASHA |
+| Daulton et al. (2021) locator | "Section 3.2, Equation 7" | Sections 5.1-5.2, equations (2)-(3) |
+| `pruning_strategies.py` median rule | "Schmucker Alg. 1, per-objective median AND rule" | Alg. 1 states no median rule; the rule is ours |
+| gamma discrepancy attribution | Modrák et al. (2025), "Equation 7" | Säilynoja et al. (2022); Modrák et al. adopt it in Sec. 4.1, unnumbered display |
+| Optuna API entries | stamped 4.9.0, "the version installed" | re-run and re-stamped 5.0.0; both claims still hold |
+
+### Corrected (second pass)
+
+| Claim | Was | Is | Sites |
+|---|---|---|---|
+| Talts et al. (2018) rank uniformity | "Theorem 2: ranks uniform **iff** posterior correct" | **Theorem 1** (Sec. 4.1, p. 6), and correctness implies uniformity, not conversely | `registry.py` x2, `sbc_tests.py`, this file |
+| Median pruning attribution | Akiba et al. (2019) | The paper's Alg. 1 is the Successive Halving pruner and states no median rule; `MedianPruner` is documented only in the Optuna API reference | `pruning_strategies.py` x2, `validation_callback.py`, matrix |
+| Hyperband `eta = 3` locator | "Section 3.6: η=3 convention" | The default is in **Algorithm 1**'s input line; §3.6 recommends "3 or 4" and gives `e ≈ 2.718` as the theoretical optimum | `study.py`, this file |
+| Emmerich & Deutz (2018) locators | "non-dominated sorting (Eqs. 3--4), complexity bounds (Props. 7, 9)" | Neither exists as cited; Props. 3--4 and 7--9 are cone-order results. Only "Pareto dominance (Def. 5)" was right | this file |
+| Sobol power-of-two warning | attributed to Sobol' (1967) | Attributed to the SciPy `qmc.Sobol` docs, which state it and which Optuna's `QMCSampler` wraps | `study.py` |
+| `"dominance"` strategy wording | "MO-ASHA's dominance-based promotion" | Stale: missing the first pass's "the median rule is ours" caveat | `validation_callback.py` |
+
+### Verified, and correct as written
+
+- Deb et al. (2002): the abstract states "a fast nondominated sorting
+  approach with O(MN^2) computational complexity", as `_non_dominated_sort()`
+  claims.
+- Emmerich & Deutz (2018), **Definition 5** (p. 588) is Pareto dominance.
+- Li et al. (2018), **Section 6** does propose quasi-random sampling
+  ("Quasi-random methods like Sobol or latin hypercube") as an extension.
+- Li et al. (2018) via `pruning_strategies.py`: the quoted §3.6 wording
+  ("in practice we suggest taking eta to be equal to 3 or 4") is verbatim.
+- Talts et al. (2018), **Algorithm 1** is the SBC histogram procedure.
+- Linhart et al. (2023), **Algorithms 1--2** are `l`-C2ST training and
+  evaluation -- what `lc2st()` implements. Algs. 3--4 are the NF variant,
+  which we do not implement.
+- Joe & Kuo (2008) supplies the direction numbers for `scipy.stats.qmc.Sobol`
+  (cited there as reference [4]).
+- Schmucker et al. (2021): `eta = 3` really is in the MO-ASHA Algorithm 2
+  header.
+- Optuna 5.0.0: `Trial.report()` and `should_prune()` still raise
+  `NotImplementedError` on a multi-objective study -- re-executed, not
+  assumed. This is what justifies `pruning_strategies.py` existing at all.
+- Optuna 5.0.0: `HyperbandPruner` defaults to `reduction_factor=3`, matching
+  our preset and Li et al.'s Algorithm 1 default.
+- Both Optuna behavioural claims (categorical choice-order identity,
+  positional `directions`/`values`), re-executed on 5.0.0.
+
+### Bulk metadata check
+
+Every DOI in this file was resolved against the OpenAlex API. All resolve.
+Five entries carry a year differing from OpenAlex's (Balandat 2020/2019, Deb &
+Jain 2014/2013, Modrák 2025/2023, Smith 2018/2017): each is a published-version
+year cited against a preprint or online-first DOI, which is the intended
+convention, not an error. Five entries carry no DOI at all (Bergstra 2011, Li
+et al. 2018, Lopez-Paz & Oquab 2017, Lueckmann et al. 2021, Shallue et al.
+2019) -- a completeness gap, not a known error.
+
+### Known-unreliable: `docs/references/*.md`
+
+The per-paper summaries in `docs/references/` are **not** covered by this
+audit and several are demonstrably wrong. Spot checks found:
+
+- `emmerich2018_moo.md` misidentifies Definitions 6, 7 and 9 (it has them as
+  Pareto optimality, hypervolume and unary hypervolume; they are the
+  search-space pre-order, the strict component order and the non-trivial
+  cone) and places Pareto dominance in Section 2.1 when it is in Section 3.
+- `li2018_hyperband.md` labels Algorithm 1 "Successive Halving" with
+  pseudocode that is not the paper's; Algorithm 1 is Hyperband. It also cites
+  an "ASHA (Li et al., 2016), JMLR 17(142)" that does not correspond to a
+  real work.
+- `sobol1967_qmc.md` gives section, page and theorem locators against pages
+  86--112, but the indexed copy is the Russian original (Zh. Vychisl. Mat.
+  Mat. Fiz. 7, pp. 784--802); the English translation carries the 86--112
+  pagination. The locators cannot have come from the source at hand.
+
+These files back no code path on their own -- every implementation claim
+cites this file or the source docstrings, both of which are now verified --
+but they should not be trusted as a secondary source, and are best treated as
+drafts pending their own pass.
+
+**Still NOT verified.** Entries here whose description summarises a paper's
+general contribution without naming a locator have had metadata checked but
+not their substance: Bergstra et al. (2011), Balandat et al. (2020), Daulton
+et al. (2020), Deb & Jain (2014), Bischl et al. (2023), Goyal et al. (2017),
+Smith et al. (2018), Shallue et al. (2019), Lopez-Paz & Oquab (2017),
+Lueckmann et al. (2021), Lemos et al. (2023), Bland & Altman (1986), Gneiting
+(2011), Sobol' (1967). Also unverified: the two Optuna issue-tracker pointers
+in `study.py`, which needed repository access this audit did not have.
+
 ## Coverage Matrix
 
 Feature implementations and their backing references.
@@ -12,8 +113,10 @@ Feature implementations and their backing references.
 | Feature | Module | Reference |
 |---------|--------|-----------|
 | Optuna framework | `optimization/study.py` | Akiba et al. (2019) |
-| Objective column ordering | `objectives.py` | Optuna 4.9.0 docs |
-| Categorical choice-order identity | `search_spaces/base.py` | Optuna 4.9.0 docs |
+| End-to-end objective ranking | `tests/test_end_to_end/` | Optuna docs; Deb et al. (2002) |
+| End-to-end `log_gamma` direction | `tests/test_end_to_end/` | Sailynoja et al. (2022); Modrak et al. (2025), Sec. 4.1 |
+| Objective column ordering | `objectives.py` | Optuna 5.0.0 docs |
+| Categorical choice-order identity | `search_spaces/base.py` | Optuna 5.0.0 docs |
 | `CanonicalMetricName` type | `validation/registry.py` | PEP 484 |
 | `RawScore` / `MinimizeScore` types | `objectives.py` | PEP 484 |
 | TPE sampler preset | `optimization/study.py` | Bergstra et al. (2011) |
@@ -31,12 +134,12 @@ Feature implementations and their backing references.
 
 | Feature | Module | Reference |
 |---------|--------|-----------|
-| Dominance-based pruning | `optimization/pruning_strategies.py` | Schmucker et al. (2021), Alg. 1 |
-| MO-SHA non-dominated sorting | `optimization/pruning_strategies.py` | Schmucker et al. (2021), Alg. 2 |
-| Primary-metric median pruning | `optimization/pruning_strategies.py` | Akiba et al. (2019) |
-| Hyperband / Successive Halving | `optimization/study.py` | Li et al. (2018) |
+| Dominance-based pruning (simplified) | `optimization/pruning_strategies.py` | Schmucker et al. (2021), Alg. 1 selector |
+| MO-SHA rung/bottom-fraction pruning | `optimization/pruning_strategies.py` | Schmucker et al. (2021), Alg. 2 (selector: Alg. 1) |
+| Primary-metric median pruning | `optimization/pruning_strategies.py` | Optuna docs (`MedianPruner`) |
+| Hyperband / Successive Halving | `optimization/study.py` | Li et al. (2018), Alg. 1 |
 | Non-dominated sorting (shared) | `optimization/pruning_strategies.py` | Deb et al. (2002) |
-| Multi-objective fundamentals | `optimization/pruning_strategies.py` | Emmerich & Deutz (2018) |
+| Multi-objective fundamentals | `optimization/pruning_strategies.py` | Emmerich & Deutz (2018), Def. 5 |
 
 ### Trial Selection
 
@@ -48,16 +151,16 @@ Feature implementations and their backing references.
 
 | Feature | Module | Reference |
 |---------|--------|-----------|
-| Sobol quasi-random startup | `optimization/study.py` | Sobol' (1967); Joe & Kuo (2008) |
+| Sobol quasi-random startup | `optimization/study.py` | Sobol' (1967); Joe & Kuo (2008); SciPy `qmc.Sobol` docs |
 
 ### Validation Metrics
 
 | Feature | Module | Reference |
 |---------|--------|-----------|
-| SBC rank uniformity tests | `validation/sbc_tests.py` | Talts et al. (2018) |
-| SBC rank-based coverage | `validation/registry.py` | Talts et al. (2018) |
+| SBC rank uniformity tests | `validation/sbc_tests.py` | Talts et al. (2018), Thm. 1 |
+| SBC rank-based coverage | `validation/registry.py` | Talts et al. (2018), Thm. 1, Sec. 4.1 |
 | Global C2ST | `validation/c2st.py` | Lopez-Paz & Oquab (2017) |
-| L-C2ST (local) | `validation/c2st.py` | Linhart et al. (2023) |
+| L-C2ST (local) | `validation/c2st.py` | Linhart et al. (2023), Algs. 1--2 |
 | Correlation versus agreement | `validation/registry.py` | Bland & Altman (1986) |
 | Point-summary/loss consistency | `validation/registry.py` | Gneiting (2011) |
 | TARP (possible future extension) | documentation only | Lemos et al. (2023) |
@@ -86,7 +189,13 @@ Discovery & Data Mining* (pp. 2623--2631).
 https://doi.org/10.1145/3292500.3330701
 
 Introduces Optuna, a define-by-run HPO framework with efficient pruning
-strategies and versatile architecture for distributed optimization.
+strategies and versatile architecture for distributed optimization. Its
+Algorithm 1, "Pruning algorithm based on Successive Halving", is a variant of
+ASHA and is the only pruner the paper specifies.
+
+It therefore does **not** back median pruning. `"primary"` mirrors Optuna's
+`MedianPruner`, which is a software feature documented in the API reference
+and absent from this paper; the coverage matrix cites the docs for it.
 
 ### Balandat, M., Karrer, B., Jiang, D. R., Daulton, S., Letham, B., Wilson, A. G., & Bakshy, E. (2020)
 
@@ -156,9 +265,17 @@ A tutorial on multiobjective optimization: Fundamentals and evolutionary
 methods. *Natural Computing*, *17*(3), 585--609.
 https://doi.org/10.1007/s11047-018-9685-y
 
-Tutorial on MOO fundamentals: Pareto dominance (Def. 5), non-dominated
-sorting (Eqs. 3--4), complexity bounds (Props. 7, 9). Covers NSGA-II,
-indicator-based, and decomposition-based approaches.
+Tutorial on MOO fundamentals. **Definition 5 (p. 588) is Pareto
+dominance** -- "not worse in each of the objectives and better in at least
+one" -- which is the rule `_non_dominated_sort()` implements. Definition 8
+gives the efficient set and Pareto front. Both sit in Section 3, "Order and
+dominance".
+
+(An earlier version of this entry cited "non-dominated sorting (Eqs. 3--4)"
+and "complexity bounds (Props. 7, 9)". Neither survives the full text:
+Propositions 3--4 and 7--9 belong to the cone-order development, and the
+complexity bound we actually rely on is Deb et al.'s, not this tutorial's.
+Only the Definition 5 locator was correct.)
 
 ### Joe, S., & Kuo, F. Y. (2008)
 
@@ -166,8 +283,12 @@ Constructing Sobol sequences with better two-dimensional projections.
 *SIAM Journal on Scientific Computing*, *30*(5), 2635--2654.
 https://doi.org/10.1137/070709359
 
-Improved direction numbers for Sobol sequences, used by SciPy's
-`scipy.stats.qmc.Sobol` (and thus Optuna's `QMCSampler`).
+Improved direction numbers for Sobol sequences. Verified against the
+SciPy API reference, which cites this paper as its reference [4] for the
+direction numbers used by `scipy.stats.qmc.Sobol` (and thus by Optuna's
+`QMCSampler`). The same page documents the power-of-two property that
+`_maybe_warn_qmc_startup()` warns about: Sobol' points "lose their balance
+properties if one uses a sample size that is not a power of 2".
 
 ### Li, L., Jamieson, K., DeSalvo, G., Rostamizadeh, A., & Talwalkar, A. (2018)
 
@@ -175,8 +296,16 @@ Hyperband: A novel bandit-based approach to hyperparameter optimization.
 *Journal of Machine Learning Research*, *18*(185), 1--52.
 
 Combines random search with adaptive resource allocation via Successive
-Halving. Default eta=3 (Section 3.6). Section 6 suggests Sobol sampling
-as a promising extension.
+Halving. **Algorithm 1 is Hyperband itself**, and takes the reduction factor
+as an input annotated "default eta = 3"; SuccessiveHalving is its inner loop
+(lines 3--9). Section 3.6, "Setting eta", recommends eta of 3 *or 4* in
+practice and notes the theoretically optimal value is e ~= 2.718 -- so the
+default and the recommendation are separate claims with separate locators.
+Section 6 does suggest quasi-random sampling as a promising extension:
+"Quasi-random methods like Sobol or latin hypercube [...] may improve the
+performance of Hyperband by giving better coverage of the search space."
+
+(An earlier version of this entry placed the eta=3 default in Section 3.6.)
 
 ### Linhart, J., Gramfort, A., & Rodrigues, P. L. C. (2023)
 
@@ -185,7 +314,27 @@ inference. In *Advances in Neural Information Processing Systems 36*.
 https://doi.org/10.48550/arXiv.2306.03580
 
 Reference-free local posterior diagnostic using joint samples p(theta, x).
-Implementation: `bayesflow_hpo.validation.c2st.lc2st()`.
+Algorithm 1 trains the classifier on joint-distribution data and derives the
+null by permutation; Algorithm 2 evaluates the test statistic and p-value for
+a given observation. Those two are what
+`bayesflow_hpo.validation.c2st.lc2st()` implements. Algorithms 3--4 are the
+normalizing-flow variant (l-C2ST-NF), which we do not implement.
+
+### Säilynoja, T., Bürkner, P.-C., & Vehtari, A. (2022)
+
+Graphical test for discrete uniformity and its applications in goodness-of-fit
+evaluation and multiple sample comparison. *Statistics and Computing, 32*(2).
+https://doi.org/10.1007/s11222-022-10090-6
+
+Introduces the gamma discrepancy: the probability, under uniform ranks, of
+observing the most extreme point of the empirical rank CDF, together with
+methods for evaluating its null distribution for given `M` and `S`. Modrák et
+al. (2025) attribute the statistic to this paper ("This metric was introduced
+in a paper by Säilynoja et al. (2022)", Section 4.1) and define the log ratio
+against its 5th percentile that BayesFlow's `calibration_log_gamma` reports.
+
+Verified via the OpenAlex API (DOI 10.1007/s11222-022-10090-6; *Statistics and
+Computing*, volume 32, issue 2, 2022).
 
 ### Modrák, M., Moon, A. H., Kim, S., Bürkner, P.-C., Huurre, N., Faltejsková, K., Gelman, A., & Vehtari, A. (2025)
 
@@ -259,10 +408,16 @@ metric is critical; no uniformly best algorithm exists.
 Multi-objective asynchronous successive halving. *arXiv preprint*.
 https://doi.org/10.48550/arxiv.2106.12639
 
-Extends ASHA to multi-objective settings. Algorithm 1: dominance-based
-promotion. Algorithm 2: non-dominated sorting + bottom-fraction pruning.
-Key finding: dominance-based approaches consistently outperform
-scalarization-based ones.
+Extends ASHA to multi-objective settings. **Algorithm 1 is the
+multi-objective selector** (`non_dom_sorting`, `selector_eps_net`,
+`selector_nsga_ii`); **Algorithm 2 is MO-ASHA itself** (`mo_asha`, `get_job`,
+rung promotion), whose header reads "Data: R, r0, s, eta (default eta = 3)".
+Algorithm 2 calls the Algorithm 1 selector as
+`mo_selector(rung k, |rung k| / eta)`. Key finding: dominance-based approaches
+consistently outperform scalarization-based ones.
+
+(An earlier version of this entry had the two algorithms the other way round.
+Corrected against the full text.)
 
 ### Goyal, P., Dollár, P., Girshick, R., Noordhuis, P., Wesolowski, L., Kyrola, A., Tulloch, A., Jia, Y., & He, K. (2017)
 
@@ -312,7 +467,19 @@ Validating Bayesian inference algorithms with simulation-based calibration.
 *arXiv preprint*. https://doi.org/10.48550/arXiv.1804.06788
 
 Introduces SBC: verify that posterior rank statistics are uniformly
-distributed. Backs `sbc_tests.py` and the SBC rank-based coverage metrics.
+distributed. **Theorem 1** (Section 4.1, p. 6) is the result the code relies
+on: given exact posterior samples, "the rank statistic of any one-dimensional
+random variable over theta is uniformly distributed over the integers [0, L]".
+Algorithm 1 is the SBC histogram procedure. Backs `sbc_tests.py` and the SBC
+rank-based coverage metrics.
+
+Note the direction of the implication. The theorem says correctness implies
+uniformity, not the converse, and the paper is explicit that SBC "offers no
+guarantee that the posterior will cover the ground truth for any single
+observation". Uniform ranks are therefore necessary, not sufficient.
+
+(An earlier version of this entry, and three code comments, cited "Theorem 2"
+and stated the equivalence as "iff".)
 
 ### Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones, L., Gomez, A. N., Kaiser, L., & Polosukhin, I. (2017)
 
@@ -326,6 +493,25 @@ schedule used by `open_ended` training mode. OpenAlex candidate
 therefore not used as the bibliographic record. The cited 2017 arXiv DOI,
 authors, and Section 5.3 were verified directly against the full text because
 OpenAlex did not return a correctly mapped work for that DOI.
+
+**Optuna developers. (2025). `optuna.trial.Trial.report` and
+`optuna.pruners.MedianPruner`.** Optuna 5.0.0 API reference.
+https://optuna.readthedocs.io/en/v5.0.0/reference/generated/optuna.trial.Trial.report.html
+and
+https://optuna.readthedocs.io/en/v5.0.0/reference/generated/optuna.pruners.MedianPruner.html
+
+Two claims, both load-bearing.
+
+`Trial.report()` is unavailable for multi-objective studies, which is the
+entire reason `optimization/pruning_strategies.py` exists. Verified by
+execution on the installed 5.0.0, not from the docs alone: on a study created
+with two directions, `trial.report(0.5, 1)` raises `NotImplementedError`
+("Trial.report is not supported for multi-objective optimization"), and
+`trial.should_prune()` raises the same. The module docstrings attribute this
+to upstream issue #3450; the *behaviour* is what is verified here.
+
+`MedianPruner` is the Optuna feature that the `"primary"` strategy mirrors.
+It is documented here and not in Akiba et al. (2019).
 
 ### Specification and library documentation
 
@@ -344,28 +530,29 @@ directly by construction, since the runtime behaviour is the load-bearing part
 of the claim.
 
 **Optuna developers. (2025). `optuna.distributions.CategoricalDistribution`.**
-Optuna 4.9.0 API reference.
-https://optuna.readthedocs.io/en/v4.9.0/reference/generated/optuna.distributions.CategoricalDistribution.html
+Optuna 5.0.0 API reference.
+https://optuna.readthedocs.io/en/v5.0.0/reference/generated/optuna.distributions.CategoricalDistribution.html
 
 Backs the 0.2.0 changelog's warning that `FlowMatchingSpace.quality()` breaks
 resume for a 0.1.0 study. `choices` is stored as an ordered tuple and forms
 part of the distribution's identity, so reordering it makes the stored and
 requested distributions unequal and Optuna refuses the parameter as a dynamic
-value space. Verified against the installed 4.9.0 rather than from the
+value space. Verified against the installed release rather than from the
 documentation alone: `CategoricalDistribution([False, True]) !=
 CategoricalDistribution([True, False])`, with `.choices` round-tripping as
-`(False, True)` and `(True, False)` respectively.
+`(False, True)` and `(True, False)` respectively. Re-verified on 5.0.0 after
+the dependency floor moved; both still hold.
 
 **Optuna developers. (2025). `optuna.study.create_study` and
-`optuna.trial.FrozenTrial`.** Optuna 4.9.0 API reference.
-https://optuna.readthedocs.io/en/v4.9.0/reference/generated/optuna.study.create_study.html
+`optuna.trial.FrozenTrial`.** Optuna 5.0.0 API reference.
+https://optuna.readthedocs.io/en/v5.0.0/reference/generated/optuna.study.create_study.html
 and
-https://optuna.readthedocs.io/en/v4.9.0/reference/generated/optuna.trial.FrozenTrial.html
+https://optuna.readthedocs.io/en/v5.0.0/reference/generated/optuna.trial.FrozenTrial.html
 
 Version-pinned deliberately: the documentation root serves whichever release
-is current, so a claim checked against 4.9.0 would silently come to point at
-pages that may no longer say it. 4.9.0 is the version installed and verified
-against here.
+is current, so a claim checked against one release would silently come to
+point at pages that may no longer say it. 5.0.0 is the version installed and
+verified against here.
 
 `directions` is a sequence and `FrozenTrial.values` is indexed positionally
 against it, so objective columns are matched by position and never by name.
