@@ -162,6 +162,12 @@ def optimize(
     qmc_startup_trials: int = 0,
     checkpoint_pool: CheckpointPool | None = None,
     show_progress_bar: bool = True,
+    # Appended after show_progress_bar and made keyword-only on purpose.
+    # optimize() has no keyword-only separator, so every parameter above is
+    # positionally bindable and inserting into the middle would silently
+    # rebind a caller's trailing positional arguments.
+    *,
+    sampler_n_startup_trials: int | None = None,
 ) -> optuna.Study:
     """Run HPO with a high-level convenience API.
 
@@ -381,6 +387,14 @@ def optimize(
         space-filling coverage than random startup.  Only non-rejected
         completions count.  Default 0 (disabled).  See
         :func:`~bayesflow_hpo.create_study` for details.
+    sampler_n_startup_trials
+        Override how many trials a string sampler preset draws before
+        its model takes over.  ``None`` (default) keeps the preset
+        value -- 25 for ``"tpe"``.  Optuna counts the study's COMPLETE
+        and PRUNED trials here, not the sampler's own draws, so a
+        ``qmc_startup_trials`` warm-up already counts toward it.
+        Ignored when *sampler* is a sampler instance.  See
+        :func:`~bayesflow_hpo.create_study` for details.
     checkpoint_pool
         Optional :class:`CheckpointPool` for persisting the best
         trial weights.
@@ -442,6 +456,20 @@ def optimize(
     if report_frequency < 1:
         raise ValueError(
             f"report_frequency must be >= 1, got {report_frequency}."
+        )
+    # Startup counts are validated HERE, not only where they are consumed.
+    # create_study() checks them too, but by then _create_and_run_study() has
+    # already called optuna.delete_study() for a non-resumed run: a malformed
+    # option would destroy the previous study and its trials before failing,
+    # and leave no replacement behind.
+    if qmc_startup_trials < 0:
+        raise ValueError(
+            f"qmc_startup_trials must be >= 0, got {qmc_startup_trials}"
+        )
+    if sampler_n_startup_trials is not None and sampler_n_startup_trials < 0:
+        raise ValueError(
+            "sampler_n_startup_trials must be >= 0, "
+            f"got {sampler_n_startup_trials}"
         )
 
     # Step 1: Infer keys
@@ -543,6 +571,7 @@ def optimize(
         warm_start_from=warm_start_from,
         warm_start_top_k=warm_start_top_k,
         qmc_startup_trials=qmc_startup_trials,
+        sampler_n_startup_trials=sampler_n_startup_trials,
         n_trials=n_trials,
         max_total_trials=max_total_trials,
         show_progress_bar=show_progress_bar,
@@ -994,6 +1023,7 @@ def _create_and_run_study(
     warm_start_from: Any | None,
     warm_start_top_k: int,
     qmc_startup_trials: int = 0,
+    sampler_n_startup_trials: int | None = None,
     n_trials: int,
     max_total_trials: int | None,
     show_progress_bar: bool,
@@ -1021,6 +1051,7 @@ def _create_and_run_study(
         warm_start_from=warm_start_from,
         warm_start_top_k=warm_start_top_k,
         qmc_startup_trials=qmc_startup_trials,
+        sampler_n_startup_trials=sampler_n_startup_trials,
     )
     _guard_resumed_study(
         study, objective.config.objective_metrics, metric_names

@@ -2,6 +2,46 @@
 
 ## Unreleased
 
+### Added
+
+- **`sampler_n_startup_trials` on `optimize()` and `create_study()`.** The
+  `"tpe"` preset hardcoded `n_startup_trials=25` — 2.5x Optuna's own default of
+  10 — with no way to change it, so a study smaller than ~40 trials spent most
+  of its budget on uniform-random draws and reached the TPE model only at the
+  very end. The new parameter overrides the count for the presets that take one
+  (`"tpe"`, `"gp"`, `"botorch"`); `None` keeps the preset value, so existing
+  behaviour is unchanged.
+
+  This matters most alongside `qmc_startup_trials`. Optuna counts the study's
+  `COMPLETE` and `PRUNED` trials toward the startup quota, not the sampler's own
+  draws, so Sobol warm-up trials already count — but with the preset's 25 the
+  model still waited for 25 trials regardless. Setting
+  `sampler_n_startup_trials` at or below `qmc_startup_trials` hands over to the
+  model exactly when the Sobol phase ends, which is what the warm-up was for.
+  `QMCWarmupSampler.n_startup_trials` still reports
+  `max(qmc_quota, main_startup)`, so pruning alignment does not inherit the
+  lowered number.
+
+  The parameter is keyword-only and appended after `show_progress_bar`:
+  `optimize()` has no keyword-only separator, so inserting it among the
+  existing parameters would have silently rebound the trailing positional
+  arguments of any caller passing `checkpoint_pool` or `show_progress_bar`
+  positionally.
+
+  Both startup counts are now validated at the top of `optimize()` rather than
+  only where they are consumed. `create_study()` checked them, but by then a
+  non-resumed run had already called `optuna.delete_study()` — so a negative
+  value destroyed the previous study and its trials before raising, leaving no
+  replacement. This also fixes that pre-existing hole for `qmc_startup_trials`.
+
+  The override is ignored, with a warning, when `sampler` is a sampler instance
+  rather than a preset name — the same restriction `metric_constraints_soft`
+  already documents, for the same reason.
+
+  Bergstra, J., Bardenet, R., Bengio, Y., & Kégl, B. (2011). Algorithms for
+  hyper-parameter optimization. *Advances in Neural Information Processing
+  Systems, 24*, 2546–2554.
+
 ### Fixed
 
 - **`check_pipeline` no longer rejects `log_gamma`.** The pre-flight refused
