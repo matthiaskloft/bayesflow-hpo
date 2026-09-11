@@ -137,11 +137,18 @@ Completed all three sub-tasks for documentation-backed implementation.
 All 16 reference summaries exist with extensive method details, algorithm
 citations, and implementation notes.
 
+> **Superseded 2026-09-11.** "Exist" was the only claim verified. The
+> 2026-09-11 audit found several of these summaries carry wrong locators
+> and at least one citation to a work that does not appear to exist; the
+> directory is now marked unreliable. See the "Audit status" section of
+> [`references.md`](references.md).
+
 #### Sub-task 2: Docstring citations
 
 Added References sections to module docstrings:
-- `validation/sbc_tests.py` — Talts et al. (2018), Theorem 2
-- `validation/registry.py` — Talts et al. (2018), Section 4
+- `validation/sbc_tests.py` — Talts et al. (2018), ~~Theorem 2~~ Theorem 1
+  (corrected 2026-09-11)
+- `validation/registry.py` — Talts et al. (2018), ~~Section 4~~ Section 4.1
 - `optimization/pruning_strategies.py` — Schmucker et al. (2021), Emmerich & Deutz (2018), Deb et al. (2002)
 - `optimization/study.py` — Sobol' (1967), Joe & Kuo (2008)
 - `results/extraction.py` — Deb et al. (2002)
