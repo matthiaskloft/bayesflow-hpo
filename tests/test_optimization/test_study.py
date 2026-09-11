@@ -343,6 +343,24 @@ class TestSamplerNStartupTrialsOverride:
         )
         assert _resolve_n_startup_trials(study.sampler) == 8
 
+    def test_the_override_is_keyword_only(self):
+        """Nothing may be inserted in front of a positionally bindable arg.
+
+        create_study() has no keyword-only separator, so this mirrors the
+        same guard optimize() carries.
+        """
+        import inspect
+
+        params = inspect.signature(create_study).parameters
+        assert (
+            params["sampler_n_startup_trials"].kind
+            is inspect.Parameter.KEYWORD_ONLY
+        )
+        assert (
+            params["qmc_startup_trials"].kind
+            is inspect.Parameter.POSITIONAL_OR_KEYWORD
+        )
+
     def test_negative_is_rejected(self):
         with pytest.raises(ValueError, match="must be >= 0"):
             create_study(storage=None, sampler_n_startup_trials=-1)

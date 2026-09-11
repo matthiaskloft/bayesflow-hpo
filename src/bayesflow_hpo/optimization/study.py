@@ -467,6 +467,10 @@ def create_study(
     budget_aware: bool = True,
     metric_constraints_soft: list[MetricConstraintSpec] | None = None,
     qmc_startup_trials: int = 0,
+    # Keyword-only, like its counterpart on optimize(): create_study() has no
+    # keyword-only separator either, so a parameter that can be bound
+    # positionally is a parameter nothing may ever be inserted in front of.
+    *,
     sampler_n_startup_trials: int | None = None,
 ) -> optuna.Study:
     """Create or resume an Optuna study.
