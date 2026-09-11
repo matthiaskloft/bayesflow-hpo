@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **`check_pipeline` no longer rejects `log_gamma`.** The pre-flight refused
+  any non-finite objective value, while `METRIC_DIRECTIONS` gives `log_gamma`
+  `worst_raw=-math.inf` deliberately — so the one metric the table declares
+  unbounded below could not pass the pre-flight. Since the pre-flight validates
+  at `n_posterior_samples=2` on a barely-trained model, where the gamma
+  discrepancy underflows to `0.0` and `log_gamma` is legitimately `-inf`,
+  `run_pipeline_check=True` and `log_gamma` could not be combined at all.
+
+  An infinity is now refused only for a metric whose registered direction calls
+  a finite value its worst; an unregistered metric still refuses one, and `NaN`
+  is refused everywhere. The failure scaled *with* validation size — small sets
+  lack the ranks to drive gamma to zero — so it passed on toy configurations
+  and failed on real ones.
+  ([#84](https://github.com/matthiaskloft/bayesflow-hpo/issues/84))
+
 ## 0.2.0
 
 Not a patch release. Re-running an unchanged configuration can produce

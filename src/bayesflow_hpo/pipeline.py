@@ -18,7 +18,7 @@ from bayesflow_hpo.builders.workflow import (
     _make_cosine_decay_optimizer,
     build_continuous_approximator,
 )
-from bayesflow_hpo.objectives import canonical_summary
+from bayesflow_hpo.objectives import _direction_for, canonical_summary
 from bayesflow_hpo.optimization.objective import default_train_fn, default_validate_fn
 from bayesflow_hpo.search_spaces.composite import CompositeSearchSpace
 from bayesflow_hpo.types import BuildApproximatorFn, TrainFn, ValidateFn
@@ -29,6 +29,28 @@ from bayesflow_hpo.validation.registry import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _has_finite_worst_case(key: str) -> bool:
+    """Whether *key*'s registered direction calls a finite value its worst.
+
+    ``True`` for an unregistered metric: nothing declares that an infinity is
+    meaningful for it, so the pre-flight keeps refusing one. Resolution goes
+    through :func:`~bayesflow_hpo.objectives._direction_for` rather than
+    :data:`~bayesflow_hpo.objectives.METRIC_DIRECTIONS` directly, so a metric
+    whose direction was removed via the legacy ``HIGHER_IS_BETTER`` set is
+    treated as unregistered here too.
+
+    *key* is canonicalized here rather than assumed canonical. Callers in this
+    module have already canonicalized, and the operation is idempotent, so this
+    costs nothing -- but it keeps the raw/canonical distinction that
+    :class:`~bayesflow_hpo.types.CanonicalMetricName` exists to enforce from
+    depending on where the helper is called from.
+    """
+    direction = _direction_for(canonical_metric_name(key))
+    if direction is None:
+        return True
+    return math.isfinite(direction.worst_raw)
 
 
 class PipelineError(Exception):
@@ -371,7 +393,30 @@ def check_pipeline(
 
     for key in objective_metrics:
         val = result[key]
-        if not isinstance(val, (int, float)) or not math.isfinite(val):
+        if not isinstance(val, (int, float)) or math.isnan(val):
+            raise PipelineError(
+                f"validate_fn returned non-finite value for {key!r}: {val}"
+            )
+        # An infinity is refused only for a metric whose registered direction
+        # calls a finite value its worst. For ``log_gamma`` the table says the
+        # opposite -- ``worst_raw=-math.inf``, on the reasoning that the metric
+        # is unbounded below and no finite constant is defensibly its worst --
+        # so refusing -inf here rejected the very value the objective is built
+        # to represent.
+        #
+        # It rejected it exactly where the pre-flight is meant to help. This
+        # runs at ``n_posterior_samples=2`` on a barely-trained model, where
+        # the SBC ranks are maximally non-uniform, ``gamma_discrepancy``
+        # returns 0.0 and ``log(0)`` is -inf: not a broken hook, but the
+        # correct value of a correct metric on a deliberately degenerate
+        # input. And because the underflow needs enough ranks for the binomial
+        # tails to reach zero, it surfaced only on realistically sized
+        # validation sets -- pre-flight passed on toy configurations and
+        # failed on real ones.
+        #
+        # NaN stays refused above: no metric declares it, and it is the
+        # signature of an arithmetic mistake rather than of a bad model.
+        if math.isinf(val) and _has_finite_worst_case(key):
             raise PipelineError(
                 f"validate_fn returned non-finite value for {key!r}: {val}"
             )

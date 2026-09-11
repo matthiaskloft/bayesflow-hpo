@@ -113,6 +113,72 @@ def test_check_pipeline_validate_fn_non_finite_raises():
         )
 
 
+def test_check_pipeline_accepts_an_infinity_a_metric_declares_as_its_worst():
+    """-inf passes for log_gamma, whose registered worst_raw is -inf.
+
+    The pre-flight validates at ``n_posterior_samples=2`` on a barely-trained
+    model, where the SBC ranks are maximally non-uniform, the gamma discrepancy
+    underflows to 0.0 and log_gamma is legitimately -inf. Refusing it made
+    ``run_pipeline_check=True`` unusable with log_gamma, and did so only on
+    realistically sized validation sets -- small ones lack the ranks to drive
+    gamma to zero, so the pre-flight passed on toy configurations.
+    """
+
+    def neg_inf_validate(approx, vd, n):
+        return {"log_gamma": float("-inf")}
+
+    check_pipeline(
+        simulator=_FakeSimulator(),
+        adapter=canonical_adapter(),
+        search_space=_FakeSearchSpace(),
+        build_approximator_fn=lambda hp: _FakeApproximator(),
+        train_fn=lambda approx, sim, hp, cb: None,
+        validate_fn=neg_inf_validate,
+        objective_metrics=["log_gamma"],
+    )
+
+
+def test_check_pipeline_still_refuses_an_infinity_for_a_bounded_metric():
+    """calibration_error declares worst_raw=1.0, so an infinity is a defect."""
+
+    def inf_validate(approx, vd, n):
+        return {"calibration_error": float("inf")}
+
+    with pytest.raises(PipelineError, match="non-finite"):
+        check_pipeline(
+            simulator=_FakeSimulator(),
+            adapter=canonical_adapter(),
+            search_space=_FakeSearchSpace(),
+            build_approximator_fn=lambda hp: _FakeApproximator(),
+            train_fn=lambda approx, sim, hp, cb: None,
+            validate_fn=inf_validate,
+            objective_metrics=["calibration_error"],
+        )
+
+
+def test_check_pipeline_still_refuses_nan_for_an_unbounded_metric():
+    """NaN is refused even where an infinity is allowed.
+
+    No metric declares NaN meaningful; it is the signature of an arithmetic
+    mistake rather than of a bad model, so widening the rule for infinities
+    must not widen it for NaN.
+    """
+
+    def nan_validate(approx, vd, n):
+        return {"log_gamma": float("nan")}
+
+    with pytest.raises(PipelineError, match="non-finite"):
+        check_pipeline(
+            simulator=_FakeSimulator(),
+            adapter=canonical_adapter(),
+            search_space=_FakeSearchSpace(),
+            build_approximator_fn=lambda hp: _FakeApproximator(),
+            train_fn=lambda approx, sim, hp, cb: None,
+            validate_fn=nan_validate,
+            objective_metrics=["log_gamma"],
+        )
+
+
 def test_check_pipeline_valid_custom_hooks():
     """No error when all custom hooks work correctly."""
 
