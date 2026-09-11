@@ -1,5 +1,35 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **`check_pipeline` no longer rejects `log_gamma`.** The pre-flight refused
+  any non-finite objective value, while `METRIC_DIRECTIONS` gives `log_gamma`
+  `worst_raw=-math.inf` deliberately — so the one metric the table declares
+  unbounded below could not pass the pre-flight. Since the pre-flight validates
+  at `n_posterior_samples=2` on a barely-trained model, where the gamma
+  discrepancy underflows to `0.0` and `log_gamma` is legitimately `-inf`,
+  `run_pipeline_check=True` and `log_gamma` could not be combined at all.
+
+  An infinity is now accepted only where it **matches** the metric's registered
+  `worst_raw` exactly — so `-inf` passes for `log_gamma` while `+inf` does not,
+  since `log(gamma / null_quantile)` with `gamma` a probability is unbounded
+  below and not above. An unregistered metric still refuses any infinity, and
+  `NaN` is refused everywhere. The failure scaled *with* validation size — small
+  sets lack the ranks to drive gamma to zero — so it passed on toy
+  configurations and failed on real ones.
+  ([#84](https://github.com/matthiaskloft/bayesflow-hpo/issues/84))
+
+  The gamma discrepancy is Equation 7 of Modrák, M., Moon, A. H., Kim, S.,
+  Bürkner, P., Huurre, N., Faltejsková, K., Gelman, A., & Vehtari, A. (2025).
+  Simulation-based calibration checking for Bayesian computation: The choice of
+  test quantities shapes sensitivity. *Bayesian Analysis, 20*(2), 461–488.
+  https://doi.org/10.1214/23-BA1404 — the probability, under uniform ranks, of
+  the most extreme point of the observed rank ECDF. BayesFlow's
+  `calibration_log_gamma` reports `log(gamma / null_quantile)` against that
+  paper, so ranks extreme enough to drive `gamma` to `0.0` give `-inf`.
+
 ## 0.2.0
 
 Not a patch release. Re-running an unchanged configuration can produce

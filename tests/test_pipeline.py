@@ -113,6 +113,123 @@ def test_check_pipeline_validate_fn_non_finite_raises():
         )
 
 
+def test_check_pipeline_accepts_an_infinity_a_metric_declares_as_its_worst() -> None:
+    """-inf passes for log_gamma, whose registered worst_raw is -inf.
+
+    The pre-flight validates at ``n_posterior_samples=2`` on a barely-trained
+    model, where the SBC ranks are maximally non-uniform, the gamma discrepancy
+    underflows to 0.0 and log_gamma is legitimately -inf. Refusing it made
+    ``run_pipeline_check=True`` unusable with log_gamma, and did so only on
+    realistically sized validation sets -- small ones lack the ranks to drive
+    gamma to zero, so the pre-flight passed on toy configurations.
+    """
+
+    def neg_inf_validate(approx: Any, vd: Any, n: int) -> dict[str, float]:
+        return {"log_gamma": float("-inf")}
+
+    check_pipeline(
+        simulator=_FakeSimulator(),
+        adapter=canonical_adapter(),
+        search_space=_FakeSearchSpace(),
+        build_approximator_fn=lambda hp: _FakeApproximator(),
+        train_fn=lambda approx, sim, hp, cb: None,
+        validate_fn=neg_inf_validate,
+        objective_metrics=["log_gamma"],
+    )
+
+
+def test_check_pipeline_still_refuses_an_infinity_for_a_bounded_metric() -> None:
+    """calibration_error declares worst_raw=1.0, so an infinity is a defect."""
+
+    def inf_validate(approx: Any, vd: Any, n: int) -> dict[str, float]:
+        return {"calibration_error": float("inf")}
+
+    with pytest.raises(PipelineError, match="non-finite"):
+        check_pipeline(
+            simulator=_FakeSimulator(),
+            adapter=canonical_adapter(),
+            search_space=_FakeSearchSpace(),
+            build_approximator_fn=lambda hp: _FakeApproximator(),
+            train_fn=lambda approx, sim, hp, cb: None,
+            validate_fn=inf_validate,
+            objective_metrics=["calibration_error"],
+        )
+
+
+@pytest.mark.parametrize(
+    "metric,value,accepted",
+    [
+        # log_gamma is unbounded BELOW: worst_raw=-inf.
+        ("log_gamma", float("-inf"), True),
+        ("log_gamma", float("inf"), False),
+        # sbc_chi2 is unbounded ABOVE: worst_raw=+inf. The mirror image, and
+        # the case that shows the rule is about the declared value rather than
+        # about infinities in general -- a chi-squared statistic cannot be
+        # negative, so -inf is an invalid hook result.
+        ("sbc_chi2", float("inf"), True),
+        ("sbc_chi2", float("-inf"), False),
+        # An unregistered metric declares nothing, so neither sign passes.
+        ("pipeline_unregistered_probe", float("inf"), False),
+        ("pipeline_unregistered_probe", float("-inf"), False),
+    ],
+)
+def test_check_pipeline_infinity_rule_is_per_metric_and_signed(
+    metric: str, value: float, accepted: bool
+) -> None:
+    """Only the infinity a metric registers as its worst case passes.
+
+    Both extractors read these values directly -- sbc_chi2 passes through and
+    log_gamma is negated -- so a wrong-sign infinity maps to -inf in minimize
+    space, i.e. to the *best* possible score rather than the worst.
+    """
+    # The probe name is deliberately NOT registered: `check_pipeline` accepts
+    # unknown objective names, since a custom `validate_fn` may return values
+    # the built-in pipeline does not know. Registering one here would leak a
+    # description-less entry into the global registry and break
+    # `test_describe_metrics_builtins_have_descriptions`.
+    def validate(approx: Any, vd: Any, n: int) -> dict[str, float]:
+        return {metric: value}
+
+    kwargs: dict[str, Any] = dict(
+        simulator=_FakeSimulator(),
+        adapter=canonical_adapter(),
+        search_space=_FakeSearchSpace(),
+        build_approximator_fn=lambda hp: _FakeApproximator(),
+        train_fn=lambda approx, sim, hp, cb: None,
+        validate_fn=validate,
+        objective_metrics=[metric],
+    )
+
+    if accepted:
+        check_pipeline(**kwargs)
+    else:
+        with pytest.raises(PipelineError, match="non-finite"):
+            check_pipeline(**kwargs)
+
+
+def test_check_pipeline_still_refuses_nan_for_an_unbounded_metric() -> None:
+    """NaN is refused even where an infinity is allowed.
+
+    No metric declares NaN meaningful; it is the signature of an arithmetic
+    mistake rather than of a bad model, so widening the rule for infinities
+    must not widen it for NaN.
+    """
+
+    def nan_validate(approx: Any, vd: Any, n: int) -> dict[str, float]:
+        return {"log_gamma": float("nan")}
+
+    with pytest.raises(PipelineError, match="non-finite"):
+        check_pipeline(
+            simulator=_FakeSimulator(),
+            adapter=canonical_adapter(),
+            search_space=_FakeSearchSpace(),
+            build_approximator_fn=lambda hp: _FakeApproximator(),
+            train_fn=lambda approx, sim, hp, cb: None,
+            validate_fn=nan_validate,
+            objective_metrics=["log_gamma"],
+        )
+
+
 def test_check_pipeline_valid_custom_hooks():
     """No error when all custom hooks work correctly."""
 
