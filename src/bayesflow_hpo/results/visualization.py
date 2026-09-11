@@ -582,6 +582,17 @@ def plot_param_importance(
             ax.set_title(obj_cols[obj_idx])
             continue
 
+        # An empty result is a failure too, not a successful plot of nothing.
+        # Optuna raised here for a study it could not evaluate up to 4.x; from
+        # 5.0 it returns an empty mapping instead, which left `all_failed`
+        # cleared, drew an empty bar chart and returned a figure where the
+        # contract says `None`.
+        if not importance:
+            ax.text(0.5, 0.5, "Importance unavailable",
+                    ha="center", va="center", transform=ax.transAxes)
+            ax.set_title(obj_cols[obj_idx])
+            continue
+
         all_failed = False
         params = list(importance.keys())[:top_k]
         values = [importance[p] for p in params]
