@@ -10,6 +10,17 @@ The helper functions these exercise already have unit coverage in
 ``tests/test_optimization/test_metric_name_inventory.py``.  What was missing
 is evidence that a real ``optimize()`` run reaches them -- both defects were
 integration failures between individually well-tested components.
+
+Sources for the contracts asserted here, all recorded in
+``docs/references.md``. The ``log_gamma`` direction is BayesFlow's:
+``calibration_log_gamma`` reports ``log(gamma / null_quantile)``, the gamma
+discrepancy of Modrak et al. (2025), *Bayesian Analysis* 20(2), 461-488,
+Equation 7, with ``log_gamma < 0`` rejecting rank uniformity -- so larger is
+better and its minimize-form is negation. The ranking and Pareto claims are
+Optuna's (Akiba et al., 2019): every objective whose direction is ``minimize``
+is minimized, and a trial is non-dominated when no other trial is at least as
+good on every objective and strictly better on one -- which is why the
+selection tests hold the cost coordinate equal.
 """
 
 from __future__ import annotations
@@ -21,6 +32,7 @@ import pytest
 
 from bayesflow_hpo import objectives as objectives_module
 from bayesflow_hpo.objectives import register_metric_direction
+from bayesflow_hpo.pipeline import PipelineError
 
 from .conftest import (
     ATTR_ROUNDING_TOL,
@@ -270,21 +282,30 @@ def test_optuna_study_metric_names_record_the_schema(run_study):
     assert len(study.metric_names) == len(study.directions)
 
 
-def test_unregistered_objective_metric_is_refused(run_study):
+def test_unregistered_objective_metric_is_refused(run_study, training_spy):
     """A name no metric produces fails in pre-flight, not silently.
 
-    ``check_pipeline()`` runs before any training, so the failure is cheap and
-    the message names the missing key.
+    ``check_pipeline()`` trains one step and then validates
+    (``pipeline.py:362``, ``:369``), so the failure costs exactly one training
+    call and no optimization trial ever starts. Asserting the call count is
+    what distinguishes "pre-flight caught it" from "the run failed somewhere
+    later for some other reason" -- a bare ``pytest.raises(Exception)`` would
+    accept either.
 
     Must fail if: pre-flight stops checking that the requested objectives are
-    actually produced.
+    actually produced, or the rejection moves after the trial loop begins.
     """
-    with pytest.raises(Exception) as excinfo:
-        run_study(n_trials=1, objective_metrics=["not_a_real_metric"])
+    with pytest.raises(PipelineError, match="not_a_real_metric"):
+        run_study(
+            n_trials=1,
+            objective_metrics=["not_a_real_metric"],
+            train_fn=training_spy,
+        )
 
-    message = str(excinfo.value)
-    assert "not_a_real_metric" in message, (
-        f"the error does not name the offending metric: {message}"
+    assert training_spy.n_calls == 1, (
+        f"expected exactly the pre-flight training call, got "
+        f"{training_spy.n_calls}; an optimization trial trained despite the "
+        f"pre-flight rejection"
     )
 
 

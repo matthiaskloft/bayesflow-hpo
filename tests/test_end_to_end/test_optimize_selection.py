@@ -26,6 +26,17 @@ assertion passes even with the metric direction inverted.  Every test here uses
 ``cost_metric="param_count"`` with a fully pinned architecture, so both trials
 carry an identical cost coordinate and selection is decided by the metric
 alone.
+
+Sources for the contracts asserted here, all recorded in
+``docs/references.md``. The ``log_gamma`` direction is BayesFlow's:
+``calibration_log_gamma`` reports ``log(gamma / null_quantile)``, the gamma
+discrepancy of Modrak et al. (2025), *Bayesian Analysis* 20(2), 461-488,
+Equation 7, with ``log_gamma < 0`` rejecting rank uniformity -- so larger is
+better and its minimize-form is negation. The ranking and Pareto claims are
+Optuna's (Akiba et al., 2019): every objective whose direction is ``minimize``
+is minimized, and a trial is non-dominated when no other trial is at least as
+good on every objective and strictly better on one -- which is why the
+selection tests hold the cost coordinate equal.
 """
 
 from __future__ import annotations
@@ -34,6 +45,8 @@ import math
 from typing import Any
 
 import pytest
+
+from bayesflow_hpo.pipeline import PipelineError
 
 from .conftest import assert_no_failure_path, assert_trials_succeeded
 
@@ -282,7 +295,7 @@ def test_non_finite_hook_response_is_refused_in_preflight(run_study):
         responses=[{"log_gamma": 1.0}],
     )
 
-    with pytest.raises(Exception) as excinfo:
+    with pytest.raises(PipelineError, match="log_gamma"):
         run_study(
             n_trials=1,
             objective_metrics=["log_gamma"],
@@ -293,4 +306,3 @@ def test_non_finite_hook_response_is_refused_in_preflight(run_study):
     assert validator.n_calls == 1, (
         "the run continued past a failed pre-flight validation"
     )
-    assert "log_gamma" in str(excinfo.value)

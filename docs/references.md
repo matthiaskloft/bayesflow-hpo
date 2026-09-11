@@ -12,6 +12,8 @@ Feature implementations and their backing references.
 | Feature | Module | Reference |
 |---------|--------|-----------|
 | Optuna framework | `optimization/study.py` | Akiba et al. (2019) |
+| End-to-end objective ranking | `tests/test_end_to_end/` | Akiba et al. (2019) |
+| End-to-end `log_gamma` direction | `tests/test_end_to_end/` | Modrak et al. (2025), Eq. 7 |
 | Objective column ordering | `objectives.py` | Optuna 4.9.0 docs |
 | Categorical choice-order identity | `search_spaces/base.py` | Optuna 4.9.0 docs |
 | `CanonicalMetricName` type | `validation/registry.py` | PEP 484 |
