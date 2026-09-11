@@ -32,13 +32,21 @@
 
 ### Changed
 
-- **`optuna` is pinned to `==5.0.0`.** It was `>=4.0.0`, so a local
+- **`optuna` now requires `>=5.0.0,<6.0.0`.** It was `>=4.0.0`, so a local
   environment on 4.9.0 and a fresh CI install on 5.0.0 ran different code —
   and optuna 5.0 already changed behaviour this package depends on
-  (`get_param_importances` now returns an empty mapping where it used to
-  raise). Measurements taken locally were therefore not measurements of what
-  CI runs. An exact pin makes the two agree; widen it deliberately after
-  testing against a new release rather than picking one up implicitly.
+  (`get_param_importances` returns an empty mapping where it used to raise).
+  Measurements taken locally were therefore not measurements of what CI runs.
+
+  The floor is 5.0.0 because that fix is not backward-compatible with the
+  4.x behaviour it replaces. The range stays a range so that installing
+  `bayesflow-hpo` alongside other optuna-dependent packages does not force a
+  resolver conflict; the single version CI actually tests is pinned exactly in
+  `.github/ci-constraints.txt`. To reproduce a CI environment locally:
+
+  ```bash
+  pip install -e ".[dev]" -c .github/ci-constraints.txt
+  ```
 
 ### Testing
 
