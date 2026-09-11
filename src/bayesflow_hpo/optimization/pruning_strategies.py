@@ -11,10 +11,12 @@ Four strategies are available via ``pruning_strategy`` in ``optimize()``:
 - ``"none"`` — disable intermediate pruning entirely (no callback created).
 - ``"dominance"`` — per-objective normalized median check (AND rule).
   Prunes only if the trial is worse than the median on ALL objectives.
-  Simplified adaptation of MO-ASHA's dominance-based promotion
-  (Schmucker et al., 2021, Algorithm 1).
-- ``"mo-sha"`` — non-dominated sorting at each step; prunes trials in
-  the bottom fraction per MO-ASHA Algorithm 2 (Schmucker et al., 2021).
+  Simplified adaptation of the dominance-based selection in MO-ASHA's
+  Algorithm 1 selector (Schmucker et al., 2021); the median rule itself is
+  ours, not the paper's.
+- ``"mo-sha"`` — non-dominated sorting at each step; prunes trials in the
+  bottom fraction. The rung structure is MO-ASHA Algorithm 2 and the sorting
+  is its Algorithm 1 selector (Schmucker et al., 2021).
 - ``"primary"`` — single-metric median pruning on a user-chosen
   objective, equivalent to Optuna's MedianPruner (Akiba et al., 2019).
 
@@ -118,7 +120,10 @@ def should_prune_dominance(
     norm_current = (current - mins) / safe_ranges
     medians = np.median(norm_ref, axis=0)
 
-    # Schmucker et al. (2021), Algorithm 1, per-objective median AND rule
+    # Per-objective median AND rule. This is OUR simplification, not the
+    # paper's: Schmucker et al. (2021) Algorithm 1 is the selector
+    # (non-dominated sorting, eps-net, NSGA-II crowding) and states no
+    # median rule. Only the dominance-based selection idea is theirs.
     return bool(np.all(norm_current > medians))
 
 

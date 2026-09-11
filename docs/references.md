@@ -3,6 +3,41 @@
 Checked against the OpenAlex API, with version exceptions documented below.
 APA 7 format.
 
+## Audit status (2026-09-11)
+
+Prompted by three inherited, unchecked citations found during PR #86, two of
+which were wrong. This records what has since been verified, by what method,
+and — importantly — what has **not**.
+
+**Verified, and corrected:**
+
+| Claim | Was | Is |
+|---|---|---|
+| Schmucker et al. (2021) algorithm numbers | "Alg. 1: dominance-based promotion, Alg. 2: non-dominated sorting" | Reversed. Alg. 1 is the selector (non-dominated sorting), Alg. 2 is MO-ASHA |
+| Daulton et al. (2021) locator | "Section 3.2, Equation 7" | Sections 5.1-5.2, equations (2)-(3) |
+| `pruning_strategies.py` median rule | "Schmucker Alg. 1, per-objective median AND rule" | Alg. 1 states no median rule; the rule is ours |
+| gamma discrepancy attribution | Modrák et al. (2025), "Equation 7" | Säilynoja et al. (2022); Modrák et al. adopt it in Sec. 4.1, unnumbered display |
+| Optuna API entries | stamped 4.9.0, "the version installed" | re-run and re-stamped 5.0.0; both claims still hold |
+
+**Verified, and correct as written:** the `eta = 3` default attributed to the
+MO-ASHA Algorithm 2 header (the header reads "Data: R, r0, s, eta (default
+eta = 3)"); both Optuna behavioural claims, re-executed on 5.0.0.
+
+**Bulk metadata check.** Every DOI in this file was resolved against the
+OpenAlex API. All resolve. Five entries carry a year differing from OpenAlex's
+(Balandat 2020/2019, Deb & Jain 2014/2013, Modrák 2025/2023, Smith 2018/2017):
+each is a published-version year cited against a preprint or online-first DOI,
+which is the intended convention, not an error. Five entries carry no DOI at
+all (Bergstra 2011, Li et al. 2018, Lopez-Paz & Oquab 2017, Lueckmann et al.
+2021, Shallue et al. 2019) — a completeness gap, not a known error.
+
+**NOT verified.** The substantive claims of the remaining entries have not
+been checked against their full texts — only their metadata. The entries
+audited above were chosen because they name a *specific locator* (an equation,
+section, or algorithm number), which is the class that produced every error
+found so far. An entry summarising a paper's general contribution has not been
+read back against the paper.
+
 ## Coverage Matrix
 
 Feature implementations and their backing references.
@@ -33,8 +68,8 @@ Feature implementations and their backing references.
 
 | Feature | Module | Reference |
 |---------|--------|-----------|
-| Dominance-based pruning | `optimization/pruning_strategies.py` | Schmucker et al. (2021), Alg. 1 |
-| MO-SHA non-dominated sorting | `optimization/pruning_strategies.py` | Schmucker et al. (2021), Alg. 2 |
+| Dominance-based pruning (simplified) | `optimization/pruning_strategies.py` | Schmucker et al. (2021), Alg. 1 selector |
+| MO-SHA rung/bottom-fraction pruning | `optimization/pruning_strategies.py` | Schmucker et al. (2021), Alg. 2 (selector: Alg. 1) |
 | Primary-metric median pruning | `optimization/pruning_strategies.py` | Akiba et al. (2019) |
 | Hyperband / Successive Halving | `optimization/study.py` | Li et al. (2018) |
 | Non-dominated sorting (shared) | `optimization/pruning_strategies.py` | Deb et al. (2002) |
@@ -277,10 +312,16 @@ metric is critical; no uniformly best algorithm exists.
 Multi-objective asynchronous successive halving. *arXiv preprint*.
 https://doi.org/10.48550/arxiv.2106.12639
 
-Extends ASHA to multi-objective settings. Algorithm 1: dominance-based
-promotion. Algorithm 2: non-dominated sorting + bottom-fraction pruning.
-Key finding: dominance-based approaches consistently outperform
-scalarization-based ones.
+Extends ASHA to multi-objective settings. **Algorithm 1 is the
+multi-objective selector** (`non_dom_sorting`, `selector_eps_net`,
+`selector_nsga_ii`); **Algorithm 2 is MO-ASHA itself** (`mo_asha`, `get_job`,
+rung promotion), whose header reads "Data: R, r0, s, eta (default eta = 3)".
+Algorithm 2 calls the Algorithm 1 selector as
+`mo_selector(rung k, |rung k| / eta)`. Key finding: dominance-based approaches
+consistently outperform scalarization-based ones.
+
+(An earlier version of this entry had the two algorithms the other way round.
+Corrected against the full text.)
 
 ### Goyal, P., Dollár, P., Girshick, R., Noordhuis, P., Wesolowski, L., Kyrola, A., Tulloch, A., Jia, Y., & He, K. (2017)
 
@@ -362,8 +403,8 @@ directly by construction, since the runtime behaviour is the load-bearing part
 of the claim.
 
 **Optuna developers. (2025). `optuna.distributions.CategoricalDistribution`.**
-Optuna 4.9.0 API reference.
-https://optuna.readthedocs.io/en/v4.9.0/reference/generated/optuna.distributions.CategoricalDistribution.html
+Optuna 5.0.0 API reference.
+https://optuna.readthedocs.io/en/v5.0.0/reference/generated/optuna.distributions.CategoricalDistribution.html
 
 Backs the 0.2.0 changelog's warning that `FlowMatchingSpace.quality()` breaks
 resume for a 0.1.0 study. `choices` is stored as an ordered tuple and forms
@@ -372,13 +413,14 @@ requested distributions unequal and Optuna refuses the parameter as a dynamic
 value space. Verified against the installed 4.9.0 rather than from the
 documentation alone: `CategoricalDistribution([False, True]) !=
 CategoricalDistribution([True, False])`, with `.choices` round-tripping as
-`(False, True)` and `(True, False)` respectively.
+`(False, True)` and `(True, False)` respectively. Re-verified on 5.0.0 after
+the dependency floor moved; both still hold.
 
 **Optuna developers. (2025). `optuna.study.create_study` and
-`optuna.trial.FrozenTrial`.** Optuna 4.9.0 API reference.
-https://optuna.readthedocs.io/en/v4.9.0/reference/generated/optuna.study.create_study.html
+`optuna.trial.FrozenTrial`.** Optuna 5.0.0 API reference.
+https://optuna.readthedocs.io/en/v5.0.0/reference/generated/optuna.study.create_study.html
 and
-https://optuna.readthedocs.io/en/v4.9.0/reference/generated/optuna.trial.FrozenTrial.html
+https://optuna.readthedocs.io/en/v5.0.0/reference/generated/optuna.trial.FrozenTrial.html
 
 Version-pinned deliberately: the documentation root serves whichever release
 is current, so a claim checked against 4.9.0 would silently come to point at
