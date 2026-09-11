@@ -6,7 +6,6 @@ import pytest
 from conftest import canonical_adapter
 
 from bayesflow_hpo.pipeline import PipelineError, _TrackingDict, check_pipeline
-from bayesflow_hpo.validation.registry import register_metric
 
 
 class _FakeSearchSpace:
@@ -183,13 +182,11 @@ def test_check_pipeline_infinity_rule_is_per_metric_and_signed(
     log_gamma is negated -- so a wrong-sign infinity maps to -inf in minimize
     space, i.e. to the *best* possible score rather than the worst.
     """
-    if metric == "pipeline_unregistered_probe":
-        register_metric(
-            metric,
-            lambda draws, true_values: {metric: 0.0},
-            overwrite=True,
-        )
-
+    # The probe name is deliberately NOT registered: `check_pipeline` accepts
+    # unknown objective names, since a custom `validate_fn` may return values
+    # the built-in pipeline does not know. Registering one here would leak a
+    # description-less entry into the global registry and break
+    # `test_describe_metrics_builtins_have_descriptions`.
     def validate(approx: Any, vd: Any, n: int) -> dict[str, float]:
         return {metric: value}
 
