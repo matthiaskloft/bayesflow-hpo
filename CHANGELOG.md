@@ -33,9 +33,21 @@
 
 - **`optuna` now requires `>=5.0.0,<6.0.0`.** It was `>=4.0.0`, so a local
   environment on 4.9.0 and a fresh CI install on 5.0.0 ran different code —
-  and optuna 5.0 already changed behaviour this package depends on
-  (`get_param_importances` returns an empty mapping where it used to raise).
+  and optuna 5.0 already changed behaviour this package depends on.
   Measurements taken locally were therefore not measurements of what CI runs.
+
+  The behaviour change, observed directly on both released versions rather
+  than taken from release notes — for a study with no completed trials, and
+  for one with a single trial and no varying parameters:
+
+  | | `optuna.importance.get_param_importances(study)` |
+  |---|---|
+  | 4.9.0 | raises `ValueError`: "Cannot evaluate parameter importances without completed trials." / "…with only a single trial." |
+  | 5.0.0 | returns `{}` |
+
+  `plot_param_importance` treated "did not raise" as success, so on 5.0 it
+  drew an empty chart and returned a figure where its contract says `None`
+  (fixed in #85).
 
   The floor is 5.0.0 because that fix is not backward-compatible with the
   4.x behaviour it replaces. The range stays a range so that installing
