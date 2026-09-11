@@ -405,6 +405,27 @@ with the direction inverted.
 | Seeding via a sampler instance silently disables soft constraints | Decision 6: seed NumPy, use presets by name. |
 | BayesFlow API drift breaking fixtures | That is the point — this suite is the only thing that would notice. |
 
+## References
+
+This plan makes two claims it does not itself establish, both recorded in
+[`docs/references.md`](../references.md):
+
+- **`log_gamma` is higher-is-better, so its minimize-form is negation.**
+  BayesFlow's `calibration_log_gamma` reports `log(gamma / null_quantile)`,
+  the gamma discrepancy of Modrak et al. (2025), *Bayesian Analysis* 20(2),
+  461-488, Equation 7, with `log_gamma < 0` rejecting rank uniformity. This is
+  what the Phase 2 relational assertion and the direction-inversion mutation
+  depend on; if the direction were the other way, those tests would be
+  asserting the wrong thing rather than failing.
+- **Optuna minimizes every `minimize` direction, and a trial is non-dominated
+  when no other is at least as good on every objective and strictly better on
+  one.** Akiba et al. (2019). This is why the selection tests hold the cost
+  coordinate equal: with cost free to vary, both trials can be non-dominated
+  and an exact Pareto-membership assertion stops discriminating.
+
+Everything else here is a claim about this repository's own code, cited
+inline by `file:line` rather than by reference.
+
 ## Mutation verification (done)
 
 The plan requires each test to name the regression that must fail it. Each was

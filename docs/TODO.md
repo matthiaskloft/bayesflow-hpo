@@ -30,6 +30,11 @@ Convention change: that directory may import BayesFlow and Keras, which
 `plan-testing-gaps-done.md` had ruled out for `tests/`. The rest of `tests/`
 keeps the old rule.
 
+The two research claims the suite rests on — `log_gamma`'s direction and
+Optuna's non-dominance semantics — are recorded in
+[`docs/references.md`](references.md) and cited in the plan's References
+section. Every other claim in this entry is about this repository's own code.
+
 Remaining, deliberately not covered by this suite:
 
 1. Pruning, intermediate validation and open-ended stopping — unreachable at
