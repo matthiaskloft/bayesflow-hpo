@@ -471,6 +471,58 @@ class TestPlotParamImportance:
         result = plot_param_importance(study)
         assert result is None
 
+    @staticmethod
+    def _stub_importances(replacement):
+        """Swap `optuna.importance.get_param_importances`; return a restore.
+
+        Plain `setattr` rather than `monkeypatch.setattr`, which did not take
+        effect on this attribute here -- reading it straight back still gave
+        the original function, so a monkeypatched version of these tests
+        passed while exercising nothing.
+        """
+        import optuna.importance as _imp
+        original = _imp.get_param_importances
+        _imp.get_param_importances = replacement
+        return lambda: setattr(_imp, "get_param_importances", original)
+
+    def test_unavailable_by_raise_returns_none(self, multi_objective_study):
+        """The optuna 4.x path: unavailability signalled by a raised error.
+
+        Stubbed rather than left to whichever optuna is installed, so both
+        branches stay covered either way. Up to 4.x `get_param_importances`
+        raised for a study it could not evaluate; from 5.0 it returns an empty
+        mapping. `plot_param_importance` handles both -- which is why the
+        5.0.0 floor is a support decision, not a requirement of the #85 fix.
+
+        Must fail if: the `except Exception` branch stops returning None.
+        """
+        def _raise(*args, **kwargs):
+            raise ValueError(
+                "Cannot evaluate parameter importances without completed "
+                "trials."
+            )
+
+        restore = self._stub_importances(_raise)
+        try:
+            assert plot_param_importance(multi_objective_study) is None
+        finally:
+            restore()
+
+    def test_unavailable_by_empty_mapping_returns_none(
+        self, multi_objective_study,
+    ):
+        """The optuna 5.x path: unavailability signalled by an empty mapping.
+
+        Must fail if: the empty-mapping branch is removed. Without it the
+        function draws an empty bar chart and returns a figure where its
+        contract says `None`.
+        """
+        restore = self._stub_importances(lambda *a, **k: {})
+        try:
+            assert plot_param_importance(multi_objective_study) is None
+        finally:
+            restore()
+
     def test_3obj_produces_3_panels(self, three_objective_study):
         result = plot_param_importance(three_objective_study)
         if result is None:

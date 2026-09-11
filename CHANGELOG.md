@@ -49,8 +49,19 @@
   drew an empty chart and returned a figure where its contract says `None`
   (fixed in #85).
 
-  The floor is 5.0.0 because that fix is not backward-compatible with the
-  4.x behaviour it replaces. The range stays a range so that installing
+  The #85 fix is **not** what forces the floor, and an earlier draft of this
+  entry wrongly said it was. `plot_param_importance()` handles both
+  signals -- the 4.x raise, via `except Exception`, and the 5.0 empty
+  mapping, via the branch #85 added -- so it works unchanged on either
+  major version. Both branches now have regression tests that stub
+  `get_param_importances`, so neither depends on which optuna is
+  installed.
+
+  The floor is a deliberate **support-policy decision**: testing one
+  optuna major rather than two keeps local measurements and CI results
+  comparable, which the version split had already broken. It does mean
+  `bayesflow-hpo` can no longer be installed alongside an application
+  pinned to optuna 4. The range stays a range so that installing
   `bayesflow-hpo` alongside other optuna-dependent packages does not force a
   resolver conflict; the single version CI actually tests is pinned exactly in
   `.github/ci-constraints.txt`. To reproduce a CI environment locally:
