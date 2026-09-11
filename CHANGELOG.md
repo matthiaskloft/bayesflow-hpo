@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+### Testing
+
+- **`tests/test_end_to_end/` runs real `optimize()` studies.** Until now
+  nothing in `tests/` ran one: `test_api.py` patches out `GenericObjective`,
+  `create_study`, `optimize_until`, `check_pipeline` and
+  `generate_validation_dataset`, and `test_direction_end_to_end.py` drives a
+  real Optuna study over hand-fed metric values without building an
+  approximator. Both #72 defects were integration failures in the seam neither
+  covers. The new directory builds real approximators and runs the real
+  validation pipeline against a tiny Gaussian model.
+
+  These tests import BayesFlow and Keras, which
+  `docs/plans/plan-testing-gaps-done.md` had ruled out for `tests/`. Both are
+  already hard runtime dependencies and `tests/test_builders/test_workflow.py`
+  already imports Keras, so this widens an existing precedent rather than
+  adding a dependency.
+
+  They add ~210s to the suite and are marked `endtoend`; deselect them with
+  `pytest -m "not endtoend"`. They do **not** cover pruning, intermediate
+  validation, open-ended stopping (unreachable at two epochs) or
+  persistence/resume (studies run in memory).
+
 ## 0.2.0
 
 Not a patch release. Re-running an unchanged configuration can produce

@@ -47,6 +47,9 @@ bayesflow_hpo = ["py.typed"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = [
+    "endtoend: runs a real optimize() with a real approximator (~15s each)",
+]
 
 [tool.ruff]
 line-length = 88

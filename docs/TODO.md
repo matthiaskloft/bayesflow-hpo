@@ -18,6 +18,30 @@ Suggested execution order: I, then research follow-ups A2/A3.
 
 ---
 
+### Package L: End-to-End `optimize()` Tests
+
+Tracked in [issue #76](https://github.com/matthiaskloft/bayesflow-hpo/issues/76).
+Shipped: `tests/test_end_to_end/` runs real `optimize()` studies against real
+approximators and the real validation pipeline (19 tests, ~210s, marked
+`endtoend`). Plan and measurements in
+[`docs/plans/plan-end-to-end-optimize-tests.md`](plans/plan-end-to-end-optimize-tests.md).
+
+Convention change: that directory may import BayesFlow and Keras, which
+`plan-testing-gaps-done.md` had ruled out for `tests/`. The rest of `tests/`
+keeps the old rule.
+
+Remaining, deliberately not covered by this suite:
+
+1. Pruning, intermediate validation and open-ended stopping — unreachable at
+   two epochs (`validation_callback.py:236` warmup). Needs its own targeted
+   test at a higher epoch count.
+2. Persistence, resume and serialization — these studies run in memory.
+3. The concurrent-initialization race in
+   [issue #77](https://github.com/matthiaskloft/bayesflow-hpo/issues/77), which
+   now has somewhere to live.
+
+---
+
 ### Package K: Training Search-Space Follow-up
 
 Tracked in [issue #69](https://github.com/matthiaskloft/bayesflow-hpo/issues/69).
