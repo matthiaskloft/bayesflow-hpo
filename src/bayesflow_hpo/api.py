@@ -160,6 +160,7 @@ def optimize(
     warm_start_from: Any | None = None,
     warm_start_top_k: int = 25,
     qmc_startup_trials: int = 0,
+    sampler_n_startup_trials: int | None = None,
     checkpoint_pool: CheckpointPool | None = None,
     show_progress_bar: bool = True,
 ) -> optuna.Study:
@@ -381,6 +382,14 @@ def optimize(
         space-filling coverage than random startup.  Only non-rejected
         completions count.  Default 0 (disabled).  See
         :func:`~bayesflow_hpo.create_study` for details.
+    sampler_n_startup_trials
+        Override how many trials a string sampler preset draws before
+        its model takes over.  ``None`` (default) keeps the preset
+        value -- 25 for ``"tpe"``.  Optuna counts the study's COMPLETE
+        and PRUNED trials here, not the sampler's own draws, so a
+        ``qmc_startup_trials`` warm-up already counts toward it.
+        Ignored when *sampler* is a sampler instance.  See
+        :func:`~bayesflow_hpo.create_study` for details.
     checkpoint_pool
         Optional :class:`CheckpointPool` for persisting the best
         trial weights.
@@ -543,6 +552,7 @@ def optimize(
         warm_start_from=warm_start_from,
         warm_start_top_k=warm_start_top_k,
         qmc_startup_trials=qmc_startup_trials,
+        sampler_n_startup_trials=sampler_n_startup_trials,
         n_trials=n_trials,
         max_total_trials=max_total_trials,
         show_progress_bar=show_progress_bar,
@@ -994,6 +1004,7 @@ def _create_and_run_study(
     warm_start_from: Any | None,
     warm_start_top_k: int,
     qmc_startup_trials: int = 0,
+    sampler_n_startup_trials: int | None = None,
     n_trials: int,
     max_total_trials: int | None,
     show_progress_bar: bool,
@@ -1021,6 +1032,7 @@ def _create_and_run_study(
         warm_start_from=warm_start_from,
         warm_start_top_k=warm_start_top_k,
         qmc_startup_trials=qmc_startup_trials,
+        sampler_n_startup_trials=sampler_n_startup_trials,
     )
     _guard_resumed_study(
         study, objective.config.objective_metrics, metric_names

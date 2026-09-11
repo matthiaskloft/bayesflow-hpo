@@ -312,3 +312,62 @@ def test_count_non_rejected_includes_metric_rejected_trials():
     )
     study.add_trial(_mk_frozen_trial())
     assert _count_non_rejected(study) == 2
+
+
+class TestSamplerNStartupTrialsOverride:
+    """Tests for the ``sampler_n_startup_trials`` override."""
+
+    @pytest.mark.parametrize(
+        ("preset", "preset_default"),
+        [("tpe", 25), ("gp", 10)],
+    )
+    def test_none_keeps_the_preset_default(self, preset, preset_default):
+        sampler = _resolve_sampler(preset, n_startup_trials=None)
+        assert _resolve_n_startup_trials(sampler) == preset_default
+
+    @pytest.mark.parametrize("preset", ["tpe", "gp"])
+    @pytest.mark.parametrize("override", [0, 5, 40])
+    def test_override_reaches_the_sampler(self, preset, override):
+        sampler = _resolve_sampler(preset, n_startup_trials=override)
+        assert _resolve_n_startup_trials(sampler) == override
+
+    def test_presets_without_a_startup_count_ignore_it(self):
+        """NSGA-II has no n_startup_trials; the override must not crash."""
+        sampler = _resolve_sampler("nsga2", n_startup_trials=3)
+        assert isinstance(sampler, optuna.samplers.NSGAIISampler)
+
+    def test_create_study_forwards_the_override(self):
+        study = create_study(
+            study_name="startup_override", storage=None, sampler="tpe",
+            sampler_n_startup_trials=8,
+        )
+        assert _resolve_n_startup_trials(study.sampler) == 8
+
+    def test_negative_is_rejected(self):
+        with pytest.raises(ValueError, match="must be >= 0"):
+            create_study(storage=None, sampler_n_startup_trials=-1)
+
+    def test_qmc_quota_still_governs_pruning_alignment(self):
+        """The composite reports max(quota, main) so pruning is unaffected.
+
+        The point of setting the main sampler's count at or below the QMC
+        quota is that its model takes over as soon as the Sobol phase ends.
+        Pruning must NOT inherit that lowered number.
+        """
+        study = create_study(
+            study_name="qmc_plus_override", storage=None, sampler="tpe",
+            qmc_startup_trials=16, sampler_n_startup_trials=10,
+        )
+        assert study.sampler.n_startup_trials == 16
+        assert _resolve_n_startup_trials(study.sampler._main_sampler) == 10
+
+    def test_a_sampler_instance_is_left_alone(self, caplog):
+        """Instances cannot be patched safely, so the override is ignored."""
+        instance = optuna.samplers.TPESampler(n_startup_trials=30)
+        with caplog.at_level("WARNING"):
+            study = create_study(
+                study_name="instance_override", storage=None,
+                sampler=instance, sampler_n_startup_trials=4,
+            )
+        assert _resolve_n_startup_trials(study.sampler) == 30
+        assert "ignored" in caplog.text

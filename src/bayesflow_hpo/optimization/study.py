@@ -152,6 +152,7 @@ def _resolve_sampler(
     name: str,
     budget_aware: bool = True,
     soft_thresholds: list[MetricConstraintSpec] | None = None,
+    n_startup_trials: int | None = None,
 ) -> optuna.samplers.BaseSampler:
     """Resolve a string preset to a configured Optuna sampler.
 
@@ -167,6 +168,16 @@ def _resolve_sampler(
     budget_aware
         Whether to include budget rejection in the composed
         constraints function for samplers that support it.
+    n_startup_trials
+        Override the preset's startup-trial count for the presets that
+        take one (``"tpe"``, ``"gp"``, ``"botorch"``).  ``None`` keeps
+        the preset default.  Other presets ignore it.
+
+        The count is over the study's COMPLETE and PRUNED trials, not
+        over the sampler's own draws, so trials produced by a
+        :class:`QMCWarmupSampler` warm-up phase already count toward it
+        -- which is why a value at or below ``qmc_startup_trials`` lets
+        the model take over as soon as that phase ends.
 
     Returns
     -------
@@ -202,7 +213,7 @@ def _resolve_sampler(
         return optuna.samplers.TPESampler(
             seed=42,
             multivariate=True,
-            n_startup_trials=25,
+            n_startup_trials=25 if n_startup_trials is None else n_startup_trials,
             warn_independent_sampling=False,
             constraints_func=constraints,
         )
@@ -210,7 +221,7 @@ def _resolve_sampler(
     def _make_gp() -> optuna.samplers.GPSampler:
         return optuna.samplers.GPSampler(
             seed=42,
-            n_startup_trials=10,
+            n_startup_trials=10 if n_startup_trials is None else n_startup_trials,
             constraints_func=constraints,
         )
 
@@ -224,7 +235,7 @@ def _resolve_sampler(
             ) from None
         return BoTorchSampler(
             seed=42,
-            n_startup_trials=10,
+            n_startup_trials=10 if n_startup_trials is None else n_startup_trials,
             constraints_func=constraints,
         )
 
@@ -456,6 +467,7 @@ def create_study(
     budget_aware: bool = True,
     metric_constraints_soft: list[MetricConstraintSpec] | None = None,
     qmc_startup_trials: int = 0,
+    sampler_n_startup_trials: int | None = None,
 ) -> optuna.Study:
     """Create or resume an Optuna study.
 
@@ -545,26 +557,57 @@ def create_study(
 
         Sobol's low-discrepancy guarantee is optimal at
         n = 2^m; a warning is logged for non-power-of-2 values.
+    sampler_n_startup_trials
+        Override how many trials a string sampler preset draws before
+        its model takes over (``"tpe"``, ``"gp"``, ``"botorch"``).
+        ``None`` (default) keeps the preset value -- 25 for ``"tpe"``.
+
+        Optuna counts COMPLETE and PRUNED trials of the whole study
+        here, not the sampler's own draws, so a ``qmc_startup_trials``
+        warm-up already counts toward this quota. Setting the two
+        equal therefore hands over to the model exactly when the Sobol
+        phase ends; leaving this at the preset while QMC is enabled
+        spends the difference on uniform-random draws.
+
+        Ignored when *sampler* is a sampler instance rather than a
+        preset name, for the same reason *metric_constraints_soft* is:
+        sampler internals cannot be patched safely.
 
     Raises
     ------
     ValueError
-        If *qmc_startup_trials* is negative.
+        If *qmc_startup_trials* or *sampler_n_startup_trials* is
+        negative.
     """
     if directions is None:
         directions = ["minimize", "minimize"]
+
+    if sampler_n_startup_trials is not None and sampler_n_startup_trials < 0:
+        raise ValueError(
+            "sampler_n_startup_trials must be >= 0, "
+            f"got {sampler_n_startup_trials}"
+        )
 
     if isinstance(sampler, str):
         sampler = _resolve_sampler(
             sampler,
             budget_aware=budget_aware,
             soft_thresholds=metric_constraints_soft,
+            n_startup_trials=sampler_n_startup_trials,
         )
     elif sampler is None:
         sampler = _resolve_sampler(
             "tpe",
             budget_aware=budget_aware,
             soft_thresholds=metric_constraints_soft,
+            n_startup_trials=sampler_n_startup_trials,
+        )
+    elif sampler_n_startup_trials is not None:
+        logger.warning(
+            "sampler_n_startup_trials=%d is ignored: a sampler instance "
+            "was passed, and its internals cannot be patched safely. "
+            "Construct the sampler with the startup count you want.",
+            sampler_n_startup_trials,
         )
 
     if qmc_startup_trials < 0:
