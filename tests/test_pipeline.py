@@ -6,6 +6,7 @@ import pytest
 from conftest import canonical_adapter
 
 from bayesflow_hpo.pipeline import PipelineError, _TrackingDict, check_pipeline
+from bayesflow_hpo.validation.registry import register_metric
 
 
 class _FakeSearchSpace:
@@ -156,28 +157,57 @@ def test_check_pipeline_still_refuses_an_infinity_for_a_bounded_metric() -> None
         )
 
 
-def test_check_pipeline_refuses_the_infinity_a_metric_does_not_declare() -> None:
-    """+inf is refused for log_gamma, which registers -inf as its worst.
+@pytest.mark.parametrize(
+    "metric,value,accepted",
+    [
+        # log_gamma is unbounded BELOW: worst_raw=-inf.
+        ("log_gamma", float("-inf"), True),
+        ("log_gamma", float("inf"), False),
+        # sbc_chi2 is unbounded ABOVE: worst_raw=+inf. The mirror image, and
+        # the case that shows the rule is about the declared value rather than
+        # about infinities in general -- a chi-squared statistic cannot be
+        # negative, so -inf is an invalid hook result.
+        ("sbc_chi2", float("inf"), True),
+        ("sbc_chi2", float("-inf"), False),
+        # An unregistered metric declares nothing, so neither sign passes.
+        ("pipeline_unregistered_probe", float("inf"), False),
+        ("pipeline_unregistered_probe", float("-inf"), False),
+    ],
+)
+def test_check_pipeline_infinity_rule_is_per_metric_and_signed(
+    metric: str, value: float, accepted: bool
+) -> None:
+    """Only the infinity a metric registers as its worst case passes.
 
-    ``log(gamma / null_quantile)`` with ``gamma`` a probability is unbounded
-    below, not above, so a ``+inf`` is an arithmetic fault rather than a very
-    bad model. Allowing any infinity for a metric that declares one would have
-    let it through.
+    Both extractors read these values directly -- sbc_chi2 passes through and
+    log_gamma is negated -- so a wrong-sign infinity maps to -inf in minimize
+    space, i.e. to the *best* possible score rather than the worst.
     """
-
-    def pos_inf_validate(approx: Any, vd: Any, n: int) -> dict[str, float]:
-        return {"log_gamma": float("inf")}
-
-    with pytest.raises(PipelineError, match="non-finite"):
-        check_pipeline(
-            simulator=_FakeSimulator(),
-            adapter=canonical_adapter(),
-            search_space=_FakeSearchSpace(),
-            build_approximator_fn=lambda hp: _FakeApproximator(),
-            train_fn=lambda approx, sim, hp, cb: None,
-            validate_fn=pos_inf_validate,
-            objective_metrics=["log_gamma"],
+    if metric == "pipeline_unregistered_probe":
+        register_metric(
+            metric,
+            lambda draws, true_values: {metric: 0.0},
+            overwrite=True,
         )
+
+    def validate(approx: Any, vd: Any, n: int) -> dict[str, float]:
+        return {metric: value}
+
+    kwargs: dict[str, Any] = dict(
+        simulator=_FakeSimulator(),
+        adapter=canonical_adapter(),
+        search_space=_FakeSearchSpace(),
+        build_approximator_fn=lambda hp: _FakeApproximator(),
+        train_fn=lambda approx, sim, hp, cb: None,
+        validate_fn=validate,
+        objective_metrics=[metric],
+    )
+
+    if accepted:
+        check_pipeline(**kwargs)
+    else:
+        with pytest.raises(PipelineError, match="non-finite"):
+            check_pipeline(**kwargs)
 
 
 def test_check_pipeline_still_refuses_nan_for_an_unbounded_metric() -> None:
