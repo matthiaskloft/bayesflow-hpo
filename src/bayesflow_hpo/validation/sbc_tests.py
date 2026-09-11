@@ -39,7 +39,9 @@ def compute_sbc_uniformity_tests(
             "sbc_chi2_pvalue": np.nan,
         }
 
-    # Talts et al. (2018), Theorem 2: ranks uniform iff posterior correct
+    # Talts et al. (2018), Theorem 1: exact posterior samples imply
+    # uniform ranks. The converse does not hold, so uniformity is a
+    # necessary but not sufficient condition.
     # continuity correction, standard practice
     normalized_ranks = (ranks + 0.5) / (n_posterior_samples + 1)
     ks_stat, ks_pvalue = kstest(normalized_ranks, "uniform")

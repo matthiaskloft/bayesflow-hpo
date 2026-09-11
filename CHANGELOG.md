@@ -59,6 +59,52 @@
   pip install -e ".[dev]" -c .github/ci-constraints.txt
   ```
 
+### Documentation
+
+- **Citation audit: six more claims corrected against full texts.** A
+  systematic sweep of every implementation-backing citation in `src/`,
+  `docs/references.md` and `docs/references/`, following the four errors
+  found earlier in this release. Nothing here changes behaviour; all of it
+  changes what the code claims its behaviour is grounded in.
+
+  - The SBC rank-uniformity result is Talts et al. (2018) **Theorem 1**
+    (Sec. 4.1, p. 6), not Theorem 2, and it states that exact posterior
+    samples *imply* uniform ranks — not the equivalence that three code
+    comments asserted with "iff". SBC is a necessary, not sufficient, check,
+    which the paper says explicitly.
+  - Median pruning is no longer attributed to Akiba et al. (2019). That
+    paper's Algorithm 1 is the Successive Halving pruner and specifies no
+    median rule; `MedianPruner` is documented only in the Optuna API
+    reference, which is now what `"primary"` cites.
+  - Hyperband's `eta = 3` default is in **Algorithm 1**'s input line.
+    Section 3.6, cited previously, recommends "3 or 4" and gives the
+    theoretical optimum as `e ≈ 2.718` — a different claim.
+  - Emmerich & Deutz (2018) was cited for "non-dominated sorting
+    (Eqs. 3--4)" and "complexity bounds (Props. 7, 9)". Neither exists as
+    described; those propositions develop cone orders. Definition 5, Pareto
+    dominance, was the one correct locator and is what we keep.
+  - The power-of-two warning in `optimize()`'s QMC warm-up now cites the
+    SciPy `qmc.Sobol` documentation, which states the property and which
+    Optuna's `QMCSampler` actually wraps, rather than Sobol' (1967) — whose
+    indexed copy is the Russian original and could not support the locator.
+  - `validation_callback.py` still described `"dominance"` as MO-ASHA's
+    promotion rule, without the correction already applied to
+    `pruning_strategies.py`.
+
+  Verified and left alone: Deb et al.'s O(MN^2) sorting, Talts's Algorithm 1,
+  Linhart's Algorithms 1--2, Li et al.'s Section 6 Sobol suggestion, Joe &
+  Kuo as SciPy's direction-number source, and — re-executed on 5.0.0 rather
+  than assumed — that `Trial.report()` still raises `NotImplementedError` for
+  multi-objective studies, which is the premise the whole pruning module
+  rests on.
+
+  `docs/references/*.md` is now marked unreliable: spot checks found
+  misidentified definitions, Hyperband's Algorithm 1 labelled "Successive
+  Halving" with pseudocode that is not the paper's, and a cited "ASHA (Li et
+  al., 2016), JMLR 17(142)" that does not appear to exist. No code path
+  depends on those summaries. `docs/references.md` records what remains
+  unverified.
+
 ### Testing
 
 - **`tests/test_end_to_end/` runs real `optimize()` studies.** Until now

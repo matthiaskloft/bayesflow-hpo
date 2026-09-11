@@ -1,5 +1,19 @@
 # Reference Summaries
 
+> **Status: unaudited, and known to contain errors.**
+>
+> The 2026-09-11 citation audit (see the "Audit status" section of
+> [`../references.md`](../references.md)) spot-checked these summaries and
+> found misidentified definitions, an algorithm labelled with the wrong name
+> and pseudocode that is not the paper's, locators taken against a different
+> edition than the one indexed, and at least one citation to a work that does
+> not appear to exist.
+>
+> No implementation claim depends on these files: every backed claim in
+> `src/` cites `../references.md` or its own docstring, both verified against
+> full texts. Treat what follows as drafts, not as a source. Verify against
+> the paper before relying on any locator here.
+
 This directory contains detailed summaries of research papers backing the implementation of bayesflow-hpo features.
 
 ## Fulltexts
