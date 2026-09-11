@@ -227,13 +227,20 @@ def run_study(tiny_simulator, tiny_adapter, tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def assert_trials_succeeded(study: optuna.Study, expected: int) -> None:
-    """Assert every trial completed the pipeline for real.
+def assert_no_failure_path(study: optuna.Study, expected: int) -> None:
+    """Assert every trial completed *without* taking a failure or fallback path.
 
     ``TrialState.COMPLETE`` alone is not evidence: training and validation
     exceptions are caught and converted to penalty tuples
-    (``objective.py:1277``, ``:1362``).  This checks the absence of every
-    failure marker and the finiteness of every objective.
+    (``objective.py:1277``, ``:1362``), so a trial that blew up mid-pipeline
+    looks identical to one that finished.  This checks the absence of every
+    failure marker.
+
+    Split out from :func:`assert_trials_succeeded` because a test may
+    legitimately expect a non-finite *objective* -- the missing-metric penalty
+    for ``log_gamma`` is ``-inf`` by design -- while still requiring that the
+    trial reached that value through sanitization rather than through a
+    validation-error fallback.
     """
     assert len(study.trials) == expected, (
         f"expected {expected} trials, got {len(study.trials)}"
@@ -245,6 +252,12 @@ def assert_trials_succeeded(study: optuna.Study, expected: int) -> None:
         taken = {k: trial.user_attrs[k] for k in FAILURE_ATTRS if k in trial.user_attrs}
         assert not taken, f"trial {trial.number} took a failure path: {taken}"
         assert trial.values is not None
+
+
+def assert_trials_succeeded(study: optuna.Study, expected: int) -> None:
+    """Assert every trial completed the pipeline for real, with finite values."""
+    assert_no_failure_path(study, expected)
+    for trial in study.trials:
         for i, value in enumerate(trial.values):
             assert np.isfinite(value), (
                 f"trial {trial.number} objective {i} is not finite: {value}"

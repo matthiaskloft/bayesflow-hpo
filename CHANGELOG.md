@@ -30,6 +30,16 @@
   `calibration_log_gamma` reports `log(gamma / null_quantile)` against that
   paper, so ranks extreme enough to drive `gamma` to `0.0` give `-inf`.
 
+### Changed
+
+- **`optuna` is pinned to `==5.0.0`.** It was `>=4.0.0`, so a local
+  environment on 4.9.0 and a fresh CI install on 5.0.0 ran different code —
+  and optuna 5.0 already changed behaviour this package depends on
+  (`get_param_importances` now returns an empty mapping where it used to
+  raise). Measurements taken locally were therefore not measurements of what
+  CI runs. An exact pin makes the two agree; widen it deliberately after
+  testing against a new release rather than picking one up implicitly.
+
 ### Testing
 
 - **`tests/test_end_to_end/` runs real `optimize()` studies.** Until now

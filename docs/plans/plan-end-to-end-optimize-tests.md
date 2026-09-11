@@ -82,6 +82,12 @@ marker is the documented lever if that judgement changes
 Caveat retained: CI runs Ubuntu only (`.github/workflows/ci.yml:38`); these are
 Windows timings.
 
+**Re-measured on optuna 5.0.0** after the version was pinned (`optuna==5.0.0`;
+it had been `>=4.0.0`, so these numbers were originally taken on 4.9.0 while CI
+would have installed 5.0.0): full suite 919 passed in 169 s without coverage,
+no behavioural difference in this suite. The pin is what makes any of these
+numbers mean something.
+
 Record torch/bayesflow/keras versions alongside any re-measurement: torch is
 unpinned and bayesflow carries only a lower bound (`pyproject.toml:23`).
 

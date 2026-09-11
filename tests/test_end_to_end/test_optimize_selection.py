@@ -35,7 +35,7 @@ from typing import Any
 
 import pytest
 
-from .conftest import assert_trials_succeeded
+from .conftest import assert_no_failure_path, assert_trials_succeeded
 
 pytestmark = pytest.mark.endtoend
 
@@ -122,8 +122,24 @@ def test_omitted_metric_ranks_strictly_worse_than_a_bad_reported_value(run_study
     Strict inequality matters: "does not outrank" would pass for a broken
     implementation that gave every trial the same penalty.
 
+    **The ranking assertions alone are not enough**, and this is why the test
+    asserts the *path* first. If the missing-key branch of
+    ``_validate_metric_keys()`` raised instead of inserting the penalty,
+    ``GenericObjective.__call__`` would catch it and return the
+    validation-error fallback -- which is also strictly worse and also
+    dominated, satisfying every ranking assertion below while the integration
+    path this test exists to protect is broken. A training failure confined to
+    the second trial has the same false-positive shape. So: both trials must
+    have completed without any fallback, the validator must have been called
+    exactly three times, and the omitted trial must carry the *sanitized*
+    ``-inf`` raw value.
+
+    ``assert_trials_succeeded`` cannot be used here, because the omitted
+    trial's quality objective is legitimately ``+inf``.
+
     Must fail if: the missing-metric penalty stops being worse than reported
-    values; the ``log_gamma`` conversion is reversed.
+    values; the ``log_gamma`` conversion is reversed; missing-key sanitization
+    raises instead of inserting the penalty.
     """
     validator = ScriptedValidator(
         preflight={"log_gamma": 0.0},
@@ -139,12 +155,34 @@ def test_omitted_metric_ranks_strictly_worse_than_a_bad_reported_value(run_study
         validate_fn=validator,
     )
 
-    reported, omitted = study.trials[0], study.trials[1]
-    assert reported.values is not None and omitted.values is not None
+    # --- the path: sanitization, not a fallback ---
+    assert_no_failure_path(study, expected=2)
+    assert validator.n_calls == 3, (
+        f"expected 1 pre-flight + 2 trial calls, got {validator.n_calls}"
+    )
 
+    reported, omitted = study.trials[0], study.trials[1]
+
+    assert omitted.user_attrs["log_gamma"] == -math.inf, (
+        f"the omitted trial should carry the sanitized raw penalty -inf, got "
+        f"{omitted.user_attrs.get('log_gamma')!r}; it reached its objective "
+        f"by some path other than missing-metric sanitization"
+    )
+    assert reported.user_attrs["log_gamma"] == pytest.approx(-5.0)
+
+    # Cost is genuinely equal, so the ranking below is decided by log_gamma.
+    assert reported.values[1] == pytest.approx(omitted.values[1]), (
+        f"cost coordinates differ ({reported.values[1]} vs {omitted.values[1]})"
+    )
+
+    # --- the ranking ---
     assert math.isfinite(reported.values[0]), (
         f"the reporting trial should have a finite objective, "
         f"got {reported.values[0]}"
+    )
+    assert omitted.values[0] == math.inf, (
+        f"the omitted trial's quality objective should be +inf in minimize "
+        f"space, got {omitted.values[0]}"
     )
     assert omitted.values[0] > reported.values[0], (
         f"omitting the metric ({omitted.values[0]}) must rank strictly worse "
