@@ -348,6 +348,45 @@ def test_unused_hparams_warning_does_not_advise_removal(caplog):
     assert "cannot be seen here" in text
 
 
+def test_unused_hparams_counts_reads_by_the_default_train_fn(caplog):
+    """The ``train_fn=None`` path is tracked too, not just custom hooks.
+
+    ``default_train_fn`` reads ``batch_size`` via ``hparams.get``. Without a
+    test on this branch, a regression that tracked only custom hooks would
+    report ``batch_size`` as dead on every default-training run.
+    """
+    import logging
+
+    def selective_builder(hparams):
+        _ = hparams["initial_lr"]
+        return _FakeApproximator()
+
+    class _BatchSizeSpace:
+        class _InferenceSpace:
+            def build(self, params):
+                return object()
+
+        def __init__(self):
+            self.inference_space = self._InferenceSpace()
+            self.summary_space = None
+
+        def sample(self, trial):
+            return {"initial_lr": 1e-3, "batch_size": 64, "hidden_dim": 32}
+
+    with caplog.at_level(logging.WARNING):
+        check_pipeline(
+            simulator=_FakeSimulator(),
+            adapter=canonical_adapter(),
+            search_space=_BatchSizeSpace(),
+            build_approximator_fn=selective_builder,
+            train_fn=None,  # exercise default_train_fn
+            validate_fn=lambda approx, vd, n: {"calibration_error": 0.05, "nrmse": 0.1},
+        )
+
+    assert "batch_size" not in caplog.text
+    assert "hidden_dim" in caplog.text
+
+
 def test_check_pipeline_missing_initial_lr_raises():
     """PipelineError when search space doesn't sample initial_lr and no train_fn."""
 
