@@ -83,13 +83,20 @@ search_space = hpo.CompositeSearchSpace(inference_space=inference_space)
 
 ## Contributing
 
+Each checkout needs its own virtual environment — including each `git worktree`,
+since an editable install resolves to the source tree it was installed from.
+
 ```bash
 git clone git@github.com:matthiaskloft/bayesflow-hpo.git
 cd bayesflow-hpo
+python -m venv .venv
+PY=.venv/bin/python                             # .venv/Scripts/python on Windows
+$PY -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+$PY -m pip install -e ".[dev]"                  # [dev] pulls no backend of its own
+
 export KERAS_BACKEND=torch
-pip install -e ".[dev]"
-pytest tests/ -v
-ruff check src/ tests/
+$PY -m pytest tests/ -v
+$PY -m ruff check src/ tests/
 ```
 
 ## License
