@@ -29,7 +29,7 @@ One-time setup, from the checkout root:
 
 ```bash
 python -m venv .venv
-PY=.venv/Scripts/python            # macOS / Linux: PY=.venv/bin/python
+PY=.venv/bin/python                 # Windows: PY=.venv/Scripts/python.exe
 $PY -m pip install torch --index-url https://download.pytorch.org/whl/cpu
 $PY -m pip install -e ".[dev]"
 ```
@@ -39,14 +39,19 @@ torch, so a venv built from it alone imports `pytest` fine and then fails at
 `import bayesflow` with "No suitable backend found". CI installs the two in the
 same order.
 
-Then, for every run — always the venv interpreter, never a bare `python`:
+Then, in every new shell — always the venv interpreter, never a bare `python`:
 
 ```bash
-export KERAS_BACKEND=torch                        # Required before any run
-.venv/Scripts/python -m pytest tests/ -v          # Run tests
-.venv/Scripts/python -m ruff check src/ tests/    # Lint (matches CI)
-.venv/Scripts/python -m pip install -e ".[dashboard]"   # Optional: Optuna dashboard
+PY=.venv/bin/python                 # Windows: PY=.venv/Scripts/python.exe
+export KERAS_BACKEND=torch          # Required before any run
+
+$PY -m pytest tests/ -v             # Run tests
+$PY -m ruff check src/ tests/       # Lint (matches CI)
+$PY -m pip install -e ".[dashboard]"    # Optional: Optuna dashboard
 ```
+
+PowerShell spells the same two lines `$PY = ".venv\Scripts\python.exe"` and
+`$env:KERAS_BACKEND = 'torch'`, and invokes as `& $PY`.
 
 If `python -m pytest` reports `No module named pytest`, you are on a system
 interpreter and the venv above has not been created or not been used.
