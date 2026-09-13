@@ -119,6 +119,11 @@ class _TrackingDict(dict):
     Note: ``__iter__`` is intentionally **not** overridden because
     ``dict(tracking_dict)`` calls ``__iter__`` internally, which would
     falsely mark all keys as accessed.
+
+    The price of that choice is that a consumer which copies the dict
+    (``dict(hparams)``, ``{**hparams}``) reads the copy, not this object,
+    and its accesses are invisible here. Unused-key reporting must
+    therefore stay advisory rather than prescriptive.
     """
 
     def __init__(self, *args, **kwargs):
@@ -366,8 +371,13 @@ def check_pipeline(
 
     # --- Step 5: Train one step ---
     actual_train_fn = train_fn if train_fn is not None else default_train_fn
+    # A tracking copy, not a plain one: a custom train_fn is a documented
+    # consumer of the same hparams dict (``batch_size`` is the common case),
+    # and its reads have to count toward the unused-key report in Step 7.
+    # Copying still isolates the hook from the builder's dict.
+    train_hparams = _TrackingDict(dict(hparams))
     try:
-        actual_train_fn(approximator, simulator, dict(hparams), [])
+        actual_train_fn(approximator, simulator, train_hparams, [])
     except Exception as exc:
         raise PipelineError(f"Training step failed: {exc}") from exc
 
@@ -447,11 +457,18 @@ def check_pipeline(
     # --- Step 7: Warn about unused hparams ---
     if build_approximator_fn is not None:
         sampled_keys = set(raw_hparams.keys())
-        unused = sampled_keys - hparams.accessed_keys
+        # Union across every hook handed a tracking dict. Without the train
+        # hook's reads, a key consumed only by a custom train_fn (e.g.
+        # ``batch_size``) is reported as dead, and acting on that report
+        # would delete a live search dimension.
+        accessed = hparams.accessed_keys | train_hparams.accessed_keys
+        unused = sampled_keys - accessed
         if unused:
             logger.warning(
                 "Search space sampled keys that were never read by "
-                "build_approximator_fn: %s. Consider removing them "
-                "from the search space to avoid wasting Optuna budget.",
+                "build_approximator_fn or train_fn: %s. Check whether they "
+                "are still needed — a hook that copies the hparams dict "
+                "(dict(hparams), {**hparams}) reads the copy, so its reads "
+                "cannot be seen here and the key may well be in use.",
                 sorted(unused),
             )

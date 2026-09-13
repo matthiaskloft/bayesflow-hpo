@@ -279,6 +279,73 @@ def test_check_pipeline_warns_unused_hparams(caplog):
         )
 
     assert "never read" in caplog.text
+    assert "hidden_dim" in caplog.text
+    assert "depth" in caplog.text
+
+
+class _ExtraParamSpace:
+    """Search space sampling two keys the builder under test ignores."""
+
+    class _InferenceSpace:
+        def build(self, params):
+            return object()
+
+    def __init__(self):
+        self.inference_space = self._InferenceSpace()
+        self.summary_space = None
+
+    def sample(self, trial):
+        return {"initial_lr": 1e-3, "hidden_dim": 64, "depth": 4}
+
+
+def _run_with_train_fn(train_fn, caplog):
+    """Run ``check_pipeline`` with a builder that reads only ``initial_lr``."""
+    import logging
+
+    def selective_builder(hparams):
+        _ = hparams["initial_lr"]
+        return _FakeApproximator()
+
+    with caplog.at_level(logging.WARNING):
+        check_pipeline(
+            simulator=_FakeSimulator(),
+            adapter=canonical_adapter(),
+            search_space=_ExtraParamSpace(),
+            build_approximator_fn=selective_builder,
+            train_fn=train_fn,
+            validate_fn=lambda approx, vd, n: {"calibration_error": 0.05, "nrmse": 0.1},
+        )
+    return caplog.text
+
+
+def test_unused_hparams_counts_keys_read_only_by_train_fn(caplog):
+    """A key the builder ignores but train_fn reads is not reported unused.
+
+    Regression test for issue #88: the hook received a plain ``dict`` copy,
+    so its reads were invisible and a live search dimension was advertised
+    as dead.
+    """
+
+    def train_reading_depth(approx, sim, hparams, callbacks):
+        _ = hparams["depth"]
+
+    text = _run_with_train_fn(train_reading_depth, caplog)
+
+    assert "hidden_dim" in text  # genuinely unread by either hook
+    assert "depth" not in text
+
+
+def test_unused_hparams_warning_does_not_advise_removal(caplog):
+    """The message stays advisory: a hook copying the dict is untrackable."""
+
+    def train_copying_hparams(approx, sim, hparams, callbacks):
+        _ = dict(hparams)["depth"]  # read through a copy — invisible to tracking
+
+    text = _run_with_train_fn(train_copying_hparams, caplog)
+
+    assert "depth" in text  # tracking cannot see it, so it is still reported
+    assert "Consider removing" not in text
+    assert "cannot be seen here" in text
 
 
 def test_check_pipeline_missing_initial_lr_raises():
