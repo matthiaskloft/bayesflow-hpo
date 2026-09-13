@@ -21,13 +21,40 @@ search spaces, builders, and validation.
 
 ## Commands
 
+There is no global install of this package. Every checkout — **including each
+git worktree** — needs its own `.venv`, because an editable install resolves to
+the source tree it was installed from. `.venv/` is gitignored.
+
+One-time setup, from the checkout root:
+
 ```bash
-export KERAS_BACKEND=torch          # Required before any run
-pip install -e ".[dev]"             # Editable install with dev deps
-pytest tests/ -v                    # Run tests
-ruff check src/ tests/              # Lint (matches CI)
-pip install -e ".[dashboard]"       # Optional: Optuna dashboard
+python -m venv .venv
+PY=.venv/bin/python                 # Windows: PY=.venv/Scripts/python.exe
+$PY -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+$PY -m pip install -e ".[dev]"
 ```
+
+The backend install is a separate step on purpose: `[dev]` does **not** depend on
+torch, so a venv built from it alone imports `pytest` fine and then fails at
+`import bayesflow` with "No suitable backend found". CI installs the two in the
+same order.
+
+Then, in every new shell — always the venv interpreter, never a bare `python`:
+
+```bash
+PY=.venv/bin/python                 # Windows: PY=.venv/Scripts/python.exe
+export KERAS_BACKEND=torch          # Required before any run
+
+$PY -m pytest tests/ -v             # Run tests
+$PY -m ruff check src/ tests/       # Lint (matches CI)
+$PY -m pip install -e ".[dashboard]"    # Optional: Optuna dashboard
+```
+
+PowerShell spells the same two lines `$PY = ".venv\Scripts\python.exe"` and
+`$env:KERAS_BACKEND = 'torch'`, and invokes as `& $PY`.
+
+If `python -m pytest` reports `No module named pytest`, you are on a system
+interpreter and the venv above has not been created or not been used.
 
 ## Conventions
 
@@ -117,6 +144,12 @@ See [`docs/references.md`](docs/references.md) for verified APA 7 citations back
 ## Gotchas
 
 - `KERAS_BACKEND=torch` must be set before importing; tests fail silently otherwise
+- `pip install -e ".[dev]"` installs no Keras backend; torch must be installed
+  separately or every `import bayesflow` fails
+- Run everything through `.venv/Scripts/python` (or `.venv/bin/python`). A bare
+  `python -m pytest` picks up a system interpreter that has neither `pytest` nor
+  `bayesflow_hpo`; a venv from a *different* worktree would test that worktree's
+  source instead of this one's
 - `optimize()` auto-infers `param_keys`/`data_keys` from the adapter; `search_space` is required
 - Three optional hooks (`build_approximator_fn`, `train_fn`, `validate_fn`) replace build/train/validate steps while reusing the full trial lifecycle
 - `default_train_fn` passes `num_batches=` to `approximator.fit()`, compatible with BayesFlow 2.0.8+ (`build_dataset(num_batches=...)`)

@@ -44,6 +44,22 @@
 
 ### Fixed
 
+- **Unused-hparam warning no longer advises deleting live search dimensions.**
+  `check_pipeline` handed `train_fn` a plain `dict(hparams)` copy, so every read
+  inside a custom train hook was invisible to tracking by construction and the
+  unused set could only ever reflect `build_approximator_fn`. A run whose
+  `train_fn` consumed `batch_size` — the common case, as the starting point of
+  an OOM-retry loop — was told to remove it "to avoid wasting Optuna budget";
+  acting on that would have pinned every trial to the default. The hook now
+  receives a tracking copy and its reads count toward the report.
+
+  The message is advisory rather than prescriptive, because the fix cannot be
+  complete: `_TrackingDict` deliberately does not override `__iter__` (so that
+  `dict(td)` does not falsely mark every key), which means a hook that copies
+  the dict reads the copy and stays untrackable either way. The warning now
+  names both hooks and says so outright instead of recommending removal.
+  ([#88](https://github.com/matthiaskloft/bayesflow-hpo/issues/88))
+
 - **`check_pipeline` no longer rejects `log_gamma`.** The pre-flight refused
   any non-finite objective value, while `METRIC_DIRECTIONS` gives `log_gamma`
   `worst_raw=-math.inf` deliberately — so the one metric the table declares
@@ -111,6 +127,17 @@
   ```
 
 ### Documentation
+
+- **Development setup now states the environment requirement.** `CLAUDE.md`,
+  `AGENTS.md`, `README.md` and the `test-hpo`/`lint` skills previously said
+  `pip install -e ".[dev]"` and `pytest tests/ -v`, which silently assumes an
+  activated virtualenv that already has a Keras backend. Two failure modes went
+  unrecorded: `[dev]` pulls no backend, so a venv built from it alone imports
+  `pytest` and then fails at `import bayesflow`; and an editable install
+  resolves to the source tree it was installed from, so a venv borrowed from
+  another `git worktree` tests that worktree's source rather than the one under
+  review. All five documents now require a per-checkout `.venv`, the separate
+  torch install, and invocation through the venv interpreter.
 
 - **Citation audit: six more claims corrected against full texts.** A
   systematic sweep of every implementation-backing citation in `src/`,
