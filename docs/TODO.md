@@ -60,13 +60,20 @@ covering [issue #82](https://github.com/matthiaskloft/bayesflow-hpo/issues/82)
 (TARP) and [issue #75](https://github.com/matthiaskloft/bayesflow-hpo/issues/75)
 (`coverage_error`) as one capability. Nothing is implemented yet.
 
-Two items in that plan stand on their own and are worth landing first:
+The plan has been through an independent review and revised; its §7 records
+the three integration decisions the first version got wrong.
 
-1. Lift the joint metric dispatch into `run_validation_pipeline` and refactor
-   `make_lc2st_validate_fn` onto it, deleting its duplicated condition loop.
-2. Register `lc2st`'s direction (`worst_raw=0.25`). It has no
+Two items in it stand on their own and are worth landing first:
+
+1. Register `lc2st`'s direction (`worst_raw=0.25`). It has no
    `METRIC_DIRECTIONS` entry today, so a missing `lc2st` scores `+inf` on a
-   statistic bounded above by 0.25.
+   statistic bounded above by 0.25. No dependency on anything else.
+2. Lift the joint metric dispatch into `run_validation_pipeline` and refactor
+   `make_lc2st_validate_fn` onto it, deleting its duplicated condition loop.
+
+Two claims the plan rests on are **not yet traced to full text** (plan §6) and
+must be before anything is built on them: Lemos et al. (2023) §3.1 on HPD
+coverage, and Modrak et al. (2025) on marginal-rank blindness.
 
 ---
 
