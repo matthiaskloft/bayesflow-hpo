@@ -200,6 +200,7 @@ def check_pipeline(
     train_fn: TrainFn | None = None,
     validate_fn: ValidateFn | None = None,
     objective_metrics: list[str] | None = None,
+    joint_metrics: dict[str, Any] | None = None,
     sims_per_condition: int = 5,
     n_posterior_samples: int = 2,
     validation_conditions: dict[str, list[Any]] | None = None,
@@ -392,11 +393,18 @@ def check_pipeline(
             # The built-in validator has to be told which metrics this run
             # optimizes, or it computes DEFAULT_METRICS only and the missing
             # key check below rejects every non-default objective.
+            # `joint_metrics` forwarded, or this pre-flight becomes the
+            # thing that blocks the feature: a name registered only as a
+            # placeholder -- `tarp_error`, which cannot run without
+            # reference points -- resolves here with no override in sight
+            # and raises before the study starts. The parameter would then
+            # exist on `optimize()` and be impossible to use.
             result = default_validate_fn(
                 approximator,
                 validation_data,
                 n_posterior_samples,
                 objective_metrics=objective_metrics,
+                joint_metrics=joint_metrics,
             )
     except Exception as exc:
         raise PipelineError(f"Validation step failed: {exc}") from exc

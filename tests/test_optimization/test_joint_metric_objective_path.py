@@ -173,6 +173,12 @@ def test_a_missing_optional_dependency_refuses_at_resolve_time():
     joint guard caught and turned into the registered worst case of 0.25 --
     identical on every trial. The study runs its full budget optimizing a
     constant, with only a warning log to say so.
+
+    It must also surface as a CONFIGURATION error rather than the bare
+    ImportError: the objective re-raises only that type ahead of its
+    catch-all, so an ImportError would be converted into a training-loss
+    fallback and the study would carry on regardless -- which is the same
+    defect one layer out.
     """
     from unittest.mock import patch
 
@@ -180,8 +186,12 @@ def test_a_missing_optional_dependency_refuses_at_resolve_time():
         "bayesflow_hpo.validation.c2st._require_sklearn",
         side_effect=ImportError("C2ST metrics require scikit-learn"),
     ):
-        with pytest.raises(ImportError, match="scikit-learn"):
+        with pytest.raises(
+            JointMetricConfigurationError, match="scikit-learn"
+        ) as excinfo:
             resolve_joint_metrics(["lc2st"])
+    # The original is kept, so the traceback still names the real cause.
+    assert isinstance(excinfo.value.__cause__, ImportError)
 
 
 def test_a_present_dependency_resolves_normally():

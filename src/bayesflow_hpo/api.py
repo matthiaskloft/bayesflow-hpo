@@ -280,6 +280,12 @@ def optimize(
         :func:`~bayesflow_hpo.validation.tarp.make_tarp_joint_metric`. A
         name given here overrides its registered entry rather than being
         resolved alongside it, so a placeholder never raises in its place.
+        The key must name a registered joint metric: an unchecked key would
+        run a metric nothing requested, reported in the summary under a name
+        no configuration mentions. Register a wholly new one with
+        :func:`~bayesflow_hpo.validation.registry.register_joint_metric`
+        first; this parameter is for supplying a CONFIGURATION, which is
+        what does not belong in a process-wide registry.
     objective_mode
         ``"pareto"`` (default) — each metric is its own objective;
         study has ``len(objective_metrics) + 1`` directions (one per
@@ -548,6 +554,7 @@ def optimize(
         train_fn=train_fn,
         validate_fn=validate_fn,
         objective_metrics=objective_metrics,
+        joint_metrics=joint_metrics,
         validation_conditions=validation_conditions,
     )
 

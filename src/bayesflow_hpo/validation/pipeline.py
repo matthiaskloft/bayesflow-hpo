@@ -18,9 +18,12 @@ from bayesflow_hpo.validation.metrics import (
     compute_condition_metrics,
 )
 from bayesflow_hpo.validation.registry import (
+    _JOINT,
     DEFAULT_METRICS,
+    JointMetricConfigurationError,
     JointMetricFn,
     JointMetricInputs,
+    is_joint_metric,
     joint_metric_settings,
     output_keys_for,
     resolve_joint_metrics,
@@ -240,6 +243,24 @@ def run_validation_pipeline(
         list(metrics), overridden=(joint_metrics or {}).keys()
     )
     if joint_metrics:
+        # An override names a JOINT metric. Merging an unchecked key runs a
+        # metric nobody asked for: `joint_metrics={"nrmse": fn}` would leave
+        # `nrmse` computing marginally AND dispatch the override jointly
+        # under the same name, and a typo'd key would silently add a metric
+        # that appears in the summary from nowhere. Checked here rather than
+        # trusted, since `canonical_metric_name` passes unknown names
+        # through unchanged by design.
+        unknown = [
+            name for name in joint_metrics if not is_joint_metric(name)
+        ]
+        if unknown:
+            raise JointMetricConfigurationError(
+                f"joint_metrics keys {sorted(unknown)} are not registered "
+                "joint metrics. A key overrides a registered joint metric's "
+                "callable, so it must name one; register it first with "
+                "`register_joint_metric`, or correct the spelling. "
+                f"Registered joint metrics: {sorted(_JOINT)}."
+            )
         joint_metric_fns = {**joint_metric_fns, **joint_metrics}
 
     available_keys = (

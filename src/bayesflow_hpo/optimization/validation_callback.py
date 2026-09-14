@@ -48,6 +48,7 @@ from bayesflow_hpo.types import ValidateFn
 from bayesflow_hpo.validation.data import ValidationDataset
 from bayesflow_hpo.validation.registry import (
     CanonicalMetricName,
+    JointMetricConfigurationError,
     canonical_metric_name,
     is_joint_metric,
 )
@@ -579,6 +580,11 @@ class PeriodicValidationCallback(Callback):
                     )
                     return None
                 return extracted
+        except JointMetricConfigurationError:
+            # Not a validation failure. Swallowing it here would stop
+            # pruning silently and leave the same error to surface from
+            # final validation one wasted training run later.
+            raise
         except optuna.TrialPruned:
             raise
         except Exception:

@@ -586,7 +586,20 @@ def resolve_joint_metrics(
         # been paid for.
         precondition = getattr(fn, "_bf_hpo_resolve_check", None)
         if precondition is not None:
-            precondition()
+            try:
+                precondition()
+            except Exception as exc:
+                # Re-raised as a CONFIGURATION error, whatever it was. A
+                # precondition typically raises ImportError for a missing
+                # optional dependency, and a bare ImportError is caught by
+                # `GenericObjective`'s catch-all and converted into a
+                # training-loss fallback -- so the study would run its full
+                # budget scoring the metric's worst case, which is the
+                # behaviour checking at resolve time exists to prevent.
+                # `raise ... from exc` keeps the original for the traceback.
+                raise JointMetricConfigurationError(
+                    f"Joint metric {n!r} cannot run: {exc}"
+                ) from exc
         resolved[n] = fn  # type: ignore[assignment]
     return resolved
 
