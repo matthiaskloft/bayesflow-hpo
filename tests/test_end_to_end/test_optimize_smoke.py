@@ -37,6 +37,8 @@ selection tests hold the cost coordinate equal.
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 import pytest
 
@@ -106,7 +108,7 @@ def test_mean_mode_collapses_to_a_single_quality_objective(run_study):
     assert_all_minimize(study, expected=2)
 
 
-def test_cost_metric_none_optimizes_quality_alone(run_study):
+def test_cost_metric_none_optimizes_quality_alone(run_study: Any) -> None:
     """``cost_metric=None`` drops the direction but keeps the measurement.
 
     The measurement is the point of the feature: post-hoc cost ranking needs
@@ -136,7 +138,7 @@ def test_cost_metric_none_optimizes_quality_alone(run_study):
             )
 
 
-def test_cost_metric_none_mean_mode_is_single_objective(run_study):
+def test_cost_metric_none_mean_mode_is_single_objective(run_study: Any) -> None:
     """Mean mode without a cost column leaves exactly one direction."""
     study = run_study(
         n_trials=1,

@@ -302,7 +302,18 @@ def optimize(
         Note that in ``"mean"`` mode, or ``"pareto"`` mode over a
         single metric, ``None`` leaves the study with one direction;
         ``pruning_strategy`` then does not apply and Optuna's own
-        pruner runs instead.
+        pruner runs instead. ``objective_metrics`` may not be empty
+        when this is ``None``: Optuna requires at least one direction,
+        so the configuration has no valid study.
+
+        References
+        ----------
+        The behaviour this relies on -- Optuna addressing objectives by
+        position, and refusing a study with no directions -- is recorded
+        against the installed version in ``docs/references.md``. That a
+        cheap trial is non-dominated on the cost axis, and so enters the
+        Pareto front, is the non-dominance rule of Deb et al. (2002),
+        recorded there too.
 
         The setting changes the arity of a study's stored objective
         tuple, so a study started with one value of it cannot be

@@ -603,6 +603,20 @@ class ObjectiveConfig:
                 f"Unknown cost_metric: {self.cost_metric!r}. "
                 f"Expected 'inference_time', 'param_count' or None."
             )
+        if self.cost_metric is None and not self.objective_metrics:
+            # Nothing left to optimize: the cost column was the only
+            # objective. Optuna refuses a study with no directions
+            # ("The number of objectives must be greater than 0",
+            # `optuna/study/study.py:1264` on 5.0.0), but only once
+            # `create_study` is reached -- long after the search space,
+            # validation data and pre-flight have been built, and with a
+            # message that names neither setting responsible.
+            raise ValueError(
+                "objective_metrics is empty and cost_metric is None, so the "
+                "trial would return no objective values at all. Name at "
+                "least one metric in objective_metrics, or set a "
+                "cost_metric."
+            )
         if self.metric_constraints_hard is not None:
             for metric, _, direction in self.metric_constraints_hard:
                 if direction not in ("above", "below"):
@@ -1063,7 +1077,9 @@ class GenericObjective:
         -------
         tuple[float, ...]
             Objective values (all minimize-is-better).  Shape depends on
-            ``objective_mode``: 2 values for ``"mean"``, N+1 for ``"pareto"``.
+            ``objective_mode`` and ``cost_metric``: for N metrics, N+1
+            values in ``"pareto"`` mode and 2 in ``"mean"`` mode, dropping
+            to N and 1 when ``cost_metric`` is ``None``.
             Failed or budget-rejected trials return penalty values.
         """
         config = self.config

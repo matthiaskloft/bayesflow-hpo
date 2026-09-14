@@ -26,6 +26,8 @@ checkpoint-pool and warm-start rankings, with no error and no warning.
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 import pytest
 
@@ -55,13 +57,13 @@ _DUMMY_VALIDATION_DATA = ValidationDataset(
 
 
 class _FakeSearchSpace:
-    dimensions: dict = {}
+    dimensions: dict[str, Any] = {}
 
-    def sample(self, trial):
+    def sample(self, trial: Any) -> dict[str, Any]:
         return {}
 
 
-def _objective(**overrides) -> GenericObjective:
+def _objective(**overrides: Any) -> GenericObjective:
     kwargs = dict(
         simulator=object(),
         adapter=object(),
@@ -273,7 +275,10 @@ def test_explicit_directions_must_match_the_shorter_tuple() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _schema_for(cost_metric, metrics=("calibration_error", "nrmse")):
+def _schema_for(
+    cost_metric: str | None,
+    metrics: tuple[str, ...] = ("calibration_error", "nrmse"),
+) -> tuple[list[str], list[str]]:
     """The directions and metric names ``optimize()`` would produce.
 
     Derived through ``_derive_directions`` rather than written out, so these
@@ -429,3 +434,23 @@ def test_dominance_pruning_never_reads_cost() -> None:
             f"api.py, docs/optimization.md and CHANGELOG.md state that cost "
             f"never enters a pruning comparison and would need updating"
         )
+
+
+def test_no_metrics_and_no_cost_is_rejected() -> None:
+    """The one configuration that would leave zero objectives.
+
+    Optuna refuses a study with no directions ("The number of objectives
+    must be greater than 0", `optuna/study/study.py:1264` on 5.0.0), but
+    only once `create_study` is reached — after the search space,
+    validation data and pre-flight have been built, and with a message
+    naming neither setting responsible.
+    """
+    with pytest.raises(ValueError, match="objective_metrics is empty"):
+        _objective(objective_metrics=[], cost_metric=None)
+
+
+def test_no_metrics_with_a_cost_metric_is_still_allowed() -> None:
+    """Unchanged: a cost column alone is still one objective."""
+    assert _objective(
+        objective_metrics=[], cost_metric="param_count"
+    ).n_objectives == 1

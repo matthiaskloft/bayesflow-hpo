@@ -21,6 +21,15 @@
   attrs written from `objective_metrics` alone, so cost has never entered a
   pruning comparison.
 
+  The non-dominance rule behind the Pareto-front claim is Deb et al. (2002);
+  the Optuna contract relied on -- objectives addressed by position, and at
+  least one direction required -- is recorded against the installed version.
+  Both are in [`docs/references.md`](docs/references.md).
+
+  `objective_metrics` may not be empty when `cost_metric=None`: that would
+  leave no objectives at all, which Optuna rejects. `ObjectiveConfig` now
+  refuses the pair up front rather than failing later inside `create_study`.
+
   Cost is still *measured*: `param_count` and `inference_time_s` remain trial
   user attributes on every completed trial, which is what makes post-hoc cost
   ranking possible. `max_param_count` also still applies -- it constrains what
