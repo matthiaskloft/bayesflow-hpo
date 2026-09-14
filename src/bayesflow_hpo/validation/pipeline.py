@@ -83,6 +83,7 @@ def _run_joint_metrics(
     validation_data: ValidationDataset,
     approximator: Any,
     cond_id: int,
+    n_conditions: int,
     failed_joint: dict[str, str],
 ) -> dict[str, float]:
     """Evaluate joint metrics for one condition, under a per-metric guard.
@@ -116,6 +117,7 @@ def _run_joint_metrics(
         data_keys=tuple(validation_data.data_keys),
         approximator=approximator,
         cond_id=cond_id,
+        n_conditions=n_conditions,
     )
 
     row: dict[str, float] = {}
@@ -274,6 +276,7 @@ def run_validation_pipeline(
                 validation_data=validation_data,
                 approximator=approximator,
                 cond_id=cond_id,
+                n_conditions=len(validation_data.simulations),
                 failed_joint=failed_joint,
             )
             joint_condition_rows.append(joint_row)

@@ -523,11 +523,27 @@ def _joint_observations(inputs: JointMetricInputs) -> np.ndarray:
     return np.concatenate(flat, axis=1)
 
 
+def _subsampled_conditions(n_conditions: int, n_keep: int) -> set[int]:
+    """Pick *n_keep* condition indices spread evenly over the grid.
+
+    Evenly spaced rather than the first *n_keep*: a validation grid is
+    ordered, so a prefix samples one corner of it. `np.linspace` with
+    rounding gives the same set on every trial of a study, which matters
+    because a metric evaluated on different conditions between trials is
+    not a comparable objective.
+    """
+    if n_keep >= n_conditions:
+        return set(range(n_conditions))
+    idx = np.linspace(0, n_conditions - 1, n_keep)
+    return {int(round(i)) for i in idx}
+
+
 def make_lc2st_joint_metric(
     n_folds: int = 5,
     n_null_trials: int = 0,
     clf_kwargs: dict[str, Any] | None = None,
     seed: int = 42,
+    max_conditions: int | None = None,
 ) -> JointMetricFn:
     """Create an L-C2ST metric for the pipeline's joint dispatch.
 
@@ -550,6 +566,15 @@ def make_lc2st_joint_metric(
     seed
         Base seed. Each condition uses ``seed + cond_id`` so that conditions
         do not share a draw, which would correlate their noise.
+    max_conditions
+        Evaluate on at most this many conditions, spread evenly over the
+        grid, instead of all of them. ``None`` (default) uses every
+        condition. The cost is linear in the condition count and the
+        constant is large -- see the note below -- so this is the lever that
+        makes L-C2ST affordable as an objective without changing what it
+        measures per condition. The subset is deterministic, so every trial
+        in a study is scored on the same conditions; a subset that varied
+        between trials would not be a comparable objective.
 
     Returns
     -------
@@ -582,6 +607,14 @@ def make_lc2st_joint_metric(
     _require_sklearn()
 
     def _lc2st_metric(inputs: JointMetricInputs) -> dict[str, float]:
+        if max_conditions is not None:
+            keep = _subsampled_conditions(inputs.n_conditions, max_conditions)
+            if inputs.cond_id not in keep:
+                # An empty dict contributes no row, and the pipeline means
+                # each joint key over the conditions that reported it. So a
+                # skipped condition costs nothing and biases nothing --
+                # unlike a sentinel value, which would be averaged in.
+                return {}
         true_params = np.column_stack([
             np.asarray(inputs.sim_batch[k]).ravel()
             for k in inputs.param_keys
@@ -642,6 +675,7 @@ def make_lc2st_validate_fn(
     n_null_trials: int = 0,
     clf_kwargs: dict[str, Any] | None = None,
     seed: int = 42,
+    max_conditions: int | None = None,
 ) -> Callable[[Any, ValidationDataset, int], dict[str, float]]:
     """Create a ``ValidateFn`` that computes standard metrics + L-C2ST.
 
@@ -665,6 +699,10 @@ def make_lc2st_validate_fn(
         SBIBM defaults.
     seed
         Random seed for L-C2ST reproducibility.
+    max_conditions
+        Evaluate L-C2ST on at most this many conditions, spread evenly over
+        the grid. ``None`` (default) uses all of them. See
+        :func:`make_lc2st_joint_metric`.
 
     Returns
     -------
@@ -704,6 +742,7 @@ def make_lc2st_validate_fn(
         n_null_trials=n_null_trials,
         clf_kwargs=clf_kwargs,
         seed=seed,
+        max_conditions=max_conditions,
     )
 
     def _validate_fn(

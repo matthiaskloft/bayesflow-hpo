@@ -430,3 +430,62 @@ def test_importing_the_package_does_not_require_sklearn():
     ):
         with pytest.raises(ImportError):
             _default_lc2st_metric(None)
+
+
+# ---------------------------------------------------------------------------
+# D9 -- the condition sub-sample
+# ---------------------------------------------------------------------------
+
+
+def test_the_contract_reports_the_grid_size(joint_metric):
+    """Nothing else in JointMetricInputs implies it."""
+    seen: list[tuple[int, int]] = []
+
+    def capture(inputs: JointMetricInputs) -> dict[str, float]:
+        seen.append((inputs.cond_id, inputs.n_conditions))
+        return {"joint_size": 0.0}
+
+    joint_metric("joint_size", capture)
+    _run(["theta"], ["joint_size"], n_conditions=5)
+    assert seen == [(i, 5) for i in range(5)]
+
+
+def test_a_subsampled_metric_is_averaged_over_the_conditions_it_ran_on(
+    joint_metric,
+):
+    """Skipping a condition returns no key, which contributes no row.
+
+    A sentinel value would be averaged in and would drag the score toward
+    whatever the sentinel is; an empty dict simply does not participate.
+    """
+
+    def every_other(inputs: JointMetricInputs) -> dict[str, float]:
+        if inputs.cond_id % 2:
+            return {}
+        return {"joint_sparse": float(inputs.cond_id)}
+
+    joint_metric("joint_sparse", every_other)
+    result = _run(["theta"], ["joint_sparse"], n_conditions=5)
+    # Ran on 0, 2, 4 -> mean 2.0. Had the skipped conditions contributed a
+    # zero, the mean would be 1.2.
+    assert result.summary["joint_sparse"] == pytest.approx(2.0)
+
+
+def test_the_subsample_is_spread_over_the_grid_not_taken_from_its_front():
+    """A validation grid is ordered, so a prefix is one corner of it."""
+    from bayesflow_hpo.validation.c2st import _subsampled_conditions
+
+    assert _subsampled_conditions(20, 4) == {0, 6, 13, 19}
+    assert _subsampled_conditions(5, 10) == {0, 1, 2, 3, 4}
+    assert _subsampled_conditions(5, 1) == {0}
+
+
+def test_the_subsample_is_identical_across_trials():
+    """A metric scored on different conditions per trial is not comparable."""
+    from bayesflow_hpo.validation.c2st import _subsampled_conditions
+
+    assert all(
+        _subsampled_conditions(17, 5) == _subsampled_conditions(17, 5)
+        for _ in range(5)
+    )
+

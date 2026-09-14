@@ -76,15 +76,23 @@ class JointMetricInputs:
         The trained approximator, for metrics that need log-densities rather
         than draws alone.
     cond_id
-        Index of this condition. Metrics that need randomness derive a
-        per-condition seed from it rather than reusing one across
-        conditions, which would correlate their noise.
+        Index of this condition, in ``range(n_conditions)``. Metrics that
+        need randomness derive a per-condition seed from it rather than
+        reusing one across conditions, which would correlate their noise.
+    n_conditions
+        Total number of conditions in the validation grid.
 
     Notes
     -----
     ``n_posterior_samples`` is deliberately absent. A metric whose behaviour
     depends on it reads ``draws.shape[1]``, which cannot disagree with the
     array it is describing.
+
+    ``n_conditions`` is present for the opposite reason: nothing in this
+    object implies it, and a metric too expensive to run on every condition
+    needs it to choose a spread-out subset. Without it the only reachable
+    rule is "the first N", and a validation grid is ordered, so that samples
+    one corner of it rather than the grid.
 
     A marginal metric never sees this object: joint metrics are dispatched
     separately and :data:`MetricFn`'s signature is untouched. So carrying
@@ -98,6 +106,7 @@ class JointMetricInputs:
     data_keys: tuple[str, ...]
     approximator: Any
     cond_id: int
+    n_conditions: int
 
 
 #: A metric computed on all parameters jointly, with the data in scope.
