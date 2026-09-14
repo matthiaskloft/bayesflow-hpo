@@ -17,7 +17,7 @@ src/bayesflow_hpo/
 │   ├── base.py              # Dimension types, SearchSpace protocol, BaseSearchSpace
 │   ├── composite.py         # CompositeSearchSpace, NetworkSelectionSpace, SummarySelectionSpace
 │   ├── registry.py          # Name → space factory lookup, aliases, registration
-│   ├── training.py          # TrainingSpace (lr, batch_size, decay_rate)
+│   ├── training.py          # TrainingSpace (lr, batch_size, budget couplings)
 │   ├── inference/           # One module per inference network type
 │   │   ├── coupling_flow.py
 │   │   ├── flow_matching.py

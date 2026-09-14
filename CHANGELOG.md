@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+### Added
+
+- `TrainingSpace(lr_reference_batch_size=...)` reparametrizes the peak
+  learning rate as `initial_lr = lr_ref * batch_size / reference_batch`, the
+  linear scaling relationship of Smith et al. (2018). The sampled Optuna
+  parameter is then `lr_ref`; `initial_lr` is derived. Off by default.
+- `TrainingSpace(simulation_budget=...)` derives
+  `num_batches = budget // (batch_size * epochs)`, keeping trials
+  simulation-matched while batch size and epochs vary. Requires an `epochs`
+  dimension on the space; an infeasible budget is rejected at construction.
+  Off by default.
+- Trials record their realized `simulations` (`batch_size * epochs *
+  num_batches`) as a user attribute, and it is now a default column of
+  `trials_to_dataframe()`.
+- Values a search space derives rather than samples are recorded under the
+  `derived_params` trial user attribute, and `best_config()`, `trial_table()`,
+  `trials_to_dataframe()` and `compare_trials()` report them alongside
+  `trial.params`. Without this, retraining from `best_config()` on a study
+  with a reparametrized learning rate would silently use a different rate than
+  the trial that was selected.
+
+### Fixed
+
+- Documentation listed a `decay_rate` dimension on `TrainingSpace` that has
+  not existed since 0.2.0.
+
 ## 0.3.0
 
 A feature release, and unlike 0.2.0 a safe upgrade for existing studies: no

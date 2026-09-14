@@ -1087,6 +1087,24 @@ class GenericObjective:
         # --- Step 1: Sample hparams ---
         params = config.search_space.sample(trial)
 
+        # Optuna records only what it sampled, so a DerivedDimension's value
+        # is absent from `trial.params` -- and every results helper reads
+        # `trial.params`. Without this, `best_config()` on a study with a
+        # reparametrized learning rate returns `lr_ref` and no `initial_lr`,
+        # and a user retraining from it silently picks a different rate than
+        # the trial trained with.
+        space_constants = getattr(config.search_space, "constants", {})
+        derived_params = {
+            key: value
+            for key, value in params.items()
+            if key not in trial.params
+            and key not in space_constants
+            and not key.startswith("_")
+            and isinstance(value, (bool, int, float, str))
+        }
+        if derived_params:
+            trial.set_user_attr("derived_params", derived_params)
+
         # --- Step 2: Supply fallback training config ---
         # Search-space values (including DerivedDimension results) take
         # precedence so the optimizer schedule and train_fn share one source.
@@ -1106,6 +1124,13 @@ class GenericObjective:
         trial.set_user_attr("training_mode", config.training_mode)
         trial.set_user_attr("epochs", epochs)
         trial.set_user_attr("num_batches", num_batches)
+        # Recorded because batch size is also the data-volume knob in online
+        # SBI: two trials with the same epochs and num_batches still see
+        # different amounts of data when their batch sizes differ.
+        trial.set_user_attr(
+            "simulations",
+            int(params.get("batch_size", 256)) * epochs * num_batches,
+        )
 
         if "lr_warmup_steps" in params:
             warmup_steps = int(params["lr_warmup_steps"])

@@ -52,7 +52,46 @@ from a checkout of the tag.
 
 ---
 
-### Package M: Joint, data-dependent metric path
+### Package M: Spread-Calibration Diagnostic (`nrmse - sqrt(1 - r^2)`)
+
+Tracked in [issue #98](https://github.com/matthiaskloft/bayesflow-hpo/issues/98).
+
+Left over from the `fix/hpo-review-findings` branch, whose doc-only tail never
+merged (PR #66 landed the code fixes; the last three commits were pushed after
+the merge).
+
+Item 6 above is settled the right way — keep the posterior **mean** — but the
+recorded rationale ("squared-error consistency") understates it. The mean is
+the correlation-maximising estimator, not merely a convention: for any
+estimator `g`, the tower rule gives `Cov(g, t) = Cov(g, m)` with
+`m = E[t | D]`, so Cauchy-Schwarz bounds `corr(g, t)` by `sd(m) / sd(t)`, with
+equality iff `g` is affine in `m`. The median minimises L1 loss and has no such
+property, so substituting it would *lower* the achievable correlation —
+including for skewed posteriors, where the intuition that the median is "more
+representative" does not transfer to this metric.
+
+The open work is the corollary. Equality in that bound implies
+`NRMSE = sqrt(1 - r^2)` for a correctly scaled posterior mean, so the residual
+
+```
+nrmse - sqrt(1 - r^2)
+```
+
+is zero when the scale is right and positive when the ordering is right but the
+spread is wrong — usually under-shrinkage, i.e. an over-confident posterior.
+Neither `correlation` nor `nrmse` reveals that failure alone, and no metric in
+`validation/registry.py` currently covers it.
+
+Verified empirically in `bayesflow-irt`'s Stan/NUTS ceiling benchmark, where
+posterior means satisfy the identity to within 0.002 at all four evaluation
+corners (see that repo's `docs/mcmc_ceiling_validation.md`).
+
+To do: register it as a diagnostic-only metric alongside `correlation`, with
+tests and an entry in `docs/validation.md` and `docs/defaults.md`.
+
+---
+
+### Package N: Joint, data-dependent metric path
 
 Design settled in
 [`docs/plans/plan-joint-metric-path.md`](plans/plan-joint-metric-path.md),
@@ -114,23 +153,6 @@ Remaining, deliberately not covered by this suite:
 
 ---
 
-### Package K: Training Search-Space Follow-up
-
-Tracked in [issue #69](https://github.com/matthiaskloft/bayesflow-hpo/issues/69).
-PR #68 already made `batch_size` tunable, widened `initial_lr` to `1e-2`,
-and introduced coherent fixed-budget and open-ended training modes. Remaining
-work is to:
-
-1. Reparameterize learning rate relative to batch size so the search follows
-   the measured batch/learning-rate interaction instead of treating both axes
-   as independent.
-2. Derive `num_batches` from a fixed simulation budget, keeping comparisons
-   across sampled batch sizes simulation-matched.
-3. Keep warmup length fixed rather than adding another correlated search
-   dimension; evaluate alternative warmup fractions outside HPO first.
-
----
-
 ### Package A2: Research — Detailed Sampler Preset Defaults
 
 The sampler presets are implemented (PR #56). This research task remains
@@ -174,6 +196,17 @@ Remaining work:
 ---
 
 ## Done
+
+### Package K: Training Search-Space Follow-up (2026-09-14)
+
+Closed [issue #69](https://github.com/matthiaskloft/bayesflow-hpo/issues/69).
+`TrainingSpace` gained two opt-in couplings: `lr_reference_batch_size`
+reparametrizes the learning rate as `lr_ref * batch_size / reference_batch`
+(Smith et al., 2018), and `simulation_budget` derives
+`num_batches = budget // (batch_size * epochs)` so trials stay
+simulation-matched. Warmup stays a fixed objective setting rather than a
+search dimension, per Shallue et al. (2019, Sec. 5.1). Each trial now records
+its realized `simulations` as a user attribute.
 
 ### Correlation Recovery Diagnostic Review (2026-08-21)
 
