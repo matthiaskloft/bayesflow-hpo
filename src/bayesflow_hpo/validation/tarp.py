@@ -538,6 +538,19 @@ def make_tarp_joint_metric(
         )
         return {key: float(result["tarp_error"])}
 
+    # Everything the score moves with, so a resumed study can tell that it
+    # changed. `n_posterior_samples` is NOT listed: it is a property of the
+    # validation run rather than of this metric, and the pipeline records it
+    # on the result already. `reference_mode` records only that a provider
+    # was supplied -- a callable is not serializable, so the pin can never
+    # say WHICH one, and the two-key split is what mitigates that.
+    _tarp_metric.joint_metric_settings = {  # type: ignore[attr-defined]
+        "resolution": int(resolution),
+        "metric": str(metric),
+        "standardize": bool(standardize),
+        "seed": int(seed),
+        "reference_mode": "random" if reference_points is None else "provided",
+    }
     return _tarp_metric
 
 

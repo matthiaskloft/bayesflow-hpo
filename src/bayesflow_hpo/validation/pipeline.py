@@ -21,6 +21,7 @@ from bayesflow_hpo.validation.registry import (
     DEFAULT_METRICS,
     JointMetricFn,
     JointMetricInputs,
+    joint_metric_settings,
     output_keys_for,
     resolve_joint_metrics,
     resolve_metrics,
@@ -356,6 +357,7 @@ def run_validation_pipeline(
             n_posterior_samples=n_posterior_samples,
             metric_names=list(metrics),
             failed_joint_metrics=dict(failed_joint),
+            joint_metric_settings=joint_metric_settings(joint_metric_fns),
         )
 
     # Single-parameter case
@@ -375,4 +377,5 @@ def run_validation_pipeline(
         n_posterior_samples=n_posterior_samples,
         metric_names=list(metrics),
         failed_joint_metrics=dict(failed_joint),
+        joint_metric_settings=joint_metric_settings(joint_metric_fns),
     )

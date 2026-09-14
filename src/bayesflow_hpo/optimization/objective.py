@@ -45,6 +45,7 @@ from bayesflow_hpo.objectives import (
     MAX_PARAM_COUNT,
     _direction_for,
     canonical_summary,
+    check_or_stamp_joint_metric_settings,
     compute_inference_time_per_dataset,
     extract_multi_objective_values,
     get_param_count,
@@ -1387,6 +1388,30 @@ class GenericObjective:
                     ),
                 )
                 inference_time = result.timing.get("inference", 0.0)
+                # Checked HERE rather than at study creation, because this
+                # is the first moment the settings are known: they are
+                # declared by the metric callables that actually ran, not
+                # passed to `optimize()`, so that the record cannot disagree
+                # with what was computed. Before the objective values are
+                # reported, so a trial scored under changed settings never
+                # enters the study.
+                check_or_stamp_joint_metric_settings(
+                    trial.study,
+                    result.joint_metric_settings,
+                    n_completed_trials=sum(
+                        t.state == optuna.trial.TrialState.COMPLETE
+                        for t in trial.study.get_trials(deepcopy=False)
+                    ),
+                )
+                if result.failed_joint_metrics:
+                    # The reason a joint metric produced no value, kept where
+                    # a later reader can find it. Without this the only
+                    # evidence is a penalty, which is indistinguishable from
+                    # a genuinely bad model.
+                    trial.set_user_attr(
+                        "failed_joint_metrics",
+                        dict(result.failed_joint_metrics),
+                    )
                 metrics_summary = _validate_metric_keys(
                     dict(result.summary), config.canonical_objective_metrics,
                     penalty_values=self._metric_penalty_map(),

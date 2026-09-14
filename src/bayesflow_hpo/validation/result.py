@@ -37,6 +37,11 @@ class ValidationResult:
         Number of posterior samples drawn per simulation.
     metric_names
         Ordered list of metric names that were computed.
+    joint_metric_settings
+        Mapping from joint metric name to the configuration it declared,
+        for metrics that declare one. A joint metric's score moves with its
+        settings, so this is what lets a resumed study detect that its
+        objective changed scale under it.
     failed_joint_metrics
         Mapping from joint metric name to the exception that invalidated it
         for this trial, empty when none failed. A joint metric that raises
@@ -54,6 +59,9 @@ class ValidationResult:
     n_posterior_samples: int = 0
     metric_names: list[str] = field(default_factory=list)
     failed_joint_metrics: dict[str, str] = field(default_factory=dict)
+    joint_metric_settings: dict[str, dict[str, Any]] = field(
+        default_factory=dict
+    )
 
     # ------------------------------------------------------------------
     # Table methods

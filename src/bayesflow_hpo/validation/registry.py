@@ -109,6 +109,46 @@ class JointMetricInputs:
     n_conditions: int
 
 
+#: Attribute name a joint metric may carry to declare its settings.
+#:
+#: The value must be a flat, JSON-serializable dict. A joint metric's score
+#: moves with its configuration -- TARP's with `resolution`, `metric`,
+#: `standardize`, the reference draw, and the number of posterior samples --
+#: so two trials scored under different settings are not comparable, and a
+#: resumed study that quietly changes one is comparing across a scale
+#: change. Declaring it on the CALLABLE rather than asking the caller to
+#: repeat it to `optimize()` is what stops the record from disagreeing with
+#: what actually ran.
+JOINT_METRIC_SETTINGS = "joint_metric_settings"
+
+
+def joint_metric_settings(
+    joint_metric_fns: Mapping[str, JointMetricFn],
+) -> dict[str, dict[str, Any]]:
+    """Collect the declared settings of *joint_metric_fns*, by metric name.
+
+    Metrics that declare nothing are omitted rather than recorded as empty:
+    absent means "this metric makes no claim about its configuration", which
+    a comparison must not read as "it was configured with nothing".
+
+    Parameters
+    ----------
+    joint_metric_fns
+        Resolved joint metrics, as the validation pipeline holds them.
+
+    Returns
+    -------
+    dict[str, dict[str, Any]]
+        ``{metric_name: settings}`` for those that declare any.
+    """
+    collected: dict[str, dict[str, Any]] = {}
+    for name, fn in joint_metric_fns.items():
+        declared = getattr(fn, JOINT_METRIC_SETTINGS, None)
+        if isinstance(declared, Mapping):
+            collected[name] = dict(declared)
+    return collected
+
+
 #: A metric computed on all parameters jointly, with the data in scope.
 #:
 #: Returns ``{summary_key: value}`` for one condition, the same shape a

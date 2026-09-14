@@ -630,6 +630,20 @@ def make_lc2st_joint_metric(
         )
         return {"lc2st": float(result.statistic)}
 
+    _lc2st_metric.joint_metric_settings = {  # type: ignore[attr-defined]
+        "n_folds": int(n_folds),
+        "n_null_trials": int(n_null_trials),
+        "seed": int(seed),
+        "max_conditions": (
+            None if max_conditions is None else int(max_conditions)
+        ),
+        # The classifier changes the statistic, but its kwargs are an
+        # arbitrary nested dict; a repr is comparable and JSON-safe, which
+        # is all the pin needs.
+        "clf_kwargs": None if clf_kwargs is None else repr(sorted(
+            clf_kwargs.items()
+        )),
+    }
     return _lc2st_metric
 
 

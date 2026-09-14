@@ -623,6 +623,130 @@ def worst_objective_value(key: CanonicalMetricName) -> MinimizeScore:
     return _metric_to_minimize(key, worst_raw_value(key))
 
 
+#: User attribute recording the configuration a study's joint metrics ran at.
+#:
+#: Deliberately NOT part of ``bayesflow_hpo_objective_schema``. That attribute
+#: is a POSITIONAL LIST of objective column names -- ``api.py`` discards a
+#: stored value that is not a list or tuple, and ``schema_matches`` compares
+#: lengths first -- so appending settings to it would change its length,
+#: break resumption for every study already stamped, and misrepresent how
+#: many objective columns the study has. A metric registered as a
+#: *diagnostic*, which ``tarp_error_random`` is, has no column there at all,
+#: so its configuration could not be pinned by that mechanism even in
+#: principle.
+JOINT_METRIC_SETTINGS_ATTR = "bayesflow_hpo_joint_metric_settings"
+
+
+def check_or_stamp_joint_metric_settings(
+    study: Any,
+    settings: Mapping[str, Mapping[str, Any]],
+    *,
+    n_completed_trials: int,
+) -> None:
+    """Record the joint metric configuration, or refuse a changed one.
+
+    A joint metric's score moves with its settings: TARP's with
+    ``resolution``, ``metric``, ``standardize`` and the reference draw. Two
+    trials scored under different settings are not comparable, and a resumed
+    study that changes one is optimizing across a scale change with nothing
+    to say so -- the same defect class as the objective schema guard, which
+    is why this is checked alongside it.
+
+    Parameters
+    ----------
+    study
+        The Optuna study being written to.
+    settings
+        ``{metric_name: settings}`` as declared by the metrics that actually
+        ran, from ``ValidationResult.joint_metric_settings``. Empty does
+        nothing: a study using no joint metrics never acquires the attribute.
+    n_completed_trials
+        Number of COMPLETE trials excluding the one being scored. Decides
+        whether an absent attribute means "fresh study" or "trials this
+        version cannot vouch for".
+
+    Raises
+    ------
+    ValueError
+        If the study records different settings, or holds completed trials
+        with no record at all.
+
+    Notes
+    -----
+    Three things this pin cannot do, stated rather than implied:
+
+    - **It cannot say which reference provider was used.** A callable is not
+      serializable, so ``reference_mode`` records only that one was
+      *supplied*. The ``tarp_error`` / ``tarp_error_random`` split mitigates
+      this -- the key itself carries the mode -- and does not close it. Two
+      studies both reporting ``tarp_error`` may have used different
+      providers.
+    - **It cannot protect a study populated before it existed.** Stamping
+      such a study would assert that its existing trials ran at these
+      settings, which is exactly what is unknown. Refusing is the honest
+      option, with the escape hatch of setting the attribute by hand.
+    - **It does not close the concurrent-stamp window.** Two workers racing
+      on a fresh shared-storage study can both see zero completed trials and
+      stamp different settings, last write winning. This pre-exists for the
+      objective schema, whose guard is likewise stamp-when-empty; joint
+      settings widen the window because they are written after the first
+      validation rather than at study creation. Serializing it would need a
+      storage-level compare-and-set Optuna's user attributes do not offer.
+    """
+    if not settings:
+        return
+
+    recorded = {name: dict(value) for name, value in settings.items()}
+    stored = study.user_attrs.get(JOINT_METRIC_SETTINGS_ATTR)
+
+    if not isinstance(stored, Mapping):
+        # Anything unrecognized is treated as absent, matching the schema
+        # guard: `user_attrs` is caller-writable and round-trips through
+        # JSON, so refusing on a value this code cannot interpret would
+        # block a study over something it cannot even describe.
+        stored = None
+
+    if stored is None:
+        if n_completed_trials:
+            raise ValueError(
+                f"Study {study.study_name!r} holds {n_completed_trials} "
+                "completed trial(s) but records no joint metric settings, so "
+                "the configuration behind their joint metric values cannot "
+                "be verified. A joint metric's score moves with its "
+                f"settings, and this run uses {recorded!r}. Start a new "
+                f"study, or set the study's {JOINT_METRIC_SETTINGS_ATTR!r} "
+                "user attribute to the settings it was actually run with."
+            )
+        study.set_user_attr(JOINT_METRIC_SETTINGS_ATTR, recorded)
+        return
+
+    changed = {
+        name: (dict(stored[name]), value)
+        for name, value in recorded.items()
+        if name in stored and dict(stored[name]) != value
+    }
+    if changed:
+        detail = "; ".join(
+            f"{name}: stored {was!r}, this run {now!r}"
+            for name, (was, now) in sorted(changed.items())
+        )
+        raise ValueError(
+            f"Study {study.study_name!r} was run with different joint metric "
+            f"settings ({detail}). The score moves with these, so old and "
+            "new trials would sit on different scales in one Pareto front. "
+            "Restore the original settings, or start a new study."
+        )
+
+    new_names = {k: v for k, v in recorded.items() if k not in stored}
+    if new_names:
+        # A metric added mid-study. Its own trials are comparable among
+        # themselves, and earlier trials simply have no value for it, which
+        # the objective already handles as a missing key.
+        study.set_user_attr(
+            JOINT_METRIC_SETTINGS_ATTR, {**dict(stored), **new_names}
+        )
+
+
 def canonical_summary(summary: Mapping[str, _V]) -> dict[str, _V]:
     """Re-key a metric mapping by canonical metric name.
 
