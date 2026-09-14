@@ -103,12 +103,18 @@ def _tail_miscalibrated_posterior(
     The truncation is a constructed defect chosen for this test, not a
     modelling choice taken from a source: clipping is simply the
     cheapest way to move only the tail quantiles while provably leaving
-    every quantile strictly inside the clip untouched.  No external
-    reference is claimed for it.  What the fixture is used to
-    demonstrate -- that aggregating the per-level deviations with the
-    median rather than the mean hides tail miscalibration -- is a
-    property of this package's own two metrics, verified numerically
-    here rather than cited.
+    every quantile strictly inside the clip untouched.
+
+    References
+    ----------
+    None, deliberately. No external source is claimed for this
+    constructed defect: the tail truncation is a fixture designed for
+    this test alone, and the property it demonstrates -- that
+    aggregating the per-level deviations with the median rather than the
+    mean hides tail miscalibration -- is a property of this package's own
+    two metrics, verified numerically in the tests below rather than
+    cited. The calibrated baseline it is compared against does rest on a
+    source; see :func:`_exact_posterior`.
     """
     draws, theta = _exact_posterior(seed)
     post_sd = np.sqrt(_SIGMA**2 / (1.0 + _SIGMA**2))
