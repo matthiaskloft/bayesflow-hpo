@@ -37,6 +37,13 @@ class ValidationResult:
         Number of posterior samples drawn per simulation.
     metric_names
         Ordered list of metric names that were computed.
+    failed_joint_metrics
+        Mapping from joint metric name to the exception that invalidated it
+        for this trial, empty when none failed. A joint metric that raises
+        on any condition is dropped from *summary* entirely so the objective
+        substitutes its registered worst case; without this field the only
+        evidence would be a penalty value, which is indistinguishable from a
+        genuinely bad model.
     """
 
     condition_metrics: pd.DataFrame
@@ -46,6 +53,7 @@ class ValidationResult:
     n_conditions: int = 0
     n_posterior_samples: int = 0
     metric_names: list[str] = field(default_factory=list)
+    failed_joint_metrics: dict[str, str] = field(default_factory=dict)
 
     # ------------------------------------------------------------------
     # Table methods
@@ -105,6 +113,10 @@ class ValidationResult:
                     lines.append(f"    {k}: {v}")
         if self.per_parameter:
             lines.append(f"  Parameters: {list(self.per_parameter.keys())}")
+        if self.failed_joint_metrics:
+            lines.append("  Failed joint metrics:")
+            for k, v in self.failed_joint_metrics.items():
+                lines.append(f"    {k}: {v}")
         if self.timing:
             total = sum(self.timing.values())
             lines.append(f"  Timing: {total:.1f}s total")

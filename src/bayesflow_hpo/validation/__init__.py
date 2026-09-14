@@ -24,12 +24,15 @@ from bayesflow_hpo.validation.metrics import (
 from bayesflow_hpo.validation.pipeline import run_validation_pipeline
 from bayesflow_hpo.validation.registry import (
     DEFAULT_METRICS,
+    JointMetricInputs,
     MetricFn,
     describe_metrics,
     get_metric,
     list_metrics,
     make_coverage_metric,
+    register_joint_metric,
     register_metric,
+    resolve_joint_metrics,
     resolve_metrics,
 )
 from bayesflow_hpo.validation.result import ValidationResult
@@ -37,6 +40,7 @@ from bayesflow_hpo.validation.sbc_tests import compute_sbc_uniformity_tests
 
 __all__ = [
     "DEFAULT_METRICS",
+    "JointMetricInputs",
     "GlobalC2STResult",
     "LC2STResult",
     "MetricFn",
@@ -58,6 +62,8 @@ __all__ = [
     "make_lc2st_validate_fn",
     "make_validation_dataset",
     "register_metric",
+    "register_joint_metric",
+    "resolve_joint_metrics",
     "resolve_metrics",
     "run_validation_pipeline",
     "save_validation_dataset",

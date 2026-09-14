@@ -33,12 +33,78 @@ from __future__ import annotations
 
 import html as _html
 import warnings
-from collections.abc import Callable
-from typing import Literal, NewType
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from typing import Any, Literal, NewType
 
 import numpy as np
 
 MetricFn = Callable[[np.ndarray, np.ndarray], dict[str, float]]
+
+
+@dataclass(frozen=True)
+class JointMetricInputs:
+    """Everything the condition loop holds, for one condition.
+
+    A marginal :data:`MetricFn` sees one parameter's draws against one
+    parameter's truths, which is all a rank statistic or an RMSE needs. A
+    *joint* metric needs more, and two live consumers already prove which
+    "more": L-C2ST reassembles the data batch by hand because it classifies
+    on ``concat(params, observations)``, and TARP needs a reference point
+    derived from the data ``x``. Both were reachable only by duplicating the
+    pipeline's loop. This carries the union so they need not.
+
+    Attributes
+    ----------
+    draws
+        Posterior draws, ``(n_sims, n_samples, n_params)``, **always 3-D**.
+        The pipeline normalizes a scalar-parameter study's 2-D array back to
+        a trailing axis of 1 before constructing this, because two separate
+        places squeeze it -- see
+        :func:`~bayesflow_hpo.validation.pipeline.run_validation_pipeline`.
+    true_values
+        Ground-truth parameters, ``(n_sims, n_params)``.
+    param_keys
+        Column order of the last axis of *draws* and of *true_values*.
+        Nothing else records it: the pipeline reads it from the validation
+        dataset and slices positionally.
+    sim_batch
+        The whole condition batch, parameters and data alike.
+    data_keys
+        Which keys of *sim_batch* are data rather than parameters.
+    approximator
+        The trained approximator, for metrics that need log-densities rather
+        than draws alone.
+    cond_id
+        Index of this condition. Metrics that need randomness derive a
+        per-condition seed from it rather than reusing one across
+        conditions, which would correlate their noise.
+
+    Notes
+    -----
+    ``n_posterior_samples`` is deliberately absent. A metric whose behaviour
+    depends on it reads ``draws.shape[1]``, which cannot disagree with the
+    array it is describing.
+
+    A marginal metric never sees this object: joint metrics are dispatched
+    separately and :data:`MetricFn`'s signature is untouched. So carrying
+    the whole batch here leaks the data into nothing.
+    """
+
+    draws: np.ndarray
+    true_values: np.ndarray
+    param_keys: tuple[str, ...]
+    sim_batch: Mapping[str, np.ndarray]
+    data_keys: tuple[str, ...]
+    approximator: Any
+    cond_id: int
+
+
+#: A metric computed on all parameters jointly, with the data in scope.
+#:
+#: Returns ``{summary_key: value}`` for one condition, the same shape a
+#: :data:`MetricFn` returns -- the difference is entirely in the argument.
+JointMetricFn = Callable[[JointMetricInputs], dict[str, float]]
 
 #: A metric name that has been through :func:`canonical_metric_name`.
 #:
@@ -64,6 +130,17 @@ _REQUIRES: dict[str, str] = {}  # extra dependency, e.g. "sklearn"
 # it, so without this a constraint on `left_coverage_90` found nothing to
 # compute and was silently inactive.
 _OUTPUTS: dict[str, tuple[str, ...]] = {}
+# Canonical names registered as JOINT metrics. A marker on the shared tables,
+# not a parallel registry: a joint name has to survive `producer_for_key`,
+# `_metric_names_for_pipeline`, `validate_objective_metric_kinds` and
+# `describe_metrics`, every one of which consults `_REGISTRY` / `_OUTPUTS` /
+# `_KINDS` and fails SILENTLY on a miss -- `_metric_names_for_pipeline` drops
+# names `producer_for_key` returns None for, so a joint objective would
+# request nothing, compute nothing, and take the penalty on every trial. A
+# second registry would need all four taught about it and is silent whenever
+# one is forgotten. Only the two sites that must dispatch on the callable's
+# SIGNATURE branch on this set.
+_JOINT: set[str] = set()
 
 
 # ---------------------------------------------------------------------------
@@ -147,6 +224,12 @@ def register_metric(
         if description is None and name in _DESCRIPTIONS:
             del _DESCRIPTIONS[name]
     _REGISTRY[name] = fn
+    # Overwriting drops any joint marker: `register_joint_metric` re-adds it
+    # immediately, but a plain `register_metric(..., overwrite=True)` over a
+    # joint name is a caller replacing it with a marginal one, and a stale
+    # marker would route the new callable to the joint dispatch, which calls
+    # it with an argument its signature cannot accept.
+    _JOINT.discard(name)
     if description is not None:
         _DESCRIPTIONS[name] = description
     _KINDS[name] = kind
@@ -159,6 +242,79 @@ def register_metric(
     if aliases:
         for alias in aliases:
             _ALIASES[alias] = name
+
+
+def register_joint_metric(
+    name: str,
+    fn: JointMetricFn,
+    aliases: list[str] | None = None,
+    overwrite: bool = False,
+    description: str | None = None,
+    kind: Literal["objective", "diagnostic"] = "objective",
+    requires: str = "",
+    outputs: tuple[str, ...] = (),
+) -> None:
+    """Register a *joint* metric under *name* (and optional aliases).
+
+    Identical to :func:`register_metric` except that *fn* takes a single
+    :class:`JointMetricInputs` and is dispatched once per condition over all
+    parameters at once, rather than once per (condition, parameter) pair.
+
+    Parameters
+    ----------
+    name
+        Canonical name used to look up the metric.
+    fn
+        Callable with signature ``(JointMetricInputs) -> dict``.
+    aliases, overwrite, description, kind, requires, outputs
+        As for :func:`register_metric`.
+
+    Raises
+    ------
+    ValueError
+        As for :func:`register_metric`.
+
+    See Also
+    --------
+    register_metric : Register a per-parameter metric.
+    resolve_joint_metrics : Resolve joint names to callables.
+
+    Notes
+    -----
+    Joint values appear in a result's ``summary`` only. They are absent from
+    ``per_parameter`` -- a joint metric has no per-parameter value, and
+    writing one would be a number someone later averages -- and absent from
+    ``condition_metrics``, whose multi-parameter form is one row per
+    (condition, parameter) and would have to duplicate the value across a
+    condition's rows.
+    """
+    register_metric(
+        name,
+        fn,  # type: ignore[arg-type]
+        aliases=aliases,
+        overwrite=overwrite,
+        description=description,
+        kind=kind,
+        requires=requires,
+        outputs=outputs,
+    )
+    _JOINT.add(name)
+
+
+def is_joint_metric(name: str) -> bool:
+    """Return whether *name* (or its alias) is registered as a joint metric.
+
+    Parameters
+    ----------
+    name
+        Canonical name or alias.
+
+    Returns
+    -------
+    bool
+        ``True`` if the registered callable takes :class:`JointMetricInputs`.
+    """
+    return _ALIASES.get(name, name) in _JOINT
 
 
 def get_metric(name: str) -> MetricFn:
@@ -241,6 +397,27 @@ def producer_for_key(key: str) -> str | None:
     return None
 
 
+def output_keys_for(name: str) -> tuple[str, ...]:
+    """Return the summary keys *name* emits.
+
+    A metric's own canonical name in the common case; a multi-output metric
+    declares its keys via ``register_metric(outputs=...)``. The inverse of
+    :func:`producer_for_key`.
+
+    Parameters
+    ----------
+    name
+        Canonical name or alias.
+
+    Returns
+    -------
+    tuple[str, ...]
+        Summary keys, non-empty.
+    """
+    canonical = _ALIASES.get(name, name)
+    return _OUTPUTS.get(canonical, (canonical,))
+
+
 def resolve_metrics(names: list[str]) -> dict[str, MetricFn]:
     """Resolve a list of metric names to a ``{name: fn}`` dict.
 
@@ -258,8 +435,53 @@ def resolve_metrics(names: list[str]) -> dict[str, MetricFn]:
     ------
     KeyError
         If any name in *names* is unknown.
+
+    Notes
+    -----
+    Joint metrics are **excluded**, because their callables take a
+    :class:`JointMetricInputs` and calling one with a marginal metric's
+    ``(draws, true_values)`` would raise on every condition. Resolve those
+    with :func:`resolve_joint_metrics`; the validation pipeline calls both
+    and passes each to its own dispatch. A name unknown to the registry
+    still raises here, so a typo is not quietly reclassified as joint.
+
+    See Also
+    --------
+    resolve_joint_metrics : The joint half of the same list.
     """
-    return {n: get_metric(n) for n in names}
+    return {
+        n: get_metric(n) for n in names if not is_joint_metric(n)
+    }
+
+
+def resolve_joint_metrics(names: list[str]) -> dict[str, JointMetricFn]:
+    """Resolve the *joint* names in *names* to a ``{name: fn}`` dict.
+
+    The complement of :func:`resolve_metrics` over the same list: between
+    them they cover every name, and neither silently drops one that the
+    other does not claim.
+
+    Parameters
+    ----------
+    names
+        Metric names or aliases. Marginal names are ignored.
+
+    Returns
+    -------
+    dict[str, JointMetricFn]
+        Mapping from the *input* names to their callables.
+
+    Raises
+    ------
+    KeyError
+        If any name in *names* is unknown.
+    """
+    resolved: dict[str, JointMetricFn] = {}
+    for n in names:
+        fn = get_metric(n)  # raises on an unknown name, joint or not
+        if is_joint_metric(n):
+            resolved[n] = fn  # type: ignore[assignment]
+    return resolved
 
 
 def validate_objective_metric_kinds(names: list[str]) -> None:
