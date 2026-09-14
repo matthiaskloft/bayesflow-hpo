@@ -81,7 +81,11 @@ chosen validation objective instead.
 
 `objective_mode` chooses whether metrics are aggregated (`"mean"`) or optimized jointly (`"pareto"`). `cost_metric` selects the cost objective (`"inference_time"` or `"param_count"`), or `None` to search over the quality metrics alone.
 
-With `cost_metric=None` the study has one direction per quality metric (one in `"mean"` mode). This differs from ignoring the cost column at selection time: as a direction, cost steers the sampler toward the cheap-model frontier and keeps cheap, mediocre trials non-dominated under `pruning_strategy="dominance"`. Cost is still *measured* — `param_count` and `inference_time_s` remain trial user attributes — and `max_param_count` still constrains what gets built. Because the stored objective tuple changes arity, a study cannot be resumed or warm-started across a change of this setting; the schema guard refuses it.
+With `cost_metric=None` the study has one direction per quality metric (one in `"mean"` mode). This differs from ignoring the cost column at selection time: as a direction, cost shapes the search itself — the sampler models it and spends budget on the cheap-model frontier, and a cheap trial is non-dominated on that axis however mediocre its quality, so it enters the Pareto front that selection and warm-start read. Intermediate pruning is unaffected either way, since the strategies in `optimization/pruning_strategies.py` compare only the `objective_metrics` and never cost.
+
+Cost is still *measured* — `param_count` and `inference_time_s` remain trial user attributes — and `max_param_count` still constrains what gets built. Because the stored objective tuple changes arity, a study cannot be resumed or warm-started across a change of this setting; the schema guard refuses it.
+
+In `"mean"` mode, or `"pareto"` mode over a single metric, `cost_metric=None` leaves a single-direction study. `pruning_strategy` needs at least two objectives, so it does not apply there and Optuna's own pruner runs instead; `optimize()` warns when a non-default strategy is dropped this way.
 
 #### Pruning Strategy
 

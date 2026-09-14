@@ -9,11 +9,17 @@
   quality metrics alone: `len(objective_metrics)` in `"pareto"` mode, one in
   `"mean"` mode.
 
-  This is not the same as ignoring the cost column at selection time. As a
-  direction, cost steers the sampler toward the cheap-model frontier, and
-  `pruning_strategy="dominance"` keeps a cheap, mediocre trial alive because
-  it is non-dominated on the cost axis. That budget is spent before selection
-  ever runs, so it cannot be recovered there.
+  This is not the same as ignoring the cost column at selection time. As an
+  Optuna direction, cost shapes the search itself: the sampler models it and
+  spends budget exploring the cheap-model frontier, and every cheap trial is
+  non-dominated on the cost axis however mediocre its quality, so it enters
+  the Pareto front that selection and warm-start read. That budget is spent
+  before selection ever runs and cannot be recovered there.
+
+  Intermediate pruning is unaffected either way. The strategies in
+  `optimization/pruning_strategies.py` read `val_{metric}_step_{N}` user
+  attrs written from `objective_metrics` alone, so cost has never entered a
+  pruning comparison.
 
   Cost is still *measured*: `param_count` and `inference_time_s` remain trial
   user attributes on every completed trial, which is what makes post-hoc cost
@@ -107,6 +113,35 @@
   Systems, 24*, 2546–2554.
 
 ### Fixed
+
+- **`plot_parallel_coordinates` inverted the last axis unconditionally.** It
+  treated the final objective column as a cost score -- log-transforming,
+  negating and relabelling it `-log(...)` -- which is right only when there
+  *is* a cost column. A `cost_metric=None` study ends in an ordinary quality
+  metric, so a worse `nrmse` plotted higher on its axis under a label
+  claiming the inversion was deliberate. No exception, no warning.
+
+  Column names cannot settle it: `cost_metric=None` over two quality metrics
+  and `cost_metric="param_count"` over one both produce two columns, and
+  sniffing for the name `param_count` would misread a user metric that
+  happens to share it. `create_study()` now stamps
+  `bayesflow_hpo_has_cost_objective` on the study and the plot reads it.
+  Studies written before the stamp existed all carried a cost column, so its
+  absence defaults to `True` and their plots are unchanged.
+
+- **Single-objective intermediate pruning reported the wrong quantity.**
+  `PeriodicValidationCallback` reported `objective_metrics[0]` to Optuna's
+  pruner for a one-direction study, while mean mode's actual objective is the
+  *mean* of the metrics -- so pruning decisions were made on a quantity the
+  study does not optimize. It now reports that mean (identical to the old
+  behaviour when there is only one metric).
+
+  Previously unreachable through `optimize()`, which always produced at least
+  two directions; `cost_metric=None` reaches it in mean mode and in pareto
+  mode over a single metric. In that state the multi-objective
+  `pruning_strategy` cannot run either -- every strategy compares several
+  objectives -- and Optuna's own pruner takes over. That was silent; a
+  non-default strategy now logs a warning saying so.
 
 - **`calibration_error` was documented as an Expected Calibration Error in six
   places; it is a median, not a mean.** The metric wraps

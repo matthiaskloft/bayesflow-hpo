@@ -709,6 +709,15 @@ def create_study(
         )
         for t in study.trials
     )
+    # Whether the LAST objective column is a cost score is not recoverable
+    # from the column names: `cost_metric=None` over two quality metrics and
+    # `cost_metric="param_count"` over one both produce two columns, and
+    # sniffing for the name "param_count" would misread a user metric that
+    # happens to share it. Readers that treat the last column differently --
+    # `plot_parallel_coordinates` inverts it -- need this stamp to tell them
+    # apart. Stamped after the schema check above, so a study whose columns
+    # were just proved to match cannot be relabelled with a conflicting value.
+    study.set_user_attr("bayesflow_hpo_has_cost_objective", bool(has_cost))
     if metric_names and not unlabellable:
         try:
             with warnings.catch_warnings():

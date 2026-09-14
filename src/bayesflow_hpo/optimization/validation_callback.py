@@ -158,6 +158,19 @@ class PeriodicValidationCallback(Callback):
         self._step = 0  # monotonic step counter for Optuna
         self._consecutive_failures = 0
         self._is_multi_objective = len(trial.study.directions) > 1
+        # Every strategy in `pruning_strategies` compares several objectives,
+        # so a one-direction study falls through to Optuna's own pruner and
+        # the requested strategy never runs. Reachable since `cost_metric`
+        # became optional: mean mode, or pareto over a single metric, now
+        # yields one direction where the count was previously always >= 2.
+        if not self._is_multi_objective and pruning_strategy != "dominance":
+            logger.warning(
+                "pruning_strategy=%r is ignored: this study has a single "
+                "objective direction, and every multi-objective strategy "
+                "needs at least two. Optuna's own pruner (set via "
+                "create_study(pruner=...)) decides pruning instead.",
+                pruning_strategy,
+            )
         self.early_stopping_patience = early_stopping_patience
         self.early_stopping_window = early_stopping_window
         # Canonicalized for the same reason `ObjectiveConfig.__post_init__`
@@ -276,8 +289,15 @@ class PeriodicValidationCallback(Callback):
             if should_prune:
                 raise optuna.TrialPruned()
         else:
-            # Single-objective: use first metric with Optuna's pruner.
-            primary_val = scores[self.objective_metrics[0]]
+            # Single-objective: report the study's actual objective to
+            # Optuna's own pruner. That is the MEAN of the converted scores,
+            # not `objective_metrics[0]`: a one-direction study over several
+            # metrics is mean mode, whose objective is exactly this average
+            # (`objectives.extract_multi_objective_values`). Reporting the
+            # first metric instead pruned on a quantity the study does not
+            # optimize. With a single metric the mean is that metric, so one
+            # expression is right in both cases.
+            primary_val = float(np.mean(list(scores.values())))
             self.trial.report(primary_val, step=self._step)
             if self.trial.should_prune():
                 raise optuna.TrialPruned()

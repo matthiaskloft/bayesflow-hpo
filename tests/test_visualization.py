@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime
+import warnings
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -784,6 +785,50 @@ class TestPlotParallelCoordinatesEdgeCases:
         ax = plot_parallel_coordinates(three_objective_study)
         labels = [t.get_text() for t in ax.get_xticklabels()]
         # Last label should be "-log(param_count_norm)"
+        assert labels[-1].startswith("-log(")
+
+    def test_last_axis_is_not_inverted_without_a_cost_objective(self):
+        """A `cost_metric=None` study ends in an ordinary quality metric.
+
+        Inverting it reverses how the axis reads -- a worse NRMSE plotting
+        higher -- under a label claiming the inversion was deliberate. The
+        column names cannot distinguish the two cases (`cost_metric=None`
+        over two quality metrics and `cost_metric="param_count"` over one
+        both give two columns), so the study carries a stamp.
+        """
+        study = optuna.create_study(directions=["minimize", "minimize"])
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            study.set_metric_names(["calibration_error", "nrmse"])
+        study.set_user_attr("bayesflow_hpo_has_cost_objective", False)
+        for values in ([0.1, 0.2], [0.3, 0.8], [0.2, 0.5]):
+            study.add_trial(
+                optuna.trial.create_trial(
+                    params={}, distributions={}, values=values,
+                    state=optuna.trial.TrialState.COMPLETE,
+                )
+            )
+
+        labels = [
+            t.get_text()
+            for t in plot_parallel_coordinates(study).get_xticklabels()
+        ]
+        assert labels == ["calibration_error", "nrmse"]
+
+    def test_a_study_without_the_stamp_still_inverts_its_last_axis(
+        self, three_objective_study
+    ):
+        """Studies written before the stamp existed all carried a cost column."""
+        assert (
+            "bayesflow_hpo_has_cost_objective"
+            not in three_objective_study.user_attrs
+        )
+        labels = [
+            t.get_text()
+            for t in plot_parallel_coordinates(
+                three_objective_study
+            ).get_xticklabels()
+        ]
         assert labels[-1].startswith("-log(")
 
 

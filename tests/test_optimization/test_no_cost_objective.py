@@ -1,11 +1,18 @@
 """Tests for ``cost_metric=None`` — a study that optimizes quality alone.
 
 Dropping the cost direction is not the same as ignoring the cost column at
-selection time.  As an Optuna direction, cost steers the sampler toward the
-cheap-model frontier and keeps a cheap, mediocre trial non-dominated under
-``pruning_strategy="dominance"`` (the non-dominance rule is Deb et al., 2002,
-recorded in ``docs/references.md``).  That budget cannot be recovered after
-the fact, which is why the setting exists at all.
+selection time.  As an Optuna direction, cost shapes the search: the sampler
+models it and spends budget on the cheap-model frontier, and a cheap trial is
+non-dominated on that axis however mediocre its quality, so it enters the
+Pareto front that selection and warm-start read.  (The non-dominance rule is
+Deb et al., 2002, recorded in ``docs/references.md``.)  That budget cannot be
+recovered after the fact, which is why the setting exists at all.
+
+Intermediate pruning is *not* part of that story, despite what an earlier
+draft of this file and of issue #81 claimed: the strategies in
+``optimization/pruning_strategies.py`` compare ``val_{metric}_step_{N}`` user
+attrs written from ``objective_metrics`` alone, so cost has never entered a
+pruning comparison.  ``test_dominance_pruning_never_reads_cost`` pins that.
 
 What must survive the change: ``param_count`` and ``inference_time_s`` are
 still measured and stored as trial user attributes, so post-hoc cost ranking
@@ -266,6 +273,25 @@ def test_explicit_directions_must_match_the_shorter_tuple() -> None:
 # ---------------------------------------------------------------------------
 
 
+def _schema_for(cost_metric, metrics=("calibration_error", "nrmse")):
+    """The directions and metric names ``optimize()`` would produce.
+
+    Derived through ``_derive_directions`` rather than written out, so these
+    tests bind the schema guard to what ``cost_metric`` actually generates.
+    A hand-written literal would keep passing if the feature stopped changing
+    the schema at all.
+    """
+    return _derive_directions(
+        objective=_objective(
+            objective_metrics=list(metrics), cost_metric=cost_metric
+        ),
+        directions=None,
+        objective_metrics=list(metrics),
+        objective_mode="pareto",
+        cost_metric=cost_metric,
+    )
+
+
 def test_resuming_a_cost_bearing_study_without_cost_is_refused(tmp_path) -> None:
     """The arity change must raise, not mis-index column by column.
 
@@ -277,34 +303,39 @@ def test_resuming_a_cost_bearing_study_without_cost_is_refused(tmp_path) -> None
 
     from bayesflow_hpo.optimization.study import create_study
 
+    with_cost = _schema_for("inference_time")
+    without_cost = _schema_for(None)
+    assert len(with_cost[1]) == len(without_cost[1]) + 1
+
     storage = f"sqlite:///{(tmp_path / 'study.db').as_posix()}"
     create_study(
         study_name="s",
-        directions=["minimize"] * 3,
-        metric_names=["calibration_error", "nrmse", "inference_time"],
+        directions=with_cost[0],
+        metric_names=with_cost[1],
         storage=storage,
     )
     study = optuna.load_study(study_name="s", storage=storage)
-    study.set_user_attr(
-        "bayesflow_hpo_objective_schema",
-        ["calibration_error", "nrmse", "inference_time"],
-    )
+    study.set_user_attr("bayesflow_hpo_objective_schema", with_cost[1])
 
     with pytest.raises(ValueError, match="stores objectives"):
         create_study(
             study_name="s",
-            directions=["minimize"] * 2,
-            metric_names=["calibration_error", "nrmse"],
+            directions=without_cost[0],
+            metric_names=without_cost[1],
             storage=storage,
+            has_cost=False,
         )
 
 
-def test_warm_start_across_the_setting_is_refused(tmp_path) -> None:
+def test_warm_start_across_the_setting_is_refused() -> None:
     import optuna
 
     from bayesflow_hpo.optimization.study import create_study
 
-    source = optuna.create_study(directions=["minimize"] * 3)
+    with_cost = _schema_for("inference_time")
+    without_cost = _schema_for(None)
+
+    source = optuna.create_study(directions=with_cost[0])
     source.add_trial(
         optuna.trial.create_trial(
             params={},
@@ -313,18 +344,16 @@ def test_warm_start_across_the_setting_is_refused(tmp_path) -> None:
             state=optuna.trial.TrialState.COMPLETE,
         )
     )
-    source.set_user_attr(
-        "bayesflow_hpo_objective_schema",
-        ["calibration_error", "nrmse", "inference_time"],
-    )
+    source.set_user_attr("bayesflow_hpo_objective_schema", with_cost[1])
 
     with pytest.raises(ValueError, match="Cannot warm-start"):
         create_study(
             study_name="target",
-            directions=["minimize"] * 2,
-            metric_names=["calibration_error", "nrmse"],
+            directions=without_cost[0],
+            metric_names=without_cost[1],
             storage=None,
             warm_start_from=source,
+            has_cost=False,
         )
 
 
@@ -350,3 +379,53 @@ def test_warm_start_without_cost_ranks_on_every_metric() -> None:
     # Means are 0.5 and 0.2, so the second trial wins. Under has_cost=True
     # only the first column counts and the first trial would win instead.
     assert np.allclose(target.trials[0].values, [0.2, 0.2])
+
+
+# ---------------------------------------------------------------------------
+# Wiring: the keyword must actually reach the helper from the real call path
+# ---------------------------------------------------------------------------
+
+
+def test_create_study_stamps_whether_the_last_column_is_cost() -> None:
+    """Readers cannot recover this from the column names alone.
+
+    ``cost_metric=None`` over two quality metrics and
+    ``cost_metric="param_count"`` over one both produce two columns.
+    """
+    from bayesflow_hpo.optimization.study import create_study
+
+    with_cost = create_study(
+        study_name="a", storage=None,
+        directions=["minimize"] * 3,
+        metric_names=["calibration_error", "nrmse", "inference_time"],
+    )
+    without = create_study(
+        study_name="b", storage=None,
+        directions=["minimize"] * 2,
+        metric_names=["calibration_error", "nrmse"],
+        has_cost=False,
+    )
+    assert with_cost.user_attrs["bayesflow_hpo_has_cost_objective"] is True
+    assert without.user_attrs["bayesflow_hpo_has_cost_objective"] is False
+
+
+def test_dominance_pruning_never_reads_cost() -> None:
+    """Pins the corrected claim: cost is not part of any pruning comparison.
+
+    An earlier draft of this feature (and issue #81) asserted that
+    ``pruning_strategy="dominance"`` keeps cheap trials alive because they are
+    non-dominated on the cost axis.  It does not: the reference vectors come
+    from ``val_{metric}_step_{N}`` attrs written from ``objective_metrics``
+    alone.
+    """
+    import inspect
+
+    from bayesflow_hpo.optimization import pruning_strategies
+
+    source = inspect.getsource(pruning_strategies)
+    for token in ("cost", "inference_time", "param_count"):
+        assert token not in source, (
+            f"{token!r} appears in pruning_strategies.py; the docstrings in "
+            f"api.py, docs/optimization.md and CHANGELOG.md state that cost "
+            f"never enters a pruning comparison and would need updating"
+        )

@@ -282,15 +282,27 @@ def optimize(
         ``None`` to search over the quality metrics alone.
 
         ``None`` is not the same as ignoring the cost column when
-        selecting a trial: as a direction, cost steers the sampler
-        toward the cheap-model frontier and keeps a cheap, mediocre
-        trial alive under ``pruning_strategy="dominance"`` because it
-        is non-dominated on that axis. Dropping the direction does not
-        drop the measurement -- ``param_count`` and ``inference_time_s``
-        are still stored on every trial, so cost remains available for
-        post-hoc ranking -- and ``max_param_count`` still applies,
-        because it constrains what gets built rather than what gets
-        optimized.
+        selecting a trial. As an Optuna direction, cost shapes the
+        search itself: the sampler models it and spends budget
+        exploring the cheap-model frontier, and every cheap trial is
+        non-dominated on that axis however mediocre its quality, so it
+        enters the Pareto front that selection and warm-start read.
+        None of that is recoverable once the trials are spent.
+
+        (Intermediate pruning is unaffected either way: the strategies
+        in ``optimization.pruning_strategies`` compare only the
+        ``objective_metrics``, never cost.)
+
+        Dropping the direction does not drop the measurement --
+        ``param_count`` and ``inference_time_s`` are still stored on
+        every trial, so cost remains available for post-hoc ranking --
+        and ``max_param_count`` still applies, because it constrains
+        what gets built rather than what gets optimized.
+
+        Note that in ``"mean"`` mode, or ``"pareto"`` mode over a
+        single metric, ``None`` leaves the study with one direction;
+        ``pruning_strategy`` then does not apply and Optuna's own
+        pruner runs instead.
 
         The setting changes the arity of a study's stored objective
         tuple, so a study started with one value of it cannot be
