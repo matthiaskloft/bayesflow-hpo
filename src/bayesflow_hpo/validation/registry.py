@@ -181,9 +181,9 @@ _REQUIRES: dict[str, str] = {}  # extra dependency, e.g. "sklearn"
 _OUTPUTS: dict[str, tuple[str, ...]] = {}
 # Canonical names registered as JOINT metrics. A marker on the shared tables,
 # not a parallel registry: a joint name has to survive `producer_for_key`,
-# `_metric_names_for_pipeline`, `validate_objective_metric_kinds` and
+# `_pipeline_metrics`, `validate_objective_metric_kinds` and
 # `describe_metrics`, every one of which consults `_REGISTRY` / `_OUTPUTS` /
-# `_KINDS` and fails SILENTLY on a miss -- `_metric_names_for_pipeline` drops
+# `_KINDS` and fails SILENTLY on a miss -- `_pipeline_metrics` drops
 # names `producer_for_key` returns None for, so a joint objective would
 # request nothing, compute nothing, and take the penalty on every trial. A
 # second registry would need all four taught about it and is silent whenever

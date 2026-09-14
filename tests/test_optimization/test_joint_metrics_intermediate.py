@@ -89,6 +89,46 @@ def _callback(joint_name, **kwargs):
     return PeriodicValidationCallback(**params)
 
 
+class _RealApproximator:
+    """Returns per-parameter draws, so the real pipeline actually runs.
+
+    The whole point: `_run_lightweight_validation` wraps its body in a broad
+    `except Exception`, so a mock that makes the pipeline throw turns any
+    assertion about what the pipeline did into a vacuous one.
+    """
+
+    def __init__(self, param_keys, n_sims):
+        self.param_keys = param_keys
+        self.n_sims = n_sims
+
+    def get_weights(self):
+        return []
+
+    def sample(self, *, conditions, num_samples):
+        rng = np.random.default_rng(0)
+        return {
+            k: rng.normal(size=(self.n_sims, num_samples, 1))
+            for k in self.param_keys
+        }
+
+
+def _pipeline_callback(joint_name, **kwargs):
+    """A callback with NO validate_fn, so the pipeline branch is exercised."""
+    params = dict(
+        trial=_trial(),
+        approximator=_RealApproximator(["theta"], 8),
+        validation_data=_dataset(),
+        interval=1,
+        warmup=0,
+        n_posterior_samples=16,
+        validate_fn=None,
+        objective_metrics=["nrmse", joint_name],
+    )
+    params.update(kwargs)
+    return PeriodicValidationCallback(**params)
+
+
+
 # ---------------------------------------------------------------------------
 # The regression this exists to prevent
 # ---------------------------------------------------------------------------
@@ -125,7 +165,14 @@ def test_a_mixed_study_still_prunes_and_still_stops_early(joint_metric):
 
 
 def test_the_joint_metric_is_not_computed_at_an_interval(joint_metric):
-    """The point of the exclusion: it must not be paid for per interval."""
+    """The point of the exclusion: it must not be paid for per interval.
+
+    Driven through the REAL pipeline with a working approximator. An
+    earlier version of this test used a MagicMock, which made the pipeline
+    throw, `_run_lightweight_validation`'s broad `except Exception` swallow
+    it, and `calls == []` hold for the wrong reason -- it passed with the
+    exclusion removed entirely.
+    """
     calls: list[int] = []
 
     def expensive(inputs):
@@ -133,10 +180,41 @@ def test_the_joint_metric_is_not_computed_at_an_interval(joint_metric):
         return {"joint_slow": 0.1}
 
     joint_metric("joint_slow", expensive)
-    cb = _callback("joint_slow", validate_fn=None)
+    cb = _pipeline_callback("joint_slow")
     cb.on_epoch_end(0)
 
+    assert cb._step == 1, (
+        "intermediate validation did not complete, so this test would pass "
+        "for the wrong reason"
+    )
     assert calls == [], "the joint metric ran during intermediate validation"
+
+
+def test_the_pipeline_branch_still_prunes_and_stops_early(joint_metric):
+    """The default branch: no `validate_fn`, so the pipeline runs directly.
+
+    `_run_lightweight_validation` has TWO missing-key checks, one per
+    branch. The `validate_fn` branch was fixed to require only the
+    intermediate set; the pipeline branch was not, so it demanded the
+    excluded joint key, found it absent by design, returned None on every
+    interval, and `on_epoch_end` bailed before pruning AND
+    `_update_early_stopping` -- the exact regression the explicit set exists
+    to prevent, on the branch most studies take.
+    """
+    joint_metric("joint_slow", lambda inputs: {"joint_slow": 0.1})
+    cb = _pipeline_callback(
+        "joint_slow",
+        early_stopping_patience=2,
+        early_stopping_monitor="nrmse",
+    )
+
+    cb.on_epoch_end(0)
+
+    assert cb._step == 1
+    assert cb._consecutive_failures == 0
+    assert cb._early_stopping_values, (
+        "early stopping never received a value on the pipeline branch"
+    )
 
 
 def test_opting_in_computes_it(joint_metric):
@@ -235,3 +313,29 @@ def test_a_marginal_only_study_is_unchanged():
         "calibration_error",
     ]
     assert cb.intermediate_metrics == cb.objective_metrics
+
+
+def test_a_bare_primary_strategy_defaulting_onto_an_excluded_metric_is_caught(
+    joint_metric,
+):
+    """`pruning_strategy="primary"` leaves the metric to be defaulted.
+
+    The tuple form names the metric up front; the bare string defaults it to
+    `objective_metrics[0]`. If that default lands on an excluded joint
+    metric and the guard has already run, nothing refuses it and the failure
+    surfaces later as an uncaught KeyError from `_evaluate_pruning`,
+    mid-training.
+    """
+    joint_metric("joint_slow", lambda inputs: {"joint_slow": 0.1})
+    with pytest.raises(ValueError, match="no pruning decision"):
+        _callback(
+            "joint_slow",
+            objective_metrics=["joint_slow", "nrmse"],
+            pruning_strategy="primary",
+        )
+
+
+def test_the_tuple_primary_form_is_still_caught(joint_metric):
+    joint_metric("joint_slow", lambda inputs: {"joint_slow": 0.1})
+    with pytest.raises(ValueError, match="no pruning decision"):
+        _callback("joint_slow", pruning_strategy=("primary", "joint_slow"))

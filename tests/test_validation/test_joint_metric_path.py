@@ -489,3 +489,35 @@ def test_the_subsample_is_identical_across_trials():
         for _ in range(5)
     )
 
+
+def test_a_caller_keyed_metric_drops_the_keys_it_actually_emitted():
+    """`joint_metrics=` keys are caller-chosen and need not be registered.
+
+    Dropping by `output_keys_for(name)` alone falls back to the mapping key
+    itself for an unregistered name -- which is not what the callable emits
+    -- so nothing was dropped and a flattering partial mean reached the
+    objective, defeating the whole-trial invalidation for exactly the route
+    the docs point callers at.
+    """
+
+    def flaky(inputs: JointMetricInputs) -> dict[str, float]:
+        if inputs.cond_id == 1:
+            raise RuntimeError("boom")
+        return {"a_different_key": 0.01}
+
+    data = _dataset(["theta"], 3, 8)
+    result = run_validation_pipeline(
+        approximator=_FakeApproximator(["theta"], 8),
+        validation_data=data,
+        n_posterior_samples=16,
+        metrics=["nrmse"],
+        joint_metrics={"my_custom_joint": flaky},
+    )
+
+    assert "my_custom_joint" in result.failed_joint_metrics
+    assert "a_different_key" not in result.summary, (
+        "a partially computed joint metric reached the summary, so its "
+        "registered worst case was never applied"
+    )
+    assert "nrmse" in result.summary
+

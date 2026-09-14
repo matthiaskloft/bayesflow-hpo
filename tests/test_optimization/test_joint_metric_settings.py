@@ -142,6 +142,8 @@ def test_the_attribute_survives_a_json_round_trip():
     """It is stored by Optuna, so it has to be JSON-serializable."""
     import json
 
+    pytest.importorskip("sklearn", reason="the L-C2ST factory guards on it")
+
     from bayesflow_hpo.validation.c2st import make_lc2st_joint_metric
     from bayesflow_hpo.validation.tarp import make_tarp_joint_metric
 
@@ -190,3 +192,61 @@ def test_the_reference_mode_is_declared_from_how_it_was_built():
     random = make_tarp_joint_metric()
     assert provided.joint_metric_settings["reference_mode"] == "provided"
     assert random.joint_metric_settings["reference_mode"] == "random"
+
+
+def test_the_registered_lc2st_declares_the_factory_defaults():
+    """Otherwise the pin covers a configured L-C2ST but not the registry's.
+
+    A study stamped by `make_lc2st_validate_fn(n_folds=10)` and then resumed
+    with plain `objective_metrics=["lc2st"]` would declare nothing, so
+    `check_or_stamp_joint_metric_settings` would return early and the two
+    scales would mix unchecked.
+
+    The two are spelled separately -- the registered name cannot call the
+    factory, which guards on scikit-learn -- so they can drift. This is what
+    notices, and it needs the factory, hence the skip: the registered name
+    itself stays importable without scikit-learn, which
+    `test_importing_the_package_does_not_require_sklearn` covers.
+    """
+    pytest.importorskip("sklearn", reason="the L-C2ST factory guards on it")
+
+    from bayesflow_hpo.validation.c2st import (
+        _default_lc2st_metric,
+        make_lc2st_joint_metric,
+    )
+
+    assert (
+        _default_lc2st_metric.joint_metric_settings
+        == make_lc2st_joint_metric().joint_metric_settings
+    )
+
+
+def test_every_runnable_registered_joint_metric_declares_settings():
+    """A metric that declares nothing is silently exempt from the pin.
+
+    "Runnable" excludes the placeholders that `resolve_joint_metrics`
+    refuses outright -- `tarp_error` is registered so the routing surface
+    knows the name, but cannot run until a caller configures it, and the
+    configured callable is what declares. A placeholder can never reach the
+    pin, so it has nothing to declare; anything else that declares nothing
+    would be exempt by accident.
+    """
+    from bayesflow_hpo.validation.registry import _JOINT, get_metric
+
+    runnable = {
+        name: get_metric(name)
+        for name in _JOINT
+        if not getattr(get_metric(name), "_bf_hpo_requires_configuration", None)
+    }
+    assert runnable, "no runnable joint metrics found; the filter is wrong"
+
+    undeclared = sorted(
+        name
+        for name, fn in runnable.items()
+        if not getattr(fn, "joint_metric_settings", None)
+    )
+    assert undeclared == [], (
+        f"registered joint metrics {undeclared} declare no settings, so a "
+        "study using them records nothing and compares nothing"
+    )
+

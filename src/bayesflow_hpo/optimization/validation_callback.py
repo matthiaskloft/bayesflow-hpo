@@ -272,6 +272,16 @@ class PeriodicValidationCallback(Callback):
         # optimization that turns off stopping is a regression, not a
         # saving. Naming the set is what makes an absent joint key expected
         # rather than a fault.
+        # Default primary metric to first objective metric. MUST precede
+        # the excluded-metric guards below: `pruning_strategy="primary"`
+        # (the bare string) leaves `_primary_metric` None until here, so a
+        # guard running first would see None, wave it through, and let the
+        # default land on an excluded joint metric -- surfacing later as an
+        # uncaught KeyError from `_evaluate_pruning` mid-training rather
+        # than the clear refusal the guard exists to give.
+        if self._strategy_name == "primary" and self._primary_metric is None:
+            self._primary_metric = self.objective_metrics[0]
+
         self.include_joint_metrics = include_joint_metrics
         self.intermediate_metrics: list[CanonicalMetricName] = [
             m
@@ -332,9 +342,6 @@ class PeriodicValidationCallback(Callback):
                     [str(m) for m in self.objective_metrics],
                 )
 
-        # Default primary metric to first objective metric.
-        if self._strategy_name == "primary" and self._primary_metric is None:
-            self._primary_metric = self.objective_metrics[0]
 
     def on_epoch_end(self, epoch: int, logs: Any = None) -> None:
         """Run validation and check for pruning at scheduled intervals.
@@ -544,8 +551,17 @@ class PeriodicValidationCallback(Callback):
                     for k in self.intermediate_metrics
                     if k in result.summary
                 }
+                # `intermediate_metrics`, NOT `objective_metrics`. This
+                # is the branch taken when no `validate_fn` is supplied --
+                # the default -- and requiring every objective key here
+                # defeats the whole exclusion: the joint key is absent by
+                # design, so this returned None on every interval and
+                # `on_epoch_end` bailed before pruning AND
+                # `_update_early_stopping`. Exactly the regression the
+                # explicit set exists to prevent, reintroduced one branch
+                # over from where it was fixed.
                 missing = [
-                    k for k in self.objective_metrics
+                    k for k in self.intermediate_metrics
                     if k not in extracted
                 ]
                 if missing:

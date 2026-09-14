@@ -410,13 +410,23 @@ OBJECTIVE_ENCODING_VERSION = 2
 #: to the unregistered +inf fallback, and its direction entry now pins it at
 #: its real bound of 0.25. Two of those three numbers are not the current one,
 #: so a column carrying them is not comparable with a column produced today.
-#: The second move happens WITHIN encoding 2 and deliberately does not bump
-#: the version: it changes only the value substituted for trials that failed
-#: to report the metric, and its direction is the harmless one -- an old +inf
-#: loses to every valid value, so mixing the two reorders failures among
-#: themselves and never lets a failure outrank a success. That is the same
-#: residual ``mean_calibration_error`` documents below, and the opposite of
-#: the ``correlation`` case this set exists for.
+#: Membership here buys exactly one thing, and it is worth being precise
+#: about which: it refuses a study stamped with the LEGACY encoding, whose
+#: flat 1.0 differs from today's 0.25. It does nothing for the +inf move,
+#: because ``_check_study_compatibility`` returns early once
+#: ``encoding == OBJECTIVE_ENCODING_VERSION`` (``api.py``), so this set is
+#: never consulted for an encoding-2 study -- the only population the second
+#: move affects.
+#:
+#: That move deliberately does not bump the version. It changes only the
+#: value substituted for trials that FAILED to report the metric, and its
+#: direction is the harmless one: an old +inf loses to every valid value,
+#: including under ``objective_mode="mean"`` where it makes the whole mean
+#: +inf. So mixing the two reorders failures among themselves and never lets
+#: a failure outrank a success. Bumping would invalidate every resumable
+#: study to fix the ranking among failed trials. That is the same residual
+#: ``mean_calibration_error`` documents below, and the opposite of the
+#: ``correlation`` case this set exists for.
 #: `tests/test_objectives.py` derives this set by computing old and new values
 #: for every registered metric, so it cannot drift from the code again.
 ENCODING_CHANGED_AT_V2: frozenset[str] = frozenset(

@@ -538,6 +538,40 @@ def _subsampled_conditions(n_conditions: int, n_keep: int) -> set[int]:
     return {int(round(i)) for i in idx}
 
 
+def _lc2st_settings(
+    *,
+    n_folds: int,
+    n_null_trials: int,
+    clf_kwargs: dict[str, Any] | None,
+    seed: int,
+    max_conditions: int | None,
+) -> dict[str, Any]:
+    """Everything the L-C2ST statistic moves with, as a JSON-safe dict.
+
+    A free function rather than a line inside the factory, because the
+    REGISTERED ``"lc2st"`` name has to declare the same settings without
+    calling the factory: the factory guards on scikit-learn, and running it
+    at module scope would make an optional dependency mandatory. That is the
+    same trap `_default_lc2st_metric` exists to avoid, and reaching for
+    ``make_lc2st_joint_metric().joint_metric_settings`` to fill it walks
+    straight back into it.
+    """
+    return {
+        "n_folds": int(n_folds),
+        "n_null_trials": int(n_null_trials),
+        "seed": int(seed),
+        "max_conditions": (
+            None if max_conditions is None else int(max_conditions)
+        ),
+        # The classifier changes the statistic, but its kwargs are an
+        # arbitrary nested dict; a repr is comparable and JSON-safe, which
+        # is all the pin needs.
+        "clf_kwargs": (
+            None if clf_kwargs is None else repr(sorted(clf_kwargs.items()))
+        ),
+    }
+
+
 def make_lc2st_joint_metric(
     n_folds: int = 5,
     n_null_trials: int = 0,
@@ -630,20 +664,13 @@ def make_lc2st_joint_metric(
         )
         return {"lc2st": float(result.statistic)}
 
-    _lc2st_metric.joint_metric_settings = {  # type: ignore[attr-defined]
-        "n_folds": int(n_folds),
-        "n_null_trials": int(n_null_trials),
-        "seed": int(seed),
-        "max_conditions": (
-            None if max_conditions is None else int(max_conditions)
-        ),
-        # The classifier changes the statistic, but its kwargs are an
-        # arbitrary nested dict; a repr is comparable and JSON-safe, which
-        # is all the pin needs.
-        "clf_kwargs": None if clf_kwargs is None else repr(sorted(
-            clf_kwargs.items()
-        )),
-    }
+    _lc2st_metric.joint_metric_settings = _lc2st_settings(  # type: ignore[attr-defined]
+        n_folds=n_folds,
+        n_null_trials=n_null_trials,
+        clf_kwargs=clf_kwargs,
+        seed=seed,
+        max_conditions=max_conditions,
+    )
     return _lc2st_metric
 
 
@@ -660,6 +687,17 @@ def _default_lc2st_metric(inputs: JointMetricInputs) -> dict[str, float]:
     mechanism.)
     """
     return make_lc2st_joint_metric()(inputs)
+
+
+# The registered name must declare the SAME settings the default factory
+# produces, or the study pin covers a configured L-C2ST and not the
+# registry's own. It would then be stamped when a caller used
+# `make_lc2st_validate_fn(...)` and silently unstamped -- hence unchecked --
+# when the same study resumed with plain `objective_metrics=["lc2st"]` at
+# different defaults.
+_default_lc2st_metric.joint_metric_settings = _lc2st_settings(  # type: ignore[attr-defined]
+    n_folds=5, n_null_trials=0, clf_kwargs=None, seed=42, max_conditions=None
+)
 
 
 # Registered here rather than in `registry.py` because `c2st` imports the

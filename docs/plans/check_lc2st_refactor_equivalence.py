@@ -22,6 +22,14 @@ one mean, while the pipeline means over conditions per parameter and then
 across parameters. With a balanced grid both equal the grand mean; only the
 floating-point association order differs.
 
+One case this does NOT cover: `aggregate_condition_rows` skips NaN per key,
+so if a marginal metric returns NaN for some (condition, parameter) pairs,
+pooling and two-stage averaging weight the survivors differently and the two
+implementations genuinely disagree. The pipeline's per-parameter mean is the
+better-defined of the two -- a NaN in one parameter no longer reweights the
+others -- but it is a behaviour change, not an identity, and the number
+above does not speak to it.
+
 Requires scikit-learn.
 """
 

@@ -382,7 +382,7 @@ def compute_tarp_coverage(
 #: Marks a registered callable that cannot run at its default configuration.
 #:
 #: ``tarp_error`` has to be *registered* so that `producer_for_key` knows it,
-#: because `_metric_names_for_pipeline` drops names that lookup returns None
+#: because `_pipeline_metrics` drops names that lookup returns None
 #: for -- a metric absent from the registry is requested, computed and
 #: reported by nothing, with no error anywhere. But it cannot be *computed*
 #: without a reference provider, and a default that merely raised per

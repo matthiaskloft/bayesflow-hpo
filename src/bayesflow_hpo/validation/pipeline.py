@@ -86,6 +86,7 @@ def _run_joint_metrics(
     cond_id: int,
     n_conditions: int,
     failed_joint: dict[str, str],
+    emitted_keys: dict[str, set[str]],
 ) -> dict[str, float]:
     """Evaluate joint metrics for one condition, under a per-metric guard.
 
@@ -141,12 +142,21 @@ def _run_joint_metrics(
             continue
         for key, value in result.items():
             row[key] = float(value)
+        # Recorded so that a LATER failure can drop what this condition
+        # already contributed. The registry's declared outputs are not
+        # enough on their own: a metric passed through `joint_metrics=`
+        # carries a caller-chosen mapping key that need not be registered
+        # at all, and `output_keys_for` then falls back to that key itself
+        # -- which is not what the callable emits, so nothing would be
+        # dropped and a partial mean would reach the objective.
+        emitted_keys.setdefault(name, set()).update(result)
     return row
 
 
 def _aggregate_joint_rows(
     joint_condition_rows: list[dict[str, float]],
     failed_joint: dict[str, str],
+    emitted_keys: dict[str, set[str]],
 ) -> dict[str, float]:
     """Mean each joint key across conditions, dropping invalidated metrics.
 
@@ -161,6 +171,12 @@ def _aggregate_joint_rows(
     """
     dropped: set[str] = set()
     for name in failed_joint:
+        # Both sources: what the metric was observed to emit before it
+        # failed, and what a registered name declares. The observed set is
+        # empty when the metric failed on the very first condition, and the
+        # declared set is only meaningful for a registered name, so neither
+        # covers the other.
+        dropped.update(emitted_keys.get(name, ()))
         dropped.update(output_keys_for(name))
 
     keys: list[str] = []
@@ -247,6 +263,9 @@ def run_validation_pipeline(
     # score cannot depend on WHICH condition failed and a model cannot
     # benefit from failing on the conditions it finds hardest.
     failed_joint: dict[str, str] = {}
+    # Keys each joint metric was seen to emit, so a failure on a later
+    # condition can withdraw what an earlier one contributed.
+    emitted_keys: dict[str, set[str]] = {}
 
     # Per-parameter condition rows: {param_key: [row_dicts]}
     param_condition_rows: dict[str, list[dict[str, Any]]] = {}
@@ -279,6 +298,7 @@ def run_validation_pipeline(
                 cond_id=cond_id,
                 n_conditions=len(validation_data.simulations),
                 failed_joint=failed_joint,
+                emitted_keys=emitted_keys,
             )
             joint_condition_rows.append(joint_row)
         timing["metrics"] += time.perf_counter() - t1
@@ -345,7 +365,9 @@ def run_validation_pipeline(
         # every trial, and the study would silently optimize a constant.
         overall_summary = {
             **per_parameter_mean_summary,
-            **_aggregate_joint_rows(joint_condition_rows, failed_joint),
+            **_aggregate_joint_rows(
+            joint_condition_rows, failed_joint, emitted_keys
+        ),
         }
 
         return ValidationResult(
@@ -366,7 +388,9 @@ def run_validation_pipeline(
     condition_df = pd.DataFrame(cond_rows)
     summary = {
         **aggregate_condition_rows(cond_rows),
-        **_aggregate_joint_rows(joint_condition_rows, failed_joint),
+        **_aggregate_joint_rows(
+            joint_condition_rows, failed_joint, emitted_keys
+        ),
     }
 
     return ValidationResult(
