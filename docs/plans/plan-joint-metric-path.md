@@ -403,9 +403,16 @@ afford to be an axis.** Measured through the repository's own
 
 | n_sims | n_params | n_obs | L-C2ST ms/condition |
 | ---: | ---: | ---: | ---: |
-| 100 | 2 | 5 | 768 |
+| 100 | 2 | 5 | 431 |
 | 500 | 15 | 50 | 55,667 |
 | 500 | 60 | 50 | 79,814 |
+
+An independent second run replicated the 500 × 15 figure at 53,633 ms (a 4%
+spread) with an identical statistic of 0.0654, confirming the measurement is
+deterministic and not an artefact of machine load. The small-shape row is that
+second run's figure: the first run's 768 ms for it included one-time sklearn
+warm-up, which the replication separates out. Neither correction touches the
+conclusion.
 
 At matched shapes (500 × 15) that is **~700× TARP**: 56 seconds per condition,
 so roughly nine minutes for a ten-condition validation, per trial. It fits an
