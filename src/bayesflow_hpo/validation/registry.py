@@ -488,8 +488,19 @@ def resolve_joint_metrics(names: list[str]) -> dict[str, JointMetricFn]:
     resolved: dict[str, JointMetricFn] = {}
     for n in names:
         fn = get_metric(n)  # raises on an unknown name, joint or not
-        if is_joint_metric(n):
-            resolved[n] = fn  # type: ignore[assignment]
+        if not is_joint_metric(n):
+            continue
+        # A metric registered only so the routing surface knows its name,
+        # but which cannot run until a caller configures it. Refused HERE,
+        # before the pipeline pays for any inference: letting it raise per
+        # condition instead would route it through the joint guard, which
+        # invalidates the metric and substitutes its worst case -- correct
+        # behaviour for a numerical failure, and far too quiet for a
+        # configuration one the caller can fix in a line.
+        message = getattr(fn, "_bf_hpo_requires_configuration", None)
+        if message:
+            raise ValueError(message)
+        resolved[n] = fn  # type: ignore[assignment]
     return resolved
 
 

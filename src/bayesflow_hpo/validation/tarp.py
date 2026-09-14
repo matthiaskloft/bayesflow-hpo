@@ -43,6 +43,13 @@ from typing import Any
 
 import numpy as np
 
+from bayesflow_hpo.objectives import register_metric_direction
+from bayesflow_hpo.validation.registry import (
+    JointMetricFn,
+    JointMetricInputs,
+    register_joint_metric,
+)
+
 # Cap on the elements materialized per chunk of the distance computation.
 _TARP_CHUNK_ELEMENTS = 2e7
 
@@ -366,3 +373,232 @@ def compute_tarp_coverage(
         "n_draws": int(n_draws),
         "n_parameters": int(n_params),
     }
+
+
+# ---------------------------------------------------------------------------
+# TARP as a joint metric
+# ---------------------------------------------------------------------------
+
+#: Marks a registered callable that cannot run at its default configuration.
+#:
+#: ``tarp_error`` has to be *registered* so that `producer_for_key` knows it,
+#: because `_metric_names_for_pipeline` drops names that lookup returns None
+#: for -- a metric absent from the registry is requested, computed and
+#: reported by nothing, with no error anywhere. But it cannot be *computed*
+#: without a reference provider, and a default that merely raised per
+#: condition would be caught by the joint guard, penalized, and reported as
+#: a failed metric: loud enough to find afterwards, too late to act on. This
+#: attribute lets `resolve_joint_metrics` refuse at resolve time, before any
+#: inference is paid for.
+REQUIRES_CONFIGURATION = "_bf_hpo_requires_configuration"
+
+
+def _references_for_condition(
+    reference_points: Any, inputs: JointMetricInputs
+) -> np.ndarray:
+    """Resolve the caller's reference specification for one condition.
+
+    Accepts a callable evaluated per condition, or a sequence of arrays
+    indexed by ``cond_id``. A single ``(n_sims, n_params)`` array is
+    **rejected**, and that is the point of this function: the truths differ
+    from condition to condition, so one array reused across all of them is a
+    different metric on each -- reported under one name, averaged, and
+    indistinguishable afterwards from a real value. It is also the form a
+    caller reaches for first.
+    """
+    if callable(reference_points):
+        refs = reference_points(inputs)
+    elif isinstance(reference_points, np.ndarray):
+        raise TypeError(
+            "reference_points must be a callable or one array PER CONDITION "
+            f"(a sequence of {inputs.n_conditions} arrays), not a single "
+            f"array of shape {reference_points.shape}. Reference points are "
+            "compared against each condition's own true values, so one array "
+            "reused across conditions measures something different on every "
+            "condition while reporting a single averaged number. Pass "
+            "`lambda inputs: ...` to derive them from "
+            "`inputs.sim_batch`, or a list indexed by `inputs.cond_id`."
+        )
+    else:
+        try:
+            refs = reference_points[inputs.cond_id]
+        except (IndexError, KeyError) as exc:
+            raise ValueError(
+                f"No reference points for condition {inputs.cond_id}: the "
+                f"sequence must cover all {inputs.n_conditions} conditions."
+            ) from exc
+
+    refs = np.asarray(refs, dtype=float)
+    expected = (inputs.draws.shape[0], inputs.draws.shape[2])
+    if refs.shape != expected:
+        raise ValueError(
+            f"Reference points for condition {inputs.cond_id} have shape "
+            f"{refs.shape}, expected {expected} "
+            "(n_simulations, n_parameters)."
+        )
+    return refs
+
+
+def make_tarp_joint_metric(
+    reference_points: Any = None,
+    *,
+    resolution: int = 20,
+    metric: str = "euclidean",
+    standardize: bool = True,
+    seed: int = 42,
+) -> JointMetricFn:
+    """Create a TARP metric for the validation pipeline's joint dispatch.
+
+    Which key it emits depends on the reference, and deliberately so:
+
+    - ``reference_points=None`` draws them at random and emits
+      **``tarp_error_random``**, registered as a *diagnostic*.
+    - a provider emits **``tarp_error``**, registered as an *objective*.
+
+    Two numbers that cannot be compared must not be comparable by name.
+    Section 4.3 of Lemos et al. (2023) is explicit that a TARP run with an
+    ``x``-independent reference point is blind to
+    ``p_hat(theta|x) = p(theta)`` in the same way HPD coverage is, so the
+    two keys are different statistics with different sensitivity -- one of
+    which cannot see the failure the test is most worth running for. A
+    single key carrying a mode field would be averaged across modes by
+    something eventually, and a stored trial value would be uninterpretable
+    six months later from `trials_to_dataframe()` alone.
+
+    Parameters
+    ----------
+    reference_points
+        ``None`` for the random-reference diagnostic. Otherwise either a
+        ``Callable[[JointMetricInputs], np.ndarray]`` returning
+        ``(n_sims, n_params)`` for that condition, or a sequence of such
+        arrays indexed by ``cond_id``. A single array reused across
+        conditions is rejected; see :func:`_references_for_condition`.
+    resolution
+        Number of credibility levels the coverage curve is evaluated at.
+    metric
+        ``"euclidean"`` or ``"manhattan"``.
+    standardize
+        Standardize each parameter dimension before computing distances.
+    seed
+        Seed for the random reference draw. Unused when *reference_points*
+        is given. Not defaulted to ``None``: with ``seed=None`` two
+        identical calls return different numbers, which as an HPO objective
+        means trials are not comparable.
+
+    Returns
+    -------
+    JointMetricFn
+        Callable emitting one key for one condition.
+
+    Warnings
+    --------
+    **A provider that samples the posterior it is auditing produces a
+    reference that looks data-dependent and is not.** The provider receives
+    the whole :class:`JointMetricInputs`, including ``approximator`` and
+    ``draws``, because a real reference needs ``sim_batch``. Deriving the
+    reference from the estimator under test reintroduces exactly the blind
+    spot the two-key split exists to prevent, and *nothing can detect it* --
+    the result is reported as ``tarp_error``, the key that claims teeth.
+    Derive references from the data, never from the posterior.
+
+    ``reference_mode`` is reported as ``"provided"``, never
+    ``"data_dependent"``: supplying an array says nothing about how it was
+    built.
+
+    Notes
+    -----
+    Cheap enough to run per condition without a sub-sample: ~79 ms at 500
+    simulations with 15 parameters, against ~54 s for L-C2ST on the same
+    draws. Resolution is free -- 20 levels and 100 levels measured the same.
+    See ``docs/plans/plan-joint-metric-path.md`` D9.
+
+    References
+    ----------
+    Lemos, P., Coogan, A., Hezaveh, Y., & Perreault-Levasseur, L. (2023).
+        Sampling-based accuracy testing of posterior estimators for general
+        inference. *ICML 2023*. Algorithm 2; Section 4.3.
+    """
+    key = "tarp_error_random" if reference_points is None else "tarp_error"
+
+    def _tarp_metric(inputs: JointMetricInputs) -> dict[str, float]:
+        refs = (
+            None
+            if reference_points is None
+            else _references_for_condition(reference_points, inputs)
+        )
+        result = compute_tarp_coverage(
+            inputs.draws,
+            inputs.true_values,
+            reference_points=refs,
+            resolution=resolution,
+            metric=metric,
+            standardize=standardize,
+            # Per condition, so conditions do not share a reference draw.
+            seed=seed + inputs.cond_id,
+        )
+        return {key: float(result["tarp_error"])}
+
+    return _tarp_metric
+
+
+def _tarp_error_needs_a_reference(inputs: JointMetricInputs) -> dict[str, float]:
+    """Placeholder for the registered ``tarp_error`` name.
+
+    Never called: `resolve_joint_metrics` refuses it at resolve time. See
+    :data:`REQUIRES_CONFIGURATION`.
+    """
+    raise ValueError(_TARP_ERROR_NEEDS_REFERENCE)  # pragma: no cover
+
+
+_TARP_ERROR_NEEDS_REFERENCE = (
+    "'tarp_error' requires reference points and cannot run at its "
+    "registered default -- that is what distinguishes it from "
+    "'tarp_error_random'. Build it with "
+    "`make_tarp_joint_metric(reference_points=...)` and pass it to "
+    "`run_validation_pipeline(joint_metrics={'tarp_error': fn})`, or use "
+    "'tarp_error_random' if a random reference is what you want (a "
+    "diagnostic: Lemos et al. 2023 Sec. 4.3 shows it cannot detect a "
+    "posterior that ignores its data)."
+)
+
+setattr(
+    _tarp_error_needs_a_reference,
+    REQUIRES_CONFIGURATION,
+    _TARP_ERROR_NEEDS_REFERENCE,
+)
+
+
+register_joint_metric(
+    "tarp_error",
+    _tarp_error_needs_a_reference,
+    description=(
+        "TARP expected-coverage error against SUPPLIED reference points "
+        "(joint, data-dependent; requires configuration)"
+    ),
+    kind="objective",
+    overwrite=True,
+)
+
+register_joint_metric(
+    "tarp_error_random",
+    make_tarp_joint_metric(),
+    description=(
+        "TARP expected-coverage error with random reference points "
+        "(diagnostic: blind to a posterior that ignores its data)"
+    ),
+    kind="diagnostic",
+    overwrite=True,
+)
+
+# Both are medians over credibility levels of |ECP - level|, and both terms
+# lie in [0, 1], so the deviation is bounded by 1 and so is its median.
+# Lower is better. Unlike `log_gamma` no infinite penalty is needed.
+#
+# 1.0 is a loose bound rather than a tight one: the attainable worst is 0.5,
+# reached when every f_i collapses to one end so that ECP is 0 or 1 at every
+# level. A penalty only has to dominate real values, and quoting the
+# provable bound avoids a penalty that a pathological trial could beat.
+register_metric_direction("tarp_error", higher_is_better=False, worst_raw=1.0)
+register_metric_direction(
+    "tarp_error_random", higher_is_better=False, worst_raw=1.0
+)

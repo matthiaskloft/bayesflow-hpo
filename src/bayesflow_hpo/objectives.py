@@ -463,6 +463,15 @@ ENCODING_UNCHANGED_AT_V2: frozenset[str] = frozenset(
         "mean_calibration_error",
         "rmse",
         "nrmse",
+        # Both TARP keys postdate encoding 2, so no pre-v2 study can hold a
+        # column for either. Their penalty is unchanged in any case: the old
+        # unregistered fallback was a flat 1.0 and their `worst_raw` is 1.0,
+        # the provable bound on a median of |ECP - level|. Listed rather
+        # than omitted because omission means "encoding-sensitive", which
+        # would refuse to resume studies over metrics with no encoding
+        # history to differ from -- see `mean_calibration_error` above.
+        "tarp_error",
+        "tarp_error_random",
         "z_score",
         "sbc_ks",
         "coverage",

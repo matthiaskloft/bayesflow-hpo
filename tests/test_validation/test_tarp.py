@@ -356,3 +356,163 @@ def test_seeding_tarp_like_the_simulator_is_safe():
     assert same["tarp_error"] < 0.15
     assert other["tarp_error"] < 0.15
 
+
+# ---------------------------------------------------------------------------
+# D6 -- the two-key split and the reference contract
+# ---------------------------------------------------------------------------
+
+
+def _joint_inputs(n_sims=60, n_draws=40, n_params=2, cond_id=0, n_conditions=3):
+    from bayesflow_hpo.validation.registry import JointMetricInputs
+
+    draws, truth = _gaussian_case(
+        n_sims=n_sims, n_draws=n_draws, n_params=n_params, correct=True
+    )
+    return JointMetricInputs(
+        draws=draws,
+        true_values=truth,
+        param_keys=tuple(f"p{i}" for i in range(n_params)),
+        sim_batch={f"p{i}": truth[:, i] for i in range(n_params)}
+        | {"x": np.zeros((n_sims, 2))},
+        data_keys=("x",),
+        approximator=object(),
+        cond_id=cond_id,
+        n_conditions=n_conditions,
+    )
+
+
+def test_the_reference_mode_decides_the_key():
+    """Two numbers that cannot be compared must not be comparable by name."""
+    from bayesflow_hpo.validation.tarp import make_tarp_joint_metric
+
+    inputs = _joint_inputs()
+
+    random_out = make_tarp_joint_metric()(inputs)
+    provided_out = make_tarp_joint_metric(
+        reference_points=lambda i: np.zeros((i.draws.shape[0], i.draws.shape[2]))
+    )(inputs)
+
+    assert set(random_out) == {"tarp_error_random"}
+    assert set(provided_out) == {"tarp_error"}
+
+
+def test_tarp_error_is_an_objective_and_the_random_key_is_a_diagnostic():
+    """A diagnostic cannot be optimized, which is the guard's whole job."""
+    from bayesflow_hpo.validation.registry import validate_objective_metric_kinds
+
+    validate_objective_metric_kinds(["tarp_error"])  # must not raise
+    with pytest.raises(ValueError, match="Diagnostic metric"):
+        validate_objective_metric_kinds(["tarp_error_random"])
+
+
+def test_a_single_array_reused_across_conditions_is_rejected():
+    """The form a caller reaches for first, and it is a different metric
+    on every condition."""
+    from bayesflow_hpo.validation.tarp import make_tarp_joint_metric
+
+    inputs = _joint_inputs()
+    shared = np.zeros((inputs.draws.shape[0], inputs.draws.shape[2]))
+    fn = make_tarp_joint_metric(reference_points=shared)
+
+    with pytest.raises(TypeError, match="PER CONDITION"):
+        fn(inputs)
+
+
+def test_a_sequence_of_arrays_is_indexed_by_condition():
+    from bayesflow_hpo.validation.tarp import make_tarp_joint_metric
+
+    per_condition = [
+        np.full((60, 2), float(c)) for c in range(3)
+    ]
+    fn = make_tarp_joint_metric(reference_points=per_condition)
+
+    values = [fn(_joint_inputs(cond_id=c))["tarp_error"] for c in range(3)]
+    assert len({round(v, 12) for v in values}) == 3, (
+        "every condition produced the same value, so the sequence was not "
+        "actually indexed by cond_id"
+    )
+
+
+def test_a_short_sequence_says_which_condition_is_missing():
+    from bayesflow_hpo.validation.tarp import make_tarp_joint_metric
+
+    fn = make_tarp_joint_metric(reference_points=[np.zeros((60, 2))])
+    with pytest.raises(ValueError, match="condition 2"):
+        fn(_joint_inputs(cond_id=2))
+
+
+def test_a_misshapen_reference_is_rejected():
+    from bayesflow_hpo.validation.tarp import make_tarp_joint_metric
+
+    fn = make_tarp_joint_metric(
+        reference_points=lambda i: np.zeros((5, 5))
+    )
+    with pytest.raises(ValueError, match="expected"):
+        fn(_joint_inputs())
+
+
+def test_the_provider_receives_the_data_it_needs():
+    """A real reference is derived from sim_batch, so it must be there."""
+    from bayesflow_hpo.validation.tarp import make_tarp_joint_metric
+
+    seen = {}
+
+    def provider(inputs):
+        seen["keys"] = set(inputs.sim_batch)
+        seen["data_keys"] = inputs.data_keys
+        seen["cond"] = inputs.cond_id
+        return np.zeros((inputs.draws.shape[0], inputs.draws.shape[2]))
+
+    make_tarp_joint_metric(reference_points=provider)(_joint_inputs(cond_id=1))
+    assert "x" in seen["keys"]
+    assert seen["data_keys"] == ("x",)
+    assert seen["cond"] == 1
+
+
+def test_conditions_do_not_share_a_reference_draw():
+    """Sharing one would correlate the per-condition noise."""
+    from bayesflow_hpo.validation.tarp import make_tarp_joint_metric
+
+    fn = make_tarp_joint_metric(seed=5)
+    a = fn(_joint_inputs(cond_id=0))["tarp_error_random"]
+    b = fn(_joint_inputs(cond_id=1))["tarp_error_random"]
+    assert a != b
+
+
+def test_tarp_error_cannot_run_at_its_registered_default():
+    """Registered so the routing surface knows it; refused before inference.
+
+    It has to be in the registry, because `_metric_names_for_pipeline` drops
+    names `producer_for_key` returns None for. It cannot be computed without
+    a reference. Raising per condition instead would route it through the
+    joint guard, which invalidates the metric and substitutes its worst
+    case -- correct for a numerical failure, far too quiet for a
+    configuration one.
+    """
+    from bayesflow_hpo.validation.registry import (
+        is_joint_metric,
+        producer_for_key,
+        resolve_joint_metrics,
+    )
+
+    assert is_joint_metric("tarp_error")
+    assert producer_for_key("tarp_error") == "tarp_error"
+    with pytest.raises(ValueError, match="requires reference points"):
+        resolve_joint_metrics(["tarp_error"])
+
+
+def test_the_random_key_runs_at_its_registered_default():
+    from bayesflow_hpo.validation.registry import resolve_joint_metrics
+
+    fn = resolve_joint_metrics(["tarp_error_random"])["tarp_error_random"]
+    out = fn(_joint_inputs())
+    assert set(out) == {"tarp_error_random"}
+    assert np.isfinite(out["tarp_error_random"])
+
+
+def test_both_keys_have_a_bounded_penalty():
+    """A median of |ECP - level| is bounded by 1; no infinite penalty needed."""
+    from bayesflow_hpo.objectives import worst_objective_value
+
+    assert worst_objective_value("tarp_error") == 1.0
+    assert worst_objective_value("tarp_error_random") == 1.0

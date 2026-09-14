@@ -172,7 +172,7 @@ Feature implementations and their backing references.
 | Correlation versus agreement | `validation/registry.py` | Bland & Altman (1986) |
 | Point-summary/loss consistency | `validation/registry.py` | Gneiting (2011) |
 | ECE term not claimed for `mean_calibration_error` | `validation/registry.py` | Naeini et al. (2015) |
-| TARP (designed, not implemented) | `plans/plan-joint-metric-path.md` | Lemos et al. (2023), Secs. 3.1--3.2, Thm. 3, Alg. 2 |
+| TARP joint coverage (`tarp_error`, `tarp_error_random`) | `validation/tarp.py` | Lemos et al. (2023), Secs. 3.1--3.2, 4.1--4.3, Thm. 3, Alg. 2 |
 | SBI benchmarking | overall | Lueckmann et al. (2021) |
 
 ### BayesFlow Diagnostic Wrappers
@@ -455,10 +455,13 @@ Establishes that point summaries must be evaluated with a consistent loss: the m
 Sampling-based accuracy testing of posterior estimators for general inference. In *Proceedings of the 40th International Conference on Machine Learning* (Vol. 202, pp. 19256–19273). PMLR. https://doi.org/10.48550/arXiv.2302.03026
 
 Introduces Tests of Accuracy with Random Points (TARP) for joint posterior
-coverage testing using posterior samples. Tracked as a future extension; not
-currently implemented. OpenAlex work `W4319453761`.
+coverage testing using posterior samples. Implemented in
+`bayesflow_hpo.validation.tarp` as the joint metrics `tarp_error` (provided
+reference points) and `tarp_error_random` (diagnostic). OpenAlex work
+`W4319453761`.
 
-Verified against full text (2026-09-14) for the design in
+Verified against full text (2026-09-14, extended 2026-09-14 for the
+implementation) for the design in
 [`plans/plan-joint-metric-path.md`](plans/plan-joint-metric-path.md):
 
 - **Sec. 3.1** ("High posterior density coverage testing") is the section
@@ -473,6 +476,38 @@ Verified against full text (2026-09-14) for the design in
 - **Sec. 3.2** ("Distance to random point coverage testing") defines the TARP
   region generator as the *positionable* generator producing spherical regions
   around a reference position.
+- **Algorithm 2** is the estimator implemented. Transcribed from the PDF
+  rather than from the converted text, because the conversion renders the
+  algorithm body as an image and the math extraction is lossy exactly there:
+
+  ```
+  for i = 1 to N_sims:
+      theta_r ~ p~(theta_r | x)                  # reference point
+      f_i = (1/n) sum_j 1[d(theta_ij, theta_r) < d(theta*_i, theta_r)]
+  ECP(p_hat, alpha, D_theta_r) = (1/N_sims) sum_i 1(f_i < 1 - alpha)
+  ```
+
+  So `f_i` is the fraction of posterior draws lying closer to the reference
+  point than the truth does, and the coverage curve is the ECDF of the `f_i`
+  -- the diagonal for an exact posterior. The header names the inputs as a
+  set of simulations, a "parameter distance metric `d`", and a "reference
+  point sampling distribution `p~(.|x)`"; the dependence on `x` is the
+  paper's own notation, not an embellishment.
+- **Sec. 4** records the experimental setup the implementation's defaults
+  follow: parameters normalized "to the range [0, 1]", reference points
+  generated "uniformly in the D-dimensional hypercube", and "the Euclidean
+  or L2 distance as a metric". Sec. 4.1's Gaussian toy model uses
+  `theta* ~ U(-5, 5)` with `log sigma ~ U(-5, -1)`, which is what the test
+  suite reproduces -- and the small sigma matters, since at a larger one the
+  "correct case" stops being calibrated under the truncated prior.
+- **Sec. 4.2** explores "the dependence on the reference point distribution
+  and the distance metric", which is the basis for treating the metric
+  choice as not changing the verdict.
+- **Sec. 4.3** is the section behind the two-key split: TARP with an
+  `x`-*independent* reference point shares HPD coverage's blindness to
+  `p_hat(theta|x) = p(theta)`. This is why `tarp_error_random` is registered
+  as a diagnostic and only a supplied reference emits the objective key
+  `tarp_error`.
 
 The earlier attribution of the HPD-blindness result to "Sec. 3.1" was carried
 between repositories without a full-text check. It is correct.

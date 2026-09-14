@@ -37,6 +37,10 @@ from bayesflow_hpo.validation.registry import (
 )
 from bayesflow_hpo.validation.result import ValidationResult
 from bayesflow_hpo.validation.sbc_tests import compute_sbc_uniformity_tests
+from bayesflow_hpo.validation.tarp import (
+    compute_tarp_coverage,
+    make_tarp_joint_metric,
+)
 
 __all__ = [
     "DEFAULT_METRICS",
@@ -46,6 +50,8 @@ __all__ = [
     "MetricFn",
     "ValidationDataset",
     "ValidationResult",
+    "compute_tarp_coverage",
+    "make_tarp_joint_metric",
     "describe_metrics",
     "aggregate_condition_rows",
     "compute_condition_metrics",
