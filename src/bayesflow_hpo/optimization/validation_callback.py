@@ -298,8 +298,17 @@ class PeriodicValidationCallback(Callback):
             # optimize. With a single metric the mean is that metric, so one
             # expression is right in both cases.
             primary_val = float(np.mean(list(scores.values())))
+            # Reported even when pruning is off: the intermediate values are
+            # telemetry in their own right, and reporting alone prunes
+            # nothing.
             self.trial.report(primary_val, step=self._step)
-            if self.trial.should_prune():
+            # `_evaluate_pruning` returns False for "none", so the
+            # multi-objective branch has always honoured it. This branch
+            # consulted Optuna's pruner unconditionally, so a study that
+            # asked for no pruning still got the default MedianPruner's
+            # verdict -- and `optimize()` installs this callback whenever
+            # early stopping is on, including with `pruning_strategy="none"`.
+            if self._strategy_name != "none" and self.trial.should_prune():
                 raise optuna.TrialPruned()
 
     def _update_early_stopping(

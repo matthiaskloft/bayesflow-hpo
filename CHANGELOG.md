@@ -129,6 +129,16 @@
   Studies written before the stamp existed all carried a cost column, so its
   absence defaults to `True` and their plots are unchanged.
 
+- **`pruning_strategy="none"` did not disable pruning on a single-objective
+  study.** `_evaluate_pruning` returns `False` for `"none"`, so the
+  multi-objective path always honoured it, but the single-objective path
+  called `trial.should_prune()` unconditionally -- handing the decision to
+  whichever pruner `create_study()` installed, by default `MedianPruner`.
+  `optimize()` attaches this callback whenever early stopping is on, so a run
+  that never asked for pruning could still have trials terminated. The
+  strategy is now checked before Optuna's pruner is consulted; intermediate
+  values are still reported, since reporting alone prunes nothing.
+
 - **Single-objective intermediate pruning reported the wrong quantity.**
   `PeriodicValidationCallback` reported `objective_metrics[0]` to Optuna's
   pruner for a one-direction study, while mean mode's actual objective is the

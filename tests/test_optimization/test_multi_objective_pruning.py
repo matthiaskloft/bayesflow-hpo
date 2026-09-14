@@ -729,3 +729,94 @@ class TestSingleObjectiveStudy:
                 objective_metrics=["calibration_error", "nrmse"],
             )
         assert "is ignored" not in caplog.text
+
+
+class TestSingleObjectivePruningHonoursConfig:
+    """Regressions for the one-direction study ``cost_metric=None`` exposes."""
+
+    class _AlwaysPrune(optuna.pruners.BasePruner):
+        def prune(self, study, trial):
+            return True
+
+    def _run(self, scores, pruning_strategy, metrics, pruner=None):
+        study = optuna.create_study(
+            directions=["minimize"],
+            pruner=pruner or self._AlwaysPrune(),
+        )
+        callback = PeriodicValidationCallback(
+            trial=study.ask(),
+            approximator=None,
+            validation_data=_DUMMY_VALIDATION_DATA,
+            interval=1,
+            warmup=0,
+            pruning_strategy=pruning_strategy,
+            objective_metrics=metrics,
+        )
+        with patch.object(
+            callback, "_run_lightweight_validation", return_value=scores
+        ):
+            try:
+                callback.on_epoch_end(epoch=0)
+            except optuna.TrialPruned:
+                return "pruned"
+        return "kept"
+
+    def test_pruning_strategy_none_is_honoured(self):
+        """`"none"` must disable pruning here as it does multi-objective.
+
+        `_evaluate_pruning` returns False for `"none"`, but this branch
+        consulted Optuna's pruner unconditionally -- so a study that asked
+        for no pruning got the default MedianPruner's verdict anyway.
+        `optimize()` installs this callback whenever early stopping is on,
+        so the combination is reachable without asking for pruning at all.
+        """
+        assert self._run(
+            {"calibration_error": 0.3, "nrmse": 0.0},
+            pruning_strategy="none",
+            metrics=["calibration_error", "nrmse"],
+        ) == "kept"
+
+    def test_pruning_still_happens_when_a_strategy_is_configured(self):
+        """The fix must not disable pruning wholesale."""
+        assert self._run(
+            {"calibration_error": 0.3, "nrmse": 0.0},
+            pruning_strategy="dominance",
+            metrics=["calibration_error", "nrmse"],
+        ) == "pruned"
+
+    def test_reported_value_is_invariant_to_metric_order(self):
+        """The mean is commutative; the reported scalar must be too.
+
+        Reporting `objective_metrics[0]` made the pruning decision depend on
+        which metric the caller happened to list first -- with conflicting
+        rankings (`calibration_error` 0.3 against `nrmse` 0.0) the two
+        orderings reported 0.3 and 0.0, a prune and a keep on the same trial.
+        """
+        scores = {"calibration_error": 0.3, "nrmse": 0.0}
+        reported = []
+
+        for metrics in (
+            ["calibration_error", "nrmse"],
+            ["nrmse", "calibration_error"],
+        ):
+            study = optuna.create_study(directions=["minimize"])
+            trial = study.ask()
+            callback = PeriodicValidationCallback(
+                trial=trial,
+                approximator=None,
+                validation_data=_DUMMY_VALIDATION_DATA,
+                interval=1,
+                warmup=0,
+                pruning_strategy="none",
+                objective_metrics=metrics,
+            )
+            with patch.object(
+                callback, "_run_lightweight_validation", return_value=scores
+            ), patch.object(
+                trial, "report", side_effect=lambda v, step: reported.append(v)
+            ):
+                callback.on_epoch_end(epoch=0)
+
+        assert reported == [pytest.approx(0.15), pytest.approx(0.15)], (
+            f"metric order changed the reported value: {reported}"
+        )
