@@ -49,7 +49,29 @@ _N_SAMPLES = 4000
 
 
 def _exact_posterior(seed: int) -> tuple[np.ndarray, np.ndarray]:
-    """Draws from the exact posterior, plus the priors that generated it."""
+    """Draws from the exact posterior, plus the priors that generated it.
+
+    The construction is the simulation-based-calibration setup of Talts
+    et al. (2018), Algorithm 1: draw ``theta`` from the prior, simulate
+    ``y`` from the likelihood given it, then sample the posterior for
+    that ``y``.  Under a correct posterior the resulting coverage is
+    nominal at every level, which is what makes this a usable zero
+    reference for a calibration metric.
+
+    The normal-normal pair is conjugate, so "the posterior" here is
+    exact rather than approximated: with a ``N(0, 1)`` prior and
+    ``y | theta ~ N(theta, sigma^2)`` the posterior is
+    ``N(y / (1 + sigma^2), sigma^2 / (1 + sigma^2))``.  Both moments are
+    written out below and can be checked directly from the precision
+    sum, so no external citation is relied on for them.
+
+    References
+    ----------
+    Talts, S., Betancourt, M., Simpson, D., Vehtari, A., & Gelman, A.
+    (2018). Validating Bayesian inference algorithms with
+    simulation-based calibration. Algorithm 1. See
+    ``docs/references.md``.
+    """
     rng = np.random.default_rng(seed)
     theta = rng.normal(0.0, 1.0, _N_SIMS)
     y = theta + rng.normal(0.0, _SIGMA, _N_SIMS)
@@ -77,6 +99,16 @@ def _tail_miscalibrated_posterior(
     under-covers badly.  Deviation is therefore concentrated at large
     alpha, which is exactly the half of the curve a median over the 20
     levels discards.
+
+    The truncation is a constructed defect chosen for this test, not a
+    modelling choice taken from a source: clipping is simply the
+    cheapest way to move only the tail quantiles while provably leaving
+    every quantile strictly inside the clip untouched.  No external
+    reference is claimed for it.  What the fixture is used to
+    demonstrate -- that aggregating the per-level deviations with the
+    median rather than the mean hides tail miscalibration -- is a
+    property of this package's own two metrics, verified numerically
+    here rather than cited.
     """
     draws, theta = _exact_posterior(seed)
     post_sd = np.sqrt(_SIGMA**2 / (1.0 + _SIGMA**2))

@@ -414,6 +414,20 @@ ENCODING_UNCHANGED_AT_V2: frozenset[str] = frozenset(
         # differ from. Its penalty would also be 1.0 under either rule: the
         # old unregistered fallback and its new direction entry's `worst_raw`
         # agree.
+        #
+        # Residual, deliberately accepted: a study run at encoding 2 but
+        # before this metric existed could hold a `mean_calibration_error`
+        # column produced by a custom `validate_fn`, whose penalties were
+        # +inf (the unregistered fallback) where new ones are 1.0. Such a
+        # study still resumes. The direction of that mismatch is the benign
+        # one -- the old penalty is +inf, so it loses to everything and
+        # cannot outrank a valid trial; only the ranking *among failures*
+        # differs across the resume boundary, which carries no meaning. The
+        # harmful direction the CHANGED set guards against is the reverse:
+        # an old finite penalty beating a new valid value. Distinguishing
+        # this case would need per-metric provenance in the stored schema,
+        # which would reject every legitimate resume to guard a collision
+        # with a name that has never appeared in a released version.
         "mean_calibration_error",
         "rmse",
         "nrmse",

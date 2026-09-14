@@ -29,7 +29,8 @@
   value lands in 0.031-0.041 while the median-aggregated one lands in
   0.001-0.017 — the median often reads as barely distinguishable from a
   perfectly calibrated posterior
-  (`tests/test_validation/test_ece_vs_calibration_error.py`). Ratios against
+  (`tests/test_validation/test_mean_vs_median_calibration_error.py`). Ratios
+  against
   each metric's own calibrated baseline are not quoted here: those baselines
   are Monte Carlo noise, so the ratio swings between 3.9x and 20.4x across
   seeds while the absolute values stay put.

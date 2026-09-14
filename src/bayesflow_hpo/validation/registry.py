@@ -459,6 +459,12 @@ def _bf_calibration_error(
     yields ``num_variables == 1`` and ``result["values"]`` is a
     length-1 array.  Averaging across conditions happens later, in
     :func:`~bayesflow_hpo.validation.metrics.aggregate_condition_rows`.
+
+    References
+    ----------
+    The computation is BayesFlow's; see
+    ``bayesflow.diagnostics.calibration_error`` for its documentation.
+    This package contributes the wrapper and the frozen name only.
     """
     import bayesflow as bf
 
@@ -494,6 +500,22 @@ def _bf_mean_calibration_error(
     posterior, so a posterior that returns the prior regardless of its
     input scores perfectly.  Treat a good value as necessary, not
     sufficient.
+
+    References
+    ----------
+    The wrapped computation -- the 20 nominal levels, the central
+    intervals, and the per-level absolute deviations -- is BayesFlow's,
+    documented in ``bayesflow.diagnostics.calibration_error``.  Only the
+    choice of ``np.mean`` over that function's default ``np.median``,
+    and this metric's name, originate in this package.  Both are
+    package-owned design decisions with no external citation, recorded
+    as such in ``docs/references.md``.
+
+    Naeini, M. P., Cooper, G., & Hauskrecht, M. (2015). Obtaining well
+    calibrated probabilities using Bayesian binning. *Proceedings of the
+    AAAI Conference on Artificial Intelligence, 29*(1).
+    https://doi.org/10.1609/aaai.v29i1.9602 -- cited only to mark what
+    this metric is *not*.
     """
     import bayesflow as bf
 
