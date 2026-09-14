@@ -468,7 +468,8 @@ it OOMed on a 32 GiB card that had another job on it. This is a property of the
 *existing* pipeline, not of the joint metric path, and it bounds how large a
 validation set can be on a given card. It qualifies D10: memory is a non-issue
 for joint metrics holding one condition's draws, and is emphatically not a
-non-issue for the inference step feeding them. Worth its own issue.
+non-issue for the inference step feeding them. Tracked as
+[issue #101](https://github.com/matthiaskloft/bayesflow-hpo/issues/101).
 
 Caveat on the absolute numbers: the card was shared with a live study
 throughout, and the benchmark ran under a deliberate
@@ -479,9 +480,22 @@ measured in the same process on the same device.
 
 ### D10 — Memory
 
-A non-issue, recorded so it is not re-litigated. Joint metrics run inside the
-loop on one condition's `draws`, which the loop already holds; nothing new is
-retained across conditions, and `cleanup_trial()` still runs per iteration.
+**For the joint metrics themselves, a non-issue**, recorded so it is not
+re-litigated. They run inside the loop on one condition's `draws`, which the
+loop already holds; nothing new is retained across conditions, and
+`cleanup_trial()` still runs per iteration.
+
+**For the inference step that feeds them, emphatically not a non-issue**, which
+D9's GPU run established after this section was first written.
+`make_bayesflow_infer_fn` samples the whole condition batch in one call with no
+chunking, so peak memory scales as `n_sims × n_posterior_samples` — 500 × 1000
+needed more than 20 GiB and OOMed a 32 GiB card. The package's own defaults
+already ask for 100,000 samples in a single forward pass, and
+`estimate_peak_memory_mb` covers *training* only, so `max_memory_mb` passes a
+trial that then dies after training is paid for. Tracked separately as
+[issue #101](https://github.com/matthiaskloft/bayesflow-hpo/issues/101); it is a
+property of the existing pipeline and blocks nothing in this plan, but it bounds
+how large a validation set the joint metrics can be run on.
 
 ---
 
