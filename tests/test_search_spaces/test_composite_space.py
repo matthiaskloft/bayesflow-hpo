@@ -59,3 +59,23 @@ def test_composite_rejects_cross_space_parameter_collisions() -> None:
 
     with pytest.raises(ValueError, match="Duplicate parameter names.*initial_lr"):
         space.sample(FakeTrial())
+
+
+def test_composite_space_carries_training_couplings_through():
+    """Derived training values reach the merged parameter dict."""
+    from bayesflow_hpo.search_spaces.base import IntDimension
+
+    space = CompositeSearchSpace(
+        inference_space=CouplingFlowSpace(),
+        training_space=TrainingSpace(
+            batch_size=IntDimension("batch_size", constant=64),
+            epochs=IntDimension("epochs", constant=20),
+            simulation_budget=102_400,
+            lr_reference_batch_size=32,
+        ),
+    )
+
+    params = space.sample(FakeTrial())
+
+    assert params["num_batches"] == 80
+    assert params["initial_lr"] == pytest.approx(params["lr_ref"] * 2)

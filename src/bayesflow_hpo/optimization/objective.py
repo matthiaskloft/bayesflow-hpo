@@ -1106,6 +1106,13 @@ class GenericObjective:
         trial.set_user_attr("training_mode", config.training_mode)
         trial.set_user_attr("epochs", epochs)
         trial.set_user_attr("num_batches", num_batches)
+        # Recorded because batch size is also the data-volume knob in online
+        # SBI: two trials with the same epochs and num_batches still see
+        # different amounts of data when their batch sizes differ.
+        trial.set_user_attr(
+            "simulations",
+            int(params.get("batch_size", 256)) * epochs * num_batches,
+        )
 
         if "lr_warmup_steps" in params:
             warmup_steps = int(params["lr_warmup_steps"])

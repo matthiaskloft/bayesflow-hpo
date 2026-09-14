@@ -154,7 +154,7 @@ defaults at runtime (`bf.networks.TimeMLP` signature defaults and
 
 | Class | Controls |
 |-------|----------|
-| `TrainingSpace()` | `initial_lr`, `batch_size`, `decay_rate` |
+| `TrainingSpace()` | `initial_lr`, `batch_size`, optional `epochs` |
 
 ### Composite Spaces
 
