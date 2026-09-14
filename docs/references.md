@@ -172,7 +172,7 @@ Feature implementations and their backing references.
 | Correlation versus agreement | `validation/registry.py` | Bland & Altman (1986) |
 | Point-summary/loss consistency | `validation/registry.py` | Gneiting (2011) |
 | ECE term not claimed for `mean_calibration_error` | `validation/registry.py` | Naeini et al. (2015) |
-| TARP (possible future extension) | documentation only | Lemos et al. (2023) |
+| TARP (designed, not implemented) | `plans/plan-joint-metric-path.md` | Lemos et al. (2023), Secs. 3.1--3.2, Thm. 3, Alg. 2 |
 | SBI benchmarking | overall | Lueckmann et al. (2021) |
 
 ### BayesFlow Diagnostic Wrappers
@@ -375,6 +375,26 @@ Source of the log-gamma calibration statistic, `log(gamma/gamma_null)`, where
 ranks. This is what fixes the metric's **direction**: `log_gamma < 0` rejects
 the hypothesis of uniform ranks at the 5% level, so larger is better, and
 minimizing it would search for the most miscalibrated model available.
+Also verified against full text (2026-09-14), for the joint-metric design in
+[`plans/plan-joint-metric-path.md`](plans/plan-joint-metric-path.md): **Sec.
+4.3** (case study 2) is the source for marginal rank statistics being blind to
+a posterior that ignores the data, and the result is sharper than "blind".
+Figure 4 splits the rank distribution of the parameters by the average value of
+the corresponding data elements and reports that "the distributions for the two
+cases exactly compensate to make the overall distribution uniform" -- so the
+marginal ranks of a posterior equal to the prior are *exactly* uniform, not
+merely hard to distinguish from uniform. The paper's own remedy is a test
+quantity involving both data and parameters, with the joint log-likelihood
+recommended as "a useful default". **Sec. 4.4** (case study 5) adds the
+companion case: a posterior with correct marginals but wrong correlation
+structure passes SBC on the univariate parameters while likelihood-based
+quantities fail.
+
+This is the paper-side justification for the joint metric path, and it is what
+makes `calibration_error`, `log_gamma`, `nrmse`, `coverage` and `sbc_ks` --
+every metric in `validation/registry.py`, all of them marginal -- unable on
+their own to reject a posterior that ignores the data.
+
 Recorded in `bayesflow_hpo.objectives.METRIC_DIRECTIONS`; the metric itself is
 wrapped from BayesFlow in `bayesflow_hpo.validation.registry._bf_log_gamma`.
 
@@ -434,7 +454,28 @@ Establishes that point summaries must be evaluated with a consistent loss: the m
 
 Sampling-based accuracy testing of posterior estimators for general inference. In *Proceedings of the 40th International Conference on Machine Learning* (Vol. 202, pp. 19256–19273). PMLR. https://doi.org/10.48550/arXiv.2302.03026
 
-Introduces Tests of Accuracy with Random Points (TARP) for joint posterior coverage testing using posterior samples. Tracked as a possible future extension; not currently implemented. OpenAlex work `W4319453761`.
+Introduces Tests of Accuracy with Random Points (TARP) for joint posterior
+coverage testing using posterior samples. Tracked as a future extension; not
+currently implemented. OpenAlex work `W4319453761`.
+
+Verified against full text (2026-09-14) for the design in
+[`plans/plan-joint-metric-path.md`](plans/plan-joint-metric-path.md):
+
+- **Sec. 3.1** ("High posterior density coverage testing") is the section
+  behind the claim that expected HPD coverage is blind to a posterior that
+  ignores the data. The paper works the case `p_hat(theta|x) = p(theta)`
+  explicitly, notes that the HPD generator is then independent of `x` so that
+  `H(p_hat, alpha, x) = H(p_hat, alpha)`, and concludes that this estimator
+  "has perfect HPD ECP in this case". The same section states that the HPD
+  region generator "is not a positionable credible region generator", which is
+  why Theorem 3 does not apply to it -- positionability is what the theorem's
+  proof needs, since it varies the position function.
+- **Sec. 3.2** ("Distance to random point coverage testing") defines the TARP
+  region generator as the *positionable* generator producing spherical regions
+  around a reference position.
+
+The earlier attribution of the HPD-blindness result to "Sec. 3.1" was carried
+between repositories without a full-text check. It is correct.
 
 ### Lueckmann, J.-M., Boelts, J., Greenberg, D. S., Goncalves, P. J., & Macke, J. H. (2021)
 

@@ -91,6 +91,39 @@ tests and an entry in `docs/validation.md` and `docs/defaults.md`.
 
 ---
 
+### Package N: Joint, data-dependent metric path
+
+Design settled in
+[`docs/plans/plan-joint-metric-path.md`](plans/plan-joint-metric-path.md),
+covering [issue #82](https://github.com/matthiaskloft/bayesflow-hpo/issues/82)
+(TARP) and [issue #75](https://github.com/matthiaskloft/bayesflow-hpo/issues/75)
+(`coverage_error`) as one capability. Nothing is implemented yet.
+
+The plan has been through an independent review and revised; its §7 records
+the three integration decisions the first version got wrong.
+
+Two items in it stand on their own and are worth landing first:
+
+1. Register `lc2st`'s direction (`worst_raw=0.25`). It has no
+   `METRIC_DIRECTIONS` entry today, so a missing `lc2st` scores `+inf` on a
+   statistic bounded above by 0.25. No dependency on anything else.
+2. Lift the joint metric dispatch into `run_validation_pipeline` and refactor
+   `make_lc2st_validate_fn` onto it, deleting its duplicated condition loop.
+
+Both paper claims the plan rests on are now **verified against full text** and
+recorded in [`references.md`](references.md) -- Lemos et al. (2023) Sec. 3.1 on
+HPD coverage, and Modrak et al. (2025) Sec. 4.3, which turns out to be sharper
+than the plan claimed: marginal ranks under a data-ignoring posterior are
+*exactly* uniform, not merely hard to distinguish from uniform.
+
+The per-trial cost #82 asked for is also measured (plan §D9). TARP is cheap
+(79 ms/condition at 500 sims x 1000 draws x 15 params) and `resolution` is
+free; the package's existing `lc2st` is ~700x more expensive at matched shapes
+(56 s/condition), which is what forces joint metrics off
+`PeriodicValidationCallback` by default.
+
+---
+
 ### Package L: End-to-End `optimize()` Tests
 
 Tracked in [issue #76](https://github.com/matthiaskloft/bayesflow-hpo/issues/76).
