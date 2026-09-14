@@ -433,11 +433,49 @@ everything else. `n_draws` does not enter — `lc2st` uses draw index 0 only
   with these numbers next to it. Nothing in the package currently tells a user
   that `objective_metrics=["lc2st"]` adds minutes per trial.
 
-The one thing still unmeasured is the *relative* figure #82 phrased the question
-in: TARP's cost as a fraction of `timing["inference"]` on a real approximator.
-That needs a trained model and is left to the implementation session, but with
-TARP at sub-second per trial it can only be a small fraction of any GPU-bound
-inference pass.
+**The fraction of `timing["inference"]` — measured on GPU.** #82 phrased the
+cost question as a ratio against inference, so it was measured on an RTX 5090
+(driver 615.71.09, torch 2.11.0+cu128, bayesflow 2.0.8) through the real
+`make_bayesflow_infer_fn` closure — the same one `run_validation_pipeline`
+builds — with TARP timed on the same machine at the *same shapes*, so no
+cross-machine or cross-shape extrapolation enters the ratio. Harness:
+[`bench_inference_ratio.py`](bench_inference_ratio.py).
+
+| n_sims | n_draws | inference ms | TARP ms | TARP as % of inference |
+| ---: | ---: | ---: | ---: | ---: |
+| 100 | 200 | 1964.1 | 1.1 | 0.06% |
+| 200 | 200 | 2004.2 | 2.5 | 0.12% |
+| 100 | 400 | 2052.0 | 2.4 | 0.12% |
+
+**TARP is 0.06–0.12% of inference.** The question is closed: it is not a cost
+consideration at any shape, and L-C2ST at 53.6 s is roughly *25× the entire
+inference pass*, which is the finding that matters.
+
+Two things this run turned up that the design did not anticipate:
+
+**Inference cost is nearly flat in `n_sims` and `n_draws`.** Doubling either
+moved it by 2–4% (1964 → 2004 → 2052 ms). `FlowMatching._inverse` integrates an
+adaptive ODE (`integrate_adaptive`, Tsit5), so wall time is set by the number of
+integration steps, and the GPU parallelizes across samples. A bigger validation
+set is therefore close to free on GPU while TARP grows linearly from a tiny
+base — the ratio *improves* with scale rather than degrading. Any cost model
+that assumes inference is linear in the sample count is wrong on GPU.
+
+**`make_bayesflow_infer_fn` samples the whole condition batch in one call, with
+no chunking** (`validation/inference.py:53`). At `n_sims=500, n_draws=1000` that
+materializes 500,000 posterior samples at once and needed more than 20 GiB —
+it OOMed on a 32 GiB card that had another job on it. This is a property of the
+*existing* pipeline, not of the joint metric path, and it bounds how large a
+validation set can be on a given card. It qualifies D10: memory is a non-issue
+for joint metrics holding one condition's draws, and is emphatically not a
+non-issue for the inference step feeding them. Worth its own issue.
+
+Caveat on the absolute numbers: the card was shared with a live study
+throughout, and the benchmark ran under a deliberate
+`set_per_process_memory_fraction` self-cap so that an overrun would fail the
+benchmark rather than the other job. The inference figures are therefore an
+upper bound on a contended device. The *ratio* is unaffected — both sides were
+measured in the same process on the same device.
 
 ### D10 — Memory
 
