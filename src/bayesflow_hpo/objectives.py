@@ -703,6 +703,14 @@ def check_or_stamp_joint_metric_settings(
       validation rather than at study creation. Serializing it would need a
       storage-level compare-and-set Optuna's user attributes do not offer.
     """
+    # Imported here, not at module scope: this module keeps its
+    # `validation.registry` imports function-local (the type-only import is
+    # under TYPE_CHECKING) because `validation.tarp` imports back from here
+    # to register its directions.
+    from bayesflow_hpo.validation.registry import (
+        JointMetricConfigurationError,
+    )
+
     if not settings:
         return
 
@@ -718,14 +726,19 @@ def check_or_stamp_joint_metric_settings(
 
     if stored is None:
         if n_completed_trials:
-            raise ValueError(
+            raise JointMetricConfigurationError(
                 f"Study {study.study_name!r} holds {n_completed_trials} "
                 "completed trial(s) but records no joint metric settings, so "
                 "the configuration behind their joint metric values cannot "
                 "be verified. A joint metric's score moves with its "
-                f"settings, and this run uses {recorded!r}. Start a new "
-                f"study, or set the study's {JOINT_METRIC_SETTINGS_ATTR!r} "
-                "user attribute to the settings it was actually run with."
+                f"settings, and this run uses {recorded!r}. If those "
+                "trials ran with no joint metric at all -- adding one to an "
+                "older study -- the attribute can simply be set to this "
+                "run's settings; that case is not distinguishable from "
+                "trials run at settings nobody recorded, which is why it is "
+                "not assumed. Start a new study, or set the study's "
+                f"{JOINT_METRIC_SETTINGS_ATTR!r} user attribute to the "
+                "settings it was actually run with."
             )
         study.set_user_attr(JOINT_METRIC_SETTINGS_ATTR, recorded)
         return
@@ -740,7 +753,7 @@ def check_or_stamp_joint_metric_settings(
             f"{name}: stored {was!r}, this run {now!r}"
             for name, (was, now) in sorted(changed.items())
         )
-        raise ValueError(
+        raise JointMetricConfigurationError(
             f"Study {study.study_name!r} was run with different joint metric "
             f"settings ({detail}). The score moves with these, so old and "
             "new trials would sit on different scales in one Pareto front. "

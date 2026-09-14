@@ -477,7 +477,11 @@ def test_the_subsample_is_spread_over_the_grid_not_taken_from_its_front():
 
     assert _subsampled_conditions(20, 4) == {0, 6, 13, 19}
     assert _subsampled_conditions(5, 10) == {0, 1, 2, 3, 4}
-    assert _subsampled_conditions(5, 1) == {0}
+    # One condition takes the MIDDLE. `np.linspace(0, n-1, 1)` is [0], which
+    # is the ordered-grid prefix this function exists to avoid -- the single
+    # worst choice available, arrived at by the formula rather than chosen.
+    assert _subsampled_conditions(5, 1) == {2}
+    assert _subsampled_conditions(20, 1) == {10}
 
 
 def test_the_subsample_is_identical_across_trials():

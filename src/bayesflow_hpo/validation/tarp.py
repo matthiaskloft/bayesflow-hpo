@@ -408,6 +408,18 @@ def _references_for_condition(
     """
     if callable(reference_points):
         refs = reference_points(inputs)
+    elif isinstance(reference_points, np.ndarray) and reference_points.ndim == 3:
+        # The natural spelling of "one array per condition" once someone
+        # reaches for `np.array(list_of_arrays)`. Accepted rather than
+        # rejected with a message about a single shared array, which is a
+        # different mistake and quotes a shape that is not
+        # (n_sims, n_params).
+        if reference_points.shape[0] != inputs.n_conditions:
+            raise ValueError(
+                f"reference_points has {reference_points.shape[0]} "
+                f"conditions, expected {inputs.n_conditions}."
+            )
+        refs = reference_points[inputs.cond_id]
     elif isinstance(reference_points, np.ndarray):
         raise TypeError(
             "reference_points must be a callable or one array PER CONDITION "
@@ -426,6 +438,18 @@ def _references_for_condition(
             raise ValueError(
                 f"No reference points for condition {inputs.cond_id}: the "
                 f"sequence must cover all {inputs.n_conditions} conditions."
+            ) from exc
+        except TypeError as exc:
+            # A generator, most likely. Its own message ("not subscriptable")
+            # would be recorded by the joint guard as the metric's reason
+            # for failing, which sends the reader looking at the metric
+            # rather than at what they passed.
+            raise TypeError(
+                "reference_points must be a callable or an indexable "
+                "sequence of one array per condition; "
+                f"{type(reference_points).__name__} cannot be indexed by "
+                "condition. A generator is consumed once and cannot be "
+                "replayed per condition -- pass a list."
             ) from exc
 
     refs = np.asarray(refs, dtype=float)

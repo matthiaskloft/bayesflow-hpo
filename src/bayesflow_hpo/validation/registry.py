@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import html as _html
 import warnings
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
 from typing import Any, Literal, NewType
 
@@ -168,6 +168,25 @@ JointMetricFn = Callable[[JointMetricInputs], dict[str, float]]
 #: now require this type, which turns a raw ``str`` reaching one into an
 #: error at the call site rather than a plausible number in the results.
 CanonicalMetricName = NewType("CanonicalMetricName", str)
+
+class JointMetricConfigurationError(ValueError):
+    """A joint metric is misconfigured, as opposed to having failed.
+
+    The distinction decides who handles it. `GenericObjective` wraps its
+    whole validation step in `except Exception` and converts anything it
+    catches into a training-loss fallback, which is right for a model that
+    diverged or a classifier that would not fit: the trial is scored badly
+    and the study moves on. It is exactly wrong for a configuration the
+    caller can fix in one line -- the study would burn its entire budget
+    producing fabricated values behind a warning line, which is worse than
+    the unguarded behaviour, because at least incomparable real numbers are
+    real.
+
+    Subclasses `ValueError` so existing `except ValueError` callers are
+    unaffected; the objective re-raises this type explicitly, ahead of its
+    catch-all.
+    """
+
 
 _REGISTRY: dict[str, MetricFn] = {}
 _ALIASES: dict[str, str] = {}
@@ -503,7 +522,9 @@ def resolve_metrics(names: list[str]) -> dict[str, MetricFn]:
     }
 
 
-def resolve_joint_metrics(names: list[str]) -> dict[str, JointMetricFn]:
+def resolve_joint_metrics(
+    names: list[str], overridden: Collection[str] = (),
+) -> dict[str, JointMetricFn]:
     """Resolve the *joint* names in *names* to a ``{name: fn}`` dict.
 
     The complement of :func:`resolve_metrics` over the same list: between
@@ -514,6 +535,16 @@ def resolve_joint_metrics(names: list[str]) -> dict[str, JointMetricFn]:
     ----------
     names
         Metric names or aliases. Marginal names are ignored.
+    overridden
+        Names the caller is supplying its own callable for. These are
+        skipped entirely rather than resolved, because the registered entry
+        is about to be replaced -- and for a name registered only as a
+        placeholder, resolving it would raise the very error the caller's
+        override exists to answer. `tarp_error` is exactly that case: its
+        own message tells the caller to pass a configured metric through
+        `joint_metrics=`, and without this the advice could not be taken
+        whenever the name also appears in `metrics`, which the objective
+        path guarantees.
 
     Returns
     -------
@@ -524,9 +555,15 @@ def resolve_joint_metrics(names: list[str]) -> dict[str, JointMetricFn]:
     ------
     KeyError
         If any name in *names* is unknown.
+    JointMetricConfigurationError
+        If a name resolves to a metric that cannot run unconfigured, or
+        whose resolve-time precondition fails.
     """
     resolved: dict[str, JointMetricFn] = {}
+    overridden = set(overridden)
     for n in names:
+        if n in overridden or canonical_metric_name(n) in overridden:
+            continue
         fn = get_metric(n)  # raises on an unknown name, joint or not
         if not is_joint_metric(n):
             continue
@@ -539,7 +576,17 @@ def resolve_joint_metrics(names: list[str]) -> dict[str, JointMetricFn]:
         # configuration one the caller can fix in a line.
         message = getattr(fn, "_bf_hpo_requires_configuration", None)
         if message:
-            raise ValueError(message)
+            raise JointMetricConfigurationError(message)
+        # A resolve-time precondition, such as an optional dependency the
+        # metric needs. Checked here for the same reason as the line above:
+        # left to run time it raises once per condition, is caught by the
+        # joint guard, and the metric silently scores its registered worst
+        # case on every trial -- so a study optimizes a constant and the
+        # only evidence is a warning log, after a full training run has
+        # been paid for.
+        precondition = getattr(fn, "_bf_hpo_resolve_check", None)
+        if precondition is not None:
+            precondition()
         resolved[n] = fn  # type: ignore[assignment]
     return resolved
 

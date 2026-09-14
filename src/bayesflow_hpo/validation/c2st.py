@@ -534,6 +534,11 @@ def _subsampled_conditions(n_conditions: int, n_keep: int) -> set[int]:
     """
     if n_keep >= n_conditions:
         return set(range(n_conditions))
+    if n_keep <= 1:
+        # `np.linspace(0, n-1, 1)` is [0], the grid's first corner -- the
+        # exact prefix this function exists to avoid. The middle is the
+        # least unrepresentative single condition available.
+        return {n_conditions // 2}
     idx = np.linspace(0, n_conditions - 1, n_keep)
     return {int(round(i)) for i in idx}
 
@@ -695,6 +700,34 @@ def _default_lc2st_metric(inputs: JointMetricInputs) -> dict[str, float]:
 # `make_lc2st_validate_fn(...)` and silently unstamped -- hence unchecked --
 # when the same study resumed with plain `objective_metrics=["lc2st"]` at
 # different defaults.
+def _check_lc2st_dependency() -> None:
+    """Resolve-time guard for the registered ``lc2st``.
+
+    Checked when the metric is RESOLVED, not per condition. Left to run
+    time, the ImportError is caught by the pipeline's joint guard, the
+    metric is invalidated, and the objective substitutes its registered
+    worst case of 0.25 -- identically on every trial. A study with a
+    missing optional dependency then trains to completion over and over
+    while optimizing a constant, with only a warning log to say so. That is
+    the same "fixable in one line, do not pay for a training run first"
+    case `_bf_hpo_requires_configuration` exists for.
+
+    This is what `requires="sklearn"` would do if it gated anything. It does
+    not -- `_REQUIRES` is read only by `describe_metrics` (see the plan's
+    section 3) -- so the guard is wired explicitly.
+
+    Indirects through the module attribute rather than binding
+    `_require_sklearn` directly, so the guard a caller or a test replaces is
+    the one that runs; binding the function object at import time makes the
+    check unpatchable, which is how a guard quietly stops being observable.
+    """
+    _require_sklearn()
+
+
+_default_lc2st_metric._bf_hpo_resolve_check = (  # type: ignore[attr-defined]
+    _check_lc2st_dependency
+)
+
 _default_lc2st_metric.joint_metric_settings = _lc2st_settings(  # type: ignore[attr-defined]
     n_folds=5, n_null_trials=0, clf_kwargs=None, seed=42, max_conditions=None
 )

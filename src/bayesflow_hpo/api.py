@@ -126,6 +126,7 @@ def optimize(
     n_posterior_samples: int = 500,
     # Objectives
     objective_metrics: list[str] | None = None,
+    joint_metrics: dict[str, Any] | None = None,
     objective_mode: str = "pareto",
     cost_metric: str | None = "inference_time",
     # Pruning
@@ -269,6 +270,16 @@ def optimize(
 
         Use :func:`~bayesflow_hpo.list_metrics` for just the names,
         or :func:`~bayesflow_hpo.register_metric` to add custom ones.
+    joint_metrics
+        Configured joint metrics as ``{name: fn}``, forwarded to the
+        validation pipeline. This is how a joint metric whose configuration
+        belongs to one study reaches a trial: ``tarp_error`` needs reference
+        points derived from the data, which no registry default can supply,
+        so without this it is registered, resolvable, and unusable. Build
+        one with
+        :func:`~bayesflow_hpo.validation.tarp.make_tarp_joint_metric`. A
+        name given here overrides its registered entry rather than being
+        resolved alongside it, so a placeholder never raises in its place.
     objective_mode
         ``"pareto"`` (default) — each metric is its own objective;
         study has ``len(objective_metrics) + 1`` directions (one per
@@ -567,6 +578,7 @@ def optimize(
         adapter=adapter,
         search_space=search_space,
         validation_data=validation_data,
+        joint_metrics=joint_metrics,
         training_mode=training_mode,
         epochs=epochs,
         num_batches=num_batches,
@@ -696,6 +708,7 @@ def _build_objective(
     adapter: bf.adapters.Adapter,
     search_space: CompositeSearchSpace,
     validation_data: ValidationDataset,
+    joint_metrics: dict[str, Any] | None = None,
     training_mode: Literal["fixed_budget", "open_ended"],
     epochs: int,
     num_batches: int,
@@ -741,6 +754,7 @@ def _build_objective(
             metric_constraints_hard=metric_constraints_hard,
             metric_constraints_soft=metric_constraints_soft,
             n_posterior_samples=n_posterior_samples,
+            joint_metrics=joint_metrics,
             objective_metrics=objective_metrics,
             objective_mode=objective_mode,
             cost_metric=cost_metric,

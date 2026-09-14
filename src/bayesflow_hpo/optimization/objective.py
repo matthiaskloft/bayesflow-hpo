@@ -69,6 +69,7 @@ from bayesflow_hpo.types import BuildApproximatorFn, TrainFn, ValidateFn
 from bayesflow_hpo.validation.data import ValidationDataset
 from bayesflow_hpo.validation.registry import (
     CanonicalMetricName,
+    JointMetricConfigurationError,
     canonical_metric_name,
     validate_objective_metric_kinds,
 )
@@ -114,6 +115,7 @@ def default_validate_fn(
     validation_data: ValidationDataset,
     n_posterior_samples: int,
     objective_metrics: list[str] | None = None,
+    joint_metrics: dict[str, Any] | None = None,
 ) -> dict[str, float]:
     """Run the built-in validation pipeline and return metric dict.
 
@@ -149,6 +151,7 @@ def default_validate_fn(
         validation_data=validation_data,
         n_posterior_samples=n_posterior_samples,
         metrics=_pipeline_metrics(objective_metrics or []),
+        joint_metrics=joint_metrics,
     )
     return dict(result.summary)
 
@@ -448,6 +451,12 @@ class ObjectiveConfig:
     #: fires. Recorded so the pipeline metric list can include them.
     metric_constraints_soft: list[MetricConstraintSpec] | None = None
     n_posterior_samples: int = 500
+    #: Configured joint metrics, `{name: fn}`. The route by which a joint
+    #: metric that cannot run at a registry default -- `tarp_error`, which
+    #: needs data-derived reference points -- reaches the validation
+    #: pipeline. Without it that metric is registered, resolvable, and
+    #: unusable.
+    joint_metrics: dict[str, Any] | None = None
     n_intermediate_posterior_samples: int = 250
     intermediate_validation_interval: int = 10
     intermediate_validation_warmup: int = 10
@@ -485,6 +494,18 @@ class ObjectiveConfig:
             self.early_stopping_monitor = canonical_metric_name(
                 self.early_stopping_monitor
             )
+        # `joint_metrics` is keyed BY METRIC NAME, so it is one of those
+        # fields too. An alias key would not match the canonical name in the
+        # pipeline's `metrics=` list, so the override would not suppress the
+        # registry entry -- and for a placeholder like `tarp_error` that
+        # means the configured metric is ignored and its unconfigured
+        # namesake raises instead, which reads as the feature being broken
+        # rather than the key being spelled differently.
+        if self.joint_metrics:
+            self.joint_metrics = {
+                canonical_metric_name(k): v
+                for k, v in self.joint_metrics.items()
+            }
         # Every OTHER field naming a metric has to be canonicalized in the same
         # place, or it reads a key nothing writes. These are not hypothetical:
         # `("primary", "cal_error")` made PeriodicValidationCallback index a
@@ -1314,6 +1335,7 @@ class GenericObjective:
                     validate_fn=config.validate_fn,
                     pruning_strategy=config.pruning_strategy,
                     objective_metrics=config.objective_metrics,
+                    joint_metrics=config.joint_metrics,
                     early_stopping_patience=config.early_stopping_patience,
                     early_stopping_window=config.early_stopping_window,
                     early_stopping_monitor=config.early_stopping_monitor,
@@ -1386,6 +1408,7 @@ class GenericObjective:
                         config.objective_metrics,
                         _constraint_metric_names(config),
                     ),
+                    joint_metrics=config.joint_metrics,
                 )
                 inference_time = result.timing.get("inference", 0.0)
                 # Checked HERE rather than at study creation, because this
@@ -1436,6 +1459,19 @@ class GenericObjective:
             # Wrap for extract_multi_objective_values compatibility.
             metrics = {"summary": metrics_summary}
 
+        except JointMetricConfigurationError:
+            # NOT a trial failure, so it must not reach the catch-all below,
+            # which converts anything it catches into a training-loss
+            # fallback. This condition is a property of the STUDY -- changed
+            # settings, a metric that cannot run as configured, a missing
+            # optional dependency -- so every subsequent trial would hit it
+            # too and the run would spend its whole budget recording
+            # fabricated values behind a warning line. That is worse than
+            # not guarding at all: incomparable real numbers are at least
+            # real. Raising stops on the first trial, the only useful moment
+            # to tell the caller.
+            cleanup_trial()
+            raise
         except optuna.TrialPruned:
             cleanup_trial()
             raise

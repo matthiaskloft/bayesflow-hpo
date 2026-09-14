@@ -122,6 +122,10 @@ class PeriodicValidationCallback(Callback):
         Validation objective used for stopping. ``"objective_mean"`` (default) averages
         all objective metrics after converting them to minimize-is-better
         values. A metric name selects that metric alone.
+    joint_metrics
+        Configured joint metrics forwarded to the validation pipeline, for
+        names that cannot run at a registry default. Only consulted when
+        the metric is in the intermediate set at all.
     include_joint_metrics
         Whether joint metrics in *objective_metrics* are computed at each
         intermediate validation. ``False`` (default) excludes them.
@@ -159,6 +163,7 @@ class PeriodicValidationCallback(Callback):
         early_stopping_window: int = 1,
         early_stopping_monitor: str = "objective_mean",
         include_joint_metrics: bool = False,
+        joint_metrics: dict[str, Any] | None = None,
     ):
         super().__init__()
         self.trial = trial
@@ -282,6 +287,7 @@ class PeriodicValidationCallback(Callback):
         if self._strategy_name == "primary" and self._primary_metric is None:
             self._primary_metric = self.objective_metrics[0]
 
+        self.joint_metrics = joint_metrics
         self.include_joint_metrics = include_joint_metrics
         self.intermediate_metrics: list[CanonicalMetricName] = [
             m
@@ -545,6 +551,7 @@ class PeriodicValidationCallback(Callback):
                     validation_data=self.validation_data,
                     n_posterior_samples=self.n_posterior_samples,
                     metrics=self.intermediate_metrics,
+                    joint_metrics=self.joint_metrics,
                 )
                 extracted: dict[str, float] = {
                     k: float(result.summary[k])

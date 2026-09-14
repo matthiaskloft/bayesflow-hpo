@@ -232,7 +232,13 @@ def run_validation_pipeline(
     if metrics is None:
         metrics = list(DEFAULT_METRICS)
     metric_fns = resolve_metrics(list(metrics))
-    joint_metric_fns = resolve_joint_metrics(list(metrics))
+    # The override names are passed IN rather than merged after: a name
+    # the caller supplies must not be resolved from the registry at all,
+    # or a placeholder like `tarp_error` raises before its replacement is
+    # ever consulted.
+    joint_metric_fns = resolve_joint_metrics(
+        list(metrics), overridden=(joint_metrics or {}).keys()
+    )
     if joint_metrics:
         joint_metric_fns = {**joint_metric_fns, **joint_metrics}
 
