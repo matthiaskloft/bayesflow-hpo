@@ -120,23 +120,6 @@ Remaining, deliberately not covered by this suite:
 
 ---
 
-### Package K: Training Search-Space Follow-up
-
-Tracked in [issue #69](https://github.com/matthiaskloft/bayesflow-hpo/issues/69).
-PR #68 already made `batch_size` tunable, widened `initial_lr` to `1e-2`,
-and introduced coherent fixed-budget and open-ended training modes. Remaining
-work is to:
-
-1. Reparameterize learning rate relative to batch size so the search follows
-   the measured batch/learning-rate interaction instead of treating both axes
-   as independent.
-2. Derive `num_batches` from a fixed simulation budget, keeping comparisons
-   across sampled batch sizes simulation-matched.
-3. Keep warmup length fixed rather than adding another correlated search
-   dimension; evaluate alternative warmup fractions outside HPO first.
-
----
-
 ### Package A2: Research — Detailed Sampler Preset Defaults
 
 The sampler presets are implemented (PR #56). This research task remains
@@ -180,6 +163,17 @@ Remaining work:
 ---
 
 ## Done
+
+### Package K: Training Search-Space Follow-up (2026-09-14)
+
+Closed [issue #69](https://github.com/matthiaskloft/bayesflow-hpo/issues/69).
+`TrainingSpace` gained two opt-in couplings: `lr_reference_batch_size`
+reparametrizes the learning rate as `lr_ref * batch_size / reference_batch`
+(Smith et al., 2018), and `simulation_budget` derives
+`num_batches = budget // (batch_size * epochs)` so trials stay
+simulation-matched. Warmup stays a fixed objective setting rather than a
+search dimension, per Shallue et al. (2019, Sec. 5.1). Each trial now records
+its realized `simulations` as a user attribute.
 
 ### Correlation Recovery Diagnostic Review (2026-08-21)
 

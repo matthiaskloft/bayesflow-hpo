@@ -18,6 +18,7 @@ from bayesflow_hpo.results.extraction import (
     get_pareto_trials,
     select_best_trial,
     summarize_study,
+    trial_config,
     trial_table,
     trials_to_dataframe,
 )
@@ -885,3 +886,77 @@ class TestBestConfigPriorities:
         )
         # trial_number=2 should be used regardless of priorities.
         assert isinstance(config, dict)
+
+
+# ---------------------------------------------------------------------------
+# Derived parameters
+# ---------------------------------------------------------------------------
+
+
+def _study_with_derived_params():
+    """Single-objective study whose trial derived `initial_lr` from `lr_ref`."""
+    study = optuna.create_study(directions=["minimize"], study_name="derived")
+    study.add_trial(
+        optuna.trial.create_trial(
+            params={"lr_ref": 0.001, "batch_size": 128},
+            distributions={
+                "lr_ref": optuna.distributions.FloatDistribution(1e-4, 1e-2),
+                "batch_size": optuna.distributions.IntDistribution(32, 256),
+            },
+            values=[0.1],
+            user_attrs={
+                "derived_params": {"initial_lr": 0.004, "num_batches": 25},
+                "simulations": 102_400,
+            },
+        )
+    )
+    return study
+
+
+def test_trial_config_merges_derived_params():
+    trial = _study_with_derived_params().trials[0]
+
+    config = trial_config(trial)
+
+    assert config == {
+        "lr_ref": 0.001,
+        "batch_size": 128,
+        "initial_lr": 0.004,
+        "num_batches": 25,
+    }
+
+
+def test_trial_config_prefers_sampled_values_over_stale_derived_ones():
+    """A sampled parameter is the record of what Optuna actually chose."""
+    trial = optuna.trial.create_trial(
+        params={"batch_size": 128},
+        distributions={
+            "batch_size": optuna.distributions.IntDistribution(32, 256)
+        },
+        values=[0.1],
+        user_attrs={"derived_params": {"batch_size": 32}},
+    )
+
+    assert trial_config(trial)["batch_size"] == 128
+
+
+def test_best_config_reports_derived_learning_rate():
+    """Retraining from `best_config()` must see the rate the trial used."""
+    config = best_config(_study_with_derived_params())
+
+    # `best_config` formats learning rates for display.
+    assert config["initial_lr"] == "4.00e-03"
+    assert config["num_batches"] == 25
+
+
+def test_trials_to_dataframe_includes_derived_params_and_simulations():
+    df = trials_to_dataframe(_study_with_derived_params(), include_ranks=False)
+
+    assert df["initial_lr"].iloc[0] == pytest.approx(0.004)
+    assert df["simulations"].iloc[0] == 102_400
+
+
+def test_trial_table_includes_derived_params():
+    table = trial_table(_study_with_derived_params())
+
+    assert "initial_lr" in table.columns

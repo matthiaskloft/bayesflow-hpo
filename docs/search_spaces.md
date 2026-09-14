@@ -232,9 +232,80 @@ Cross-attention fusion summary (`FusionTransformer`).
 |-----------|------|-------|-------|----------|
 | `initial_lr` | float | [1e-4, 1e-2], log | yes | — |
 | `batch_size` | int | [32, 256], step=32 | yes | — |
-| `decay_rate` | float | [0.8, 0.99] | no | `0.95` |
+| `epochs` | int | user-defined | opt-in | `None` (objective setting) |
 
 When a dimension has `constant` set, the constant value is used directly. To make a constant dimension tunable, set `constant=_UNSET` or create a new dimension without a constant.
+
+### Coupling the learning rate to the batch size
+
+`lr_reference_batch_size` reparametrizes the learning rate as
+
+```
+initial_lr = lr_ref * batch_size / lr_reference_batch_size
+```
+
+so the sampled coordinate `lr_ref` is the peak learning rate *at the reference
+batch size*. The coupling has a known functional form — batch size
+proportional to learning rate, Smith et al. (2018) — and sampling in the
+decoupled coordinates gives the sampler a rectangle instead of a ridge, which
+matters for TPE because it models parameters marginally.
+
+```python
+TrainingSpace(lr_reference_batch_size=32)
+```
+
+The sampled Optuna parameter is then named `lr_ref`, and `initial_lr` appears
+in `hparams` as a derived value. Optuna's parameter-importance plots therefore
+attribute the effect to `lr_ref`, which is the coordinate being searched.
+
+Toggling the coupling changes a parameter name, so a study resumed from
+storage after the change keeps no sampler history for that axis. Decide before
+a long run, not during one.
+
+### Fixing the simulation budget
+
+`simulation_budget` derives
+
+```
+num_batches = simulation_budget // (batch_size * epochs)
+```
+
+In online SBI the batch size is simultaneously the data-volume knob, since
+`simulations = batch_size * epochs * num_batches`. At most two of the three
+can be fixed, and the simulation budget is the one proportional to GPU-seconds
+— fixing it keeps trials comparable while `batch_size` and `epochs` vary.
+
+```python
+TrainingSpace(
+    epochs=hpo.IntDimension("epochs", low=16, high=64),
+    simulation_budget=102_400,
+)
+```
+
+An `epochs` dimension is required, because the objective's own `epochs`
+setting is not visible inside the search space. A budget too small to give the
+largest `batch_size` x `epochs` combination one batch per epoch is rejected
+when the space is constructed, as are bounds that allow a zero batch size or
+zero epochs. `simulations` is reported as a column by `trials_to_dataframe()`.
+
+### Derived values in results
+
+Optuna records only what it sampled, so derived values are absent from
+`trial.params`. The objective stores them under the `derived_params` trial
+user attribute, and `best_config()`, `trial_table()`, `trials_to_dataframe()`
+and `compare_trials()` merge them back in — a configuration retrained from
+`best_config()` therefore uses the learning rate and step count the winning
+trial actually trained with.
+
+### Warmup is not a dimension
+
+Warmup length is configured once on `optimize()` (`lr_warmup_fraction`,
+`lr_warmup_epochs`, or `lr_warmup_steps`) rather than searched. Shallue et al.
+(2019, Sec. 5.1) report that including learning-rate schedule parameters is
+what made their own tuning hard to trust, at a budget far larger than a
+typical HPO run here; a third correlated axis alongside `{batch_size,
+learning rate}` is the change most likely to degrade the rest of the search.
+Sweep warmup outside the HPO and fix it at a known-good value.
 
 ## Composite Spaces
 

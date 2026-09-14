@@ -123,6 +123,25 @@ def _fmt_param_count(count: int | float) -> str:
     return str(count)
 
 
+def trial_config(trial: optuna.trial.FrozenTrial) -> dict[str, Any]:
+    """Return the hyperparameters a trial trained with.
+
+    This is ``trial.params`` plus any values the objective derived from them
+    (see the ``derived_params`` user attribute).  Optuna records only what it
+    sampled, so a search space that couples dimensions -- a learning rate
+    reparametrized against batch size, or a ``num_batches`` fixed by a
+    simulation budget -- has values in play that ``trial.params`` never sees.
+    Reporting only the sampled half would hand a user a configuration that
+    retrains into a different model than the trial they picked.
+    """
+    derived = trial.user_attrs.get("derived_params")
+    if not isinstance(derived, dict):
+        return dict(trial.params)
+    # Sampled values win: `derived_params` is written before a trial trains,
+    # so a stale entry must never shadow what Optuna recorded.
+    return {**derived, **trial.params}
+
+
 def get_pareto_trials(study: optuna.Study) -> list[optuna.trial.FrozenTrial]:
     """Return Pareto-optimal trials from a multi-objective study."""
     return study.best_trials
@@ -144,6 +163,7 @@ def _objective_column_names(study: optuna.Study) -> list[str]:
 # User attributes surfaced as columns by default in the results table.
 DEFAULT_RESULT_ATTRS = [
     "param_count",
+    "simulations",
     "training_time_s",
     "inference_time_s",
     "calibration_error",
@@ -204,7 +224,10 @@ def trials_to_dataframe(
                 continue
             if trained_only and "rejected_reason" in trial.user_attrs:
                 continue
-            rec: dict[str, Any] = {"trial_number": trial.number, **trial.params}
+            rec: dict[str, Any] = {
+                "trial_number": trial.number,
+                **trial_config(trial),
+            }
             for col, val in zip(obj_cols, trial.values):
                 rec[col] = val
             for attr_key in attr_keys:
@@ -213,7 +236,11 @@ def trials_to_dataframe(
             records.append(rec)
         elif include_pruned and trial.state == optuna.trial.TrialState.PRUNED:
             records.append(
-                {"trial_number": trial.number, "pruned": True, **trial.params}
+                {
+                    "trial_number": trial.number,
+                    "pruned": True,
+                    **trial_config(trial),
+                }
             )
     df = pd.DataFrame(records)
 
@@ -322,8 +349,8 @@ def trial_table(
         if raw_params is not None:
             rec["param_count"] = _fmt_param_count(raw_params)
 
-        # Hyperparameters.
-        for k, v in sorted(trial.params.items()):
+        # Hyperparameters, including values derived from them.
+        for k, v in sorted(trial_config(trial).items()):
             rec[k] = _round_value(k, v)
 
         # Extra metrics.
@@ -410,7 +437,9 @@ def best_config(
             trained, key=lambda t: t.values[select_by]
         )
 
-    config = {k: _round_value(k, v) for k, v in sorted(trial.params.items())}
+    config = {
+        k: _round_value(k, v) for k, v in sorted(trial_config(trial).items())
+    }
 
     # Print a formatted block.
     header = f"Hyperparameters (trial #{trial.number})"
@@ -463,8 +492,9 @@ def compare_trials(
     # Collect all hyperparameter keys across all trials.
     all_param_keys: list[str] = []
     seen: set[str] = set()
+    configs = {t.number: trial_config(t) for t in trials}
     for t in trials:
-        for k in sorted(t.params):
+        for k in sorted(configs[t.number]):
             if k not in seen:
                 all_param_keys.append(k)
                 seen.add(k)
@@ -486,7 +516,7 @@ def compare_trials(
         col.append(_fmt_param_count(raw) if raw is not None else None)
         # Hyperparameters.
         for k in all_param_keys:
-            val = t.params.get(k)
+            val = configs[t.number].get(k)
             col.append(_round_value(k, val) if val is not None else None)
         # Metrics.
         if metrics:

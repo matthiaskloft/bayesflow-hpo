@@ -144,7 +144,7 @@ are hardcoded in `build()`.
 |-----------|-------|-------|----------|
 | `initial_lr` | 1e-4 -- 1e-2 (log) | yes | — |
 | `batch_size` | 32--256, step 32 | yes | — |
-| `decay_rate` | 0.8--0.99 | no | `0.95` |
+| `epochs` | -- | opt-in | `None` (objective setting) |
 
 Constant dimensions can be made tunable by setting `constant=_UNSET`
 on individual dimensions or creating the space with overridden fields.
