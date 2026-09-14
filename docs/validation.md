@@ -100,7 +100,8 @@ These wrap `bf.diagnostics.*` functions, reshaping `(n_sims, n_samples)` to the 
 
 | Name | Wraps | Output Keys |
 |------|-------|-------------|
-| `calibration_error` | `bf.diagnostics.calibration_error` | `calibration_error` |
+| `calibration_error` | `bf.diagnostics.calibration_error` (default `aggregation=np.median`) | `calibration_error` |
+| `mean_calibration_error` | `bf.diagnostics.calibration_error(aggregation=np.mean)` | `mean_calibration_error` |
 | `rmse` | `bf.diagnostics.root_mean_squared_error` | `rmse` |
 | `nrmse` | `bf.diagnostics.root_mean_squared_error(normalize="range")` | `nrmse` |
 | `contraction` | `bf.diagnostics.posterior_contraction` | `contraction` |
@@ -121,6 +122,34 @@ These wrap `bf.diagnostics.*` functions, reshaping `(n_sims, n_samples)` to the 
 | `correlation` | Pearson association of posterior means and truth; diagnostic only, not recovery error | `correlation` |
 
 Aliases: `cal_error` -> `calibration_error`, `corr` -> `correlation`, `coverage_two_sided` -> `coverage`.
+
+### `calibration_error` vs `mean_calibration_error`
+
+Both form the absolute deviation between nominal and empirical
+central-interval coverage at 20 nominal levels
+(`alpha = linspace(0.005, 0.995, 20)`) and differ only in how those 20
+deviations are aggregated:
+
+- `calibration_error` uses BayesFlow's default `np.median`. Despite the
+  name it carried until 0.2.x, **it is not an Expected Calibration
+  Error** -- an ECE is a mean. Its computation is frozen so that values
+  recorded by earlier studies stay comparable.
+- `mean_calibration_error` uses `np.mean`. Prefer it for new work: a
+  median discards half the calibration curve, so a posterior that behaves
+  near the centre can hide badly miscalibrated tails.
+
+Neither is named `ece`, deliberately.
+`bf.diagnostics.expected_calibration_error` already exists and is a
+*different* statistic -- a bin-size-weighted calibration error over one-hot
+model indices, for model comparison, after Naeini et al. (2015). The
+Expected Calibration Error of that literature is a weighted mean over bins
+of predicted probability, not an unweighted mean over equally spaced
+nominal coverage levels, so this package does not claim the term.
+
+Both are *marginal* statistics computed per parameter, ignoring the data
+behind each posterior, so a posterior that returns the prior regardless
+of its input scores perfectly on either. A good value is necessary, not
+sufficient.
 
 Default set: `DEFAULT_METRICS = ["calibration_error", "nrmse", "correlation", "coverage", "rmse", "contraction"]`
 

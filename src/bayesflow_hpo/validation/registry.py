@@ -1,7 +1,8 @@
 """Metric registry for validation pipeline.
 
 Maps string names to callable metric functions.  Built-in metrics wrap
-BayesFlow diagnostics (ECE, RMSE, contraction, z-score, log-gamma);
+BayesFlow diagnostics (calibration error, RMSE, contraction, z-score,
+log-gamma);
 native metrics cover SBC rank tests (KS, chi-squared), coverage,
 bias, MAE, and correlation.  Users can register custom metrics via
 :func:`register_metric` and discover available metrics with
@@ -434,12 +435,95 @@ def _reshape_for_bf(
 def _bf_calibration_error(
     draws: np.ndarray, true_values: np.ndarray,
 ) -> dict[str, float]:
-    """Expected Calibration Error (ECE) via BayesFlow diagnostics."""
+    """Median absolute deviation of central-interval coverage.
+
+    Calls :func:`bayesflow.diagnostics.calibration_error` with all
+    defaults.  For each of ``resolution=20`` nominal levels
+    ``alpha = linspace(0.005, 0.995, 20)`` it forms the central
+    ``alpha``-credible interval, takes the empirical fraction of
+    datasets whose true value falls inside, and records
+    ``|empirical - alpha|``.  The 20 deviations are then aggregated with
+    ``aggregation=np.median``.
+
+    This is **not** an Expected Calibration Error, which is a mean over
+    the same deviations.  The name and the value are retained unchanged
+    for comparability with existing records; see
+    :func:`_bf_mean_calibration_error` for the mean-aggregated variant, which
+    is the recommended one for new work.
+    A median drops half the calibration curve by construction, so a
+    posterior that is well behaved near the centre can hide tail
+    miscalibration that the mean would expose.
+
+    The ``np.mean`` below is a scalar extraction, not an aggregation:
+    validation runs one parameter at a time, so ``_reshape_for_bf``
+    yields ``num_variables == 1`` and ``result["values"]`` is a
+    length-1 array.  Averaging across conditions happens later, in
+    :func:`~bayesflow_hpo.validation.metrics.aggregate_condition_rows`.
+
+    References
+    ----------
+    The computation is BayesFlow's; see
+    ``bayesflow.diagnostics.calibration_error`` for its documentation.
+    This package contributes the wrapper and the frozen name only.
+    """
     import bayesflow as bf
 
     estimates, targets = _reshape_for_bf(draws, true_values)
     result = bf.diagnostics.calibration_error(estimates=estimates, targets=targets)
     return {"calibration_error": float(np.mean(result["values"]))}
+
+
+def _bf_mean_calibration_error(
+    draws: np.ndarray, true_values: np.ndarray,
+) -> dict[str, float]:
+    """Mean absolute deviation of central-interval coverage.
+
+    Identical to :func:`_bf_calibration_error` except that the 20
+    per-level absolute deviations are aggregated with ``np.mean`` rather
+    than the BayesFlow default ``np.median``.  A mean over absolute
+    deviations between two probabilities is bounded in ``[0, 1]`` and is
+    sensitive to deviation anywhere on the calibration curve, where the
+    median responds only to the middle of it.
+
+    **Not an ECE, and deliberately not named one.**
+    ``bf.diagnostics.expected_calibration_error`` already exists and is a
+    different statistic: a bin-size-weighted calibration error over
+    one-hot model indices for model comparison, after Naeini et al.
+    (2015).  The Expected Calibration Error of that literature is a
+    weighted mean over bins of predicted probability, not an unweighted
+    mean over equally spaced nominal coverage levels, so the term is not
+    claimed here.  The aggregation and the name are this package's own;
+    no upstream reference backs them.
+
+    Like ``calibration_error`` this is a *marginal* statistic: it is
+    computed per parameter, ignoring the data that produced each
+    posterior, so a posterior that returns the prior regardless of its
+    input scores perfectly.  Treat a good value as necessary, not
+    sufficient.
+
+    References
+    ----------
+    The wrapped computation -- the 20 nominal levels, the central
+    intervals, and the per-level absolute deviations -- is BayesFlow's,
+    documented in ``bayesflow.diagnostics.calibration_error``.  Only the
+    choice of ``np.mean`` over that function's default ``np.median``,
+    and this metric's name, originate in this package.  Both are
+    package-owned design decisions with no external citation, recorded
+    as such in ``docs/references.md``.
+
+    Naeini, M. P., Cooper, G., & Hauskrecht, M. (2015). Obtaining well
+    calibrated probabilities using Bayesian binning. *Proceedings of the
+    AAAI Conference on Artificial Intelligence, 29*(1).
+    https://doi.org/10.1609/aaai.v29i1.9602 -- cited only to mark what
+    this metric is *not*.
+    """
+    import bayesflow as bf
+
+    estimates, targets = _reshape_for_bf(draws, true_values)
+    result = bf.diagnostics.calibration_error(
+        estimates=estimates, targets=targets, aggregation=np.mean,
+    )
+    return {"mean_calibration_error": float(np.mean(result["values"]))}
 
 
 def _bf_rmse(
@@ -743,7 +827,25 @@ DEFAULT_METRICS = [
 register_metric(
     "calibration_error", _bf_calibration_error,
     aliases=["cal_error"],
-    description="Expected Calibration Error (ECE) via BayesFlow diagnostics.",
+    description=(
+        "Median absolute deviation between nominal and empirical "
+        "central-interval coverage over 20 levels. Retained for "
+        "comparability with existing records; prefer "
+        "'mean_calibration_error' for new work."
+    ),
+)
+register_metric(
+    "mean_calibration_error", _bf_mean_calibration_error,
+    # Deliberately no alias. "mean_cal_error" is already an output key of
+    # the `coverage` family and a documented `objective_scalar` fallback,
+    # so aliasing it here would make that name ambiguous between a
+    # coverage output and this metric.
+    description=(
+        "Mean absolute deviation between nominal and empirical "
+        "central-interval coverage over 20 levels. Not an ECE -- see "
+        "bf.diagnostics.expected_calibration_error for that, a different "
+        "statistic."
+    ),
 )
 register_metric(
     "rmse", _bf_rmse,

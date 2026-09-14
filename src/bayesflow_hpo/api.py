@@ -243,24 +243,25 @@ def optimize(
 
         Built-in metrics (pass any of these as strings):
 
-        ================= ======================================
-        Name              Description
-        ================= ======================================
-        calibration_error Expected Calibration Error (ECE)
-        nrmse             Range-normalized RMSE
-        rmse              RMSE of posterior means
-        correlation       Diagnostic-only linear association
-        contraction       Posterior contraction (1=learned)
-        z_score           Posterior z-score (bias+calibration)
-        log_gamma         Log-gamma calibration diagnostic
-        coverage          Two-sided SBC rank coverage
-        coverage_left     Left-sided coverage (efficiency)
-        coverage_right    Right-sided coverage (futility)
-        sbc_ks            SBC KS statistic (minimize → 0)
-        sbc_chi2          SBC chi-squared stat (min → 0)
-        bias              Mean signed error
-        mae               Mean Absolute Error
-        ================= ======================================
+        ====================== ====================================
+        Name                   Description
+        ====================== ====================================
+        calibration_error      Median abs. coverage deviation
+        mean_calibration_error Mean abs. coverage deviation
+        nrmse                  Range-normalized RMSE
+        rmse                   RMSE of posterior means
+        correlation            Diagnostic-only linear association
+        contraction            Posterior contraction (1=learned)
+        z_score                Posterior z-score (bias+calibration)
+        log_gamma              Log-gamma calibration diagnostic
+        coverage               Two-sided SBC rank coverage
+        coverage_left          Left-sided coverage (efficiency)
+        coverage_right         Right-sided coverage (futility)
+        sbc_ks                 SBC KS statistic (minimize → 0)
+        sbc_chi2               SBC chi-squared stat (min → 0)
+        bias                   Mean signed error
+        mae                    Mean Absolute Error
+        ====================== ====================================
 
         Some metrics have aliases (e.g. ``"corr"`` for
         ``"correlation"``).  Call :func:`describe_metrics` for the

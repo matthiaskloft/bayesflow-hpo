@@ -163,6 +163,7 @@ Feature implementations and their backing references.
 | L-C2ST (local) | `validation/c2st.py` | Linhart et al. (2023), Algs. 1--2 |
 | Correlation versus agreement | `validation/registry.py` | Bland & Altman (1986) |
 | Point-summary/loss consistency | `validation/registry.py` | Gneiting (2011) |
+| ECE term not claimed for `mean_calibration_error` | `validation/registry.py` | Naeini et al. (2015) |
 | TARP (possible future extension) | documentation only | Lemos et al. (2023) |
 | SBI benchmarking | overall | Lueckmann et al. (2021) |
 
@@ -171,11 +172,30 @@ Feature implementations and their backing references.
 The following metrics wrap `bf.diagnostics.*` functions. Their methodological
 references are provided by the BayesFlow package, not this package:
 
-- `calibration_error` (ECE)
+- `calibration_error` (median absolute coverage deviation over 20
+  nominal levels -- despite the historical name, *not* an ECE)
+- `mean_calibration_error` (the same deviations aggregated with the mean)
 - `rmse`, `nrmse`
 - `contraction` (posterior contraction)
 - `z_score` (posterior z-score)
 - `log_gamma`
+
+`mean_calibration_error` is the one entry in that list with **no upstream
+reference**, and is flagged here rather than left to look like an oversight.
+It calls `bf.diagnostics.calibration_error` with a non-default `aggregation`,
+and neither that aggregation choice nor the metric's name is taken from
+BayesFlow or from a cited article -- both are this package's own design. The
+*wrapped computation* is BayesFlow's and is documented in that function's
+docstring; only the choice of `np.mean` over the default `np.median`, and the
+name, originate here.
+
+It is deliberately *not* called an ECE.
+`bf.diagnostics.expected_calibration_error` is a different statistic --
+bin-size-weighted, over one-hot model indices, for model comparison, after
+Naeini et al. (2015) -- and the Expected Calibration Error of that literature
+is a weighted mean over bins of predicted probability, not an unweighted mean
+over equally spaced nominal coverage levels. The term is therefore not
+claimed. See the Naeini et al. (2015) entry below.
 
 ---
 
@@ -365,6 +385,20 @@ authors as listed, *Bayesian Analysis* volume 20, issue 2, pages 461--488, DOI
 2023-11-23 online-first posting; the issue itself is dated June 2025, which is
 the year cited here and the one BayesFlow's own `calibration_log_gamma`
 docstring uses.
+
+### Naeini, M. P., Cooper, G., & Hauskrecht, M. (2015)
+
+Obtaining well calibrated probabilities using Bayesian binning. In
+*Proceedings of the AAAI Conference on Artificial Intelligence*, *29*(1).
+https://doi.org/10.1609/aaai.v29i1.9602
+
+Defines the Expected Calibration Error as a bin-size-weighted mean of the gap
+between confidence and accuracy over bins of predicted probability. Cited here
+only to mark what this package's `mean_calibration_error` is **not**: an
+unweighted mean over equally spaced nominal coverage levels is a different
+statistic, so the ECE name is not used for it. It is also the reference behind
+`bf.diagnostics.expected_calibration_error`, which this package does not wrap.
+OpenAlex work `W2254249950`.
 
 ### Lopez-Paz, D., & Oquab, M. (2017)
 
