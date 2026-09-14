@@ -4,6 +4,34 @@
 
 ### Added
 
+- **`cost_metric=None`.** `optimize()` and `ObjectiveConfig` now accept
+  `cost_metric=None`, producing a study whose Optuna directions are the
+  quality metrics alone: `len(objective_metrics)` in `"pareto"` mode, one in
+  `"mean"` mode.
+
+  This is not the same as ignoring the cost column at selection time. As a
+  direction, cost steers the sampler toward the cheap-model frontier, and
+  `pruning_strategy="dominance"` keeps a cheap, mediocre trial alive because
+  it is non-dominated on the cost axis. That budget is spent before selection
+  ever runs, so it cannot be recovered there.
+
+  Cost is still *measured*: `param_count` and `inference_time_s` remain trial
+  user attributes on every completed trial, which is what makes post-hoc cost
+  ranking possible. `max_param_count` also still applies -- it constrains what
+  gets built, independently of what gets optimized.
+
+  **A study's stored objective tuple has a different arity depending on this
+  setting**, so raw objective values are comparable only across studies run
+  with the same one. Resuming or warm-starting across a change is refused by
+  the existing schema guard rather than silently mis-indexed.
+
+  `mean_objective_score()` and `warm_start_study()` take a new `has_cost`
+  keyword (default `True`, the previous behavior). Passing `has_cost=False`
+  is required for a `cost_metric=None` study with more than one quality
+  metric: the default drops the last element as a cost score, which would
+  silently omit a real metric from the checkpoint-pool and warm-start
+  rankings.
+
 - **`mean_calibration_error` metric.** `bf.diagnostics.calibration_error`
   with `aggregation=np.mean` instead of its default `np.median`, registered
   with its own `METRIC_DIRECTIONS` entry (`higher_is_better=False`,

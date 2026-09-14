@@ -28,7 +28,7 @@ objects (e.g. `ObjectiveConfig`, `create_study`) directly.
 | `memory_safety_margin` | **0.2** | Safety margin for `max_memory_mb="auto"`. |
 | `objective_metrics` | **`["calibration_error", "nrmse"]`** | List of metric keys to optimize. |
 | `objective_mode` | **`"pareto"`** | `"pareto"` gives each metric its own Pareto direction; `"mean"` averages metrics into one scalar. |
-| `cost_metric` | **`"inference_time"`** | Cost objective (`"inference_time"` or `"param_count"`). |
+| `cost_metric` | **`"inference_time"`** | Cost objective (`"inference_time"` or `"param_count"`), or `None` for no cost direction. |
 | `pruning_strategy` | **`"dominance"`** | Multi-objective pruning strategy (`"dominance"`, `"mo-sha"`, `("primary", metric)`, `"none"`). |
 | `pruning_n_startup_trials` | **None** (auto-detect) | Min completed trials before pruning. Auto-detects from sampler when None. |
 | `sampler` | **`None`** (= `"tpe"`) | Sampler preset or instance. |

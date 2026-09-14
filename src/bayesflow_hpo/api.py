@@ -127,7 +127,7 @@ def optimize(
     # Objectives
     objective_metrics: list[str] | None = None,
     objective_mode: str = "pareto",
-    cost_metric: str = "inference_time",
+    cost_metric: str | None = "inference_time",
     # Pruning
     pruning_strategy: str | tuple[str, str] = "dominance",
     # Training
@@ -271,12 +271,31 @@ def optimize(
         or :func:`~bayesflow_hpo.register_metric` to add custom ones.
     objective_mode
         ``"pareto"`` (default) — each metric is its own objective;
-        study has ``len(objective_metrics) + 1`` directions.
+        study has ``len(objective_metrics) + 1`` directions (one per
+        metric when ``cost_metric=None``).
         ``"mean"`` — arithmetic mean of the listed metrics forms one
-        scalar; study has 2 directions (mean + cost).
+        scalar; study has 2 directions (mean + cost), or 1 when
+        ``cost_metric=None``.
     cost_metric
         Which cost objective to use as the last Optuna direction.
-        ``"inference_time"`` (default) or ``"param_count"``.
+        ``"inference_time"`` (default) or ``"param_count"``, or
+        ``None`` to search over the quality metrics alone.
+
+        ``None`` is not the same as ignoring the cost column when
+        selecting a trial: as a direction, cost steers the sampler
+        toward the cheap-model frontier and keeps a cheap, mediocre
+        trial alive under ``pruning_strategy="dominance"`` because it
+        is non-dominated on that axis. Dropping the direction does not
+        drop the measurement -- ``param_count`` and ``inference_time_s``
+        are still stored on every trial, so cost remains available for
+        post-hoc ranking -- and ``max_param_count`` still applies,
+        because it constrains what gets built rather than what gets
+        optimized.
+
+        The setting changes the arity of a study's stored objective
+        tuple, so a study started with one value of it cannot be
+        resumed or warm-started under another; the schema guard in
+        :func:`~bayesflow_hpo.create_study` rejects the mismatch.
     pruning_strategy
         Multi-objective pruning strategy.  One of ``"dominance"``
         (default), ``"mo-sha"``, ``"primary"``, or ``"none"``.
@@ -576,6 +595,7 @@ def optimize(
         n_trials=n_trials,
         max_total_trials=max_total_trials,
         show_progress_bar=show_progress_bar,
+        has_cost=cost_metric is not None,
     )
 
 
@@ -669,7 +689,7 @@ def _build_objective(
     n_posterior_samples: int,
     objective_metrics: list[str],
     objective_mode: str,
-    cost_metric: str,
+    cost_metric: str | None,
     report_frequency: int,
     pruning_strategy: str | tuple[str, str],
     build_approximator_fn: BuildApproximatorFn | None,
@@ -957,7 +977,7 @@ def _derive_directions(
     directions: list[str] | None,
     objective_metrics: list[str],
     objective_mode: str,
-    cost_metric: str,
+    cost_metric: str | None,
 ) -> tuple[list[str], list[str]]:
     """Validate or auto-derive optimization directions and metric names.
 
@@ -997,8 +1017,9 @@ def _derive_directions(
             f"provide exactly {n_obj} directions."
         )
 
+    cost_tail = [] if cost_metric is None else [cost_metric]
     if objective_mode == "pareto":
-        metric_names = list(objective_metrics) + [cost_metric]
+        metric_names = list(objective_metrics) + cost_tail
     else:
         # Sorted because the mean is commutative: the column holds one
         # arithmetic mean, so `mean(nrmse+log_gamma)` and
@@ -1006,7 +1027,7 @@ def _derive_directions(
         # equal on resume. Order stays significant for pareto mode, where
         # each metric owns a column.
         joined = "+".join(sorted(objective_metrics))
-        metric_names = [f"mean({joined})", cost_metric]
+        metric_names = [f"mean({joined})"] + cost_tail
 
     return directions, metric_names
 
@@ -1028,6 +1049,7 @@ def _create_and_run_study(
     n_trials: int,
     max_total_trials: int | None,
     show_progress_bar: bool,
+    has_cost: bool = True,
 ) -> optuna.Study:
     """Create (or resume) an Optuna study and run optimization."""
     if not resume and storage is not None:
@@ -1053,6 +1075,7 @@ def _create_and_run_study(
         warm_start_top_k=warm_start_top_k,
         qmc_startup_trials=qmc_startup_trials,
         sampler_n_startup_trials=sampler_n_startup_trials,
+        has_cost=has_cost,
     )
     _guard_resumed_study(
         study, objective.config.objective_metrics, metric_names
