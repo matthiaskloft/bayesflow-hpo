@@ -52,6 +52,45 @@ from a checkout of the tag.
 
 ---
 
+### Package M: Spread-Calibration Diagnostic (`nrmse - sqrt(1 - r^2)`)
+
+Tracked in [issue #98](https://github.com/matthiaskloft/bayesflow-hpo/issues/98).
+
+Left over from the `fix/hpo-review-findings` branch, whose doc-only tail never
+merged (PR #66 landed the code fixes; the last three commits were pushed after
+the merge).
+
+Item 6 above is settled the right way — keep the posterior **mean** — but the
+recorded rationale ("squared-error consistency") understates it. The mean is
+the correlation-maximising estimator, not merely a convention: for any
+estimator `g`, the tower rule gives `Cov(g, t) = Cov(g, m)` with
+`m = E[t | D]`, so Cauchy-Schwarz bounds `corr(g, t)` by `sd(m) / sd(t)`, with
+equality iff `g` is affine in `m`. The median minimises L1 loss and has no such
+property, so substituting it would *lower* the achievable correlation —
+including for skewed posteriors, where the intuition that the median is "more
+representative" does not transfer to this metric.
+
+The open work is the corollary. Equality in that bound implies
+`NRMSE = sqrt(1 - r^2)` for a correctly scaled posterior mean, so the residual
+
+```
+nrmse - sqrt(1 - r^2)
+```
+
+is zero when the scale is right and positive when the ordering is right but the
+spread is wrong — usually under-shrinkage, i.e. an over-confident posterior.
+Neither `correlation` nor `nrmse` reveals that failure alone, and no metric in
+`validation/registry.py` currently covers it.
+
+Verified empirically in `bayesflow-irt`'s Stan/NUTS ceiling benchmark, where
+posterior means satisfy the identity to within 0.002 at all four evaluation
+corners (see that repo's `docs/mcmc_ceiling_validation.md`).
+
+To do: register it as a diagnostic-only metric alongside `correlation`, with
+tests and an entry in `docs/validation.md` and `docs/defaults.md`.
+
+---
+
 ### Package L: End-to-End `optimize()` Tests
 
 Tracked in [issue #76](https://github.com/matthiaskloft/bayesflow-hpo/issues/76).
