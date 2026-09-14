@@ -300,7 +300,17 @@ METRIC_DIRECTIONS: dict[str, MetricDirection] = {
     "calibration_error": MetricDirection(
         higher_is_better=False,
         to_minimize=lambda v: v,
-        # ECE is a mean absolute deviation between two probabilities.
+        # A median of absolute deviations between two probabilities, so
+        # bounded in [0, 1] -- despite the name, not a mean. See
+        # validation.registry._bf_calibration_error.
+        worst_raw=1.0,
+    ),
+    "mean_calibration_error": MetricDirection(
+        higher_is_better=False,
+        to_minimize=lambda v: v,
+        # A mean of absolute deviations between two probabilities, hence
+        # bounded in [0, 1]. Loose rather than tight: nothing attainable
+        # exceeds ~0.5. A penalty only has to dominate real values.
         worst_raw=1.0,
     ),
     "nrmse": MetricDirection(
@@ -397,6 +407,14 @@ ENCODING_CHANGED_AT_V2: frozenset[str] = frozenset(
 ENCODING_UNCHANGED_AT_V2: frozenset[str] = frozenset(
     {
         "calibration_error",
+        # `mean_calibration_error` postdates encoding 2, so no pre-v2 study
+        # can hold a column for it at all. It is listed rather than left out
+        # because omission means "encoding-sensitive", which would block
+        # resuming studies over a metric whose encoding has no history to
+        # differ from. Its penalty would also be 1.0 under either rule: the
+        # old unregistered fallback and its new direction entry's `worst_raw`
+        # agree.
+        "mean_calibration_error",
         "rmse",
         "nrmse",
         "z_score",

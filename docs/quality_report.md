@@ -111,7 +111,8 @@ Plugin-based metric registry mapping string names to callables. Metric function 
 
 | Name | Wraps | Output Keys |
 |------|-------|-------------|
-| `calibration_error` | `bf.diagnostics.calibration_error` | `calibration_error` |
+| `calibration_error` | `bf.diagnostics.calibration_error` (default `aggregation=np.median`) | `calibration_error` |
+| `mean_calibration_error` | `bf.diagnostics.calibration_error(aggregation=np.mean)` | `mean_calibration_error` |
 | `rmse` | `bf.diagnostics.root_mean_squared_error` | `rmse` |
 | `nrmse` | `bf.diagnostics.root_mean_squared_error(normalize="range")` | `nrmse` |
 | `contraction` | `bf.diagnostics.posterior_contraction` | `contraction` |

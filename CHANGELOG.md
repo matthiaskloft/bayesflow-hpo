@@ -4,6 +4,41 @@
 
 ### Added
 
+- **`mean_calibration_error` metric.** `bf.diagnostics.calibration_error`
+  with `aggregation=np.mean` instead of its default `np.median`, registered
+  with its own `METRIC_DIRECTIONS` entry (`higher_is_better=False`,
+  `worst_raw=1.0`) so it can be passed to `objective_metrics` directly. It is
+  deliberately *not* in `DEFAULT_METRICS`: adding it there would change the
+  columns of every stored summary.
+
+  It is **not** called `ece`, and has no `mean_cal_error` alias. Both names
+  were considered and rejected: `bf.diagnostics.expected_calibration_error`
+  already exists and is a different statistic (bin-weighted, over one-hot
+  model indices, for model comparison, after Naeini et al. 2015), and
+  `mean_cal_error` is already an output key of the `coverage` family and a
+  documented `objective_scalar` fallback. The ECE of the literature is a
+  weighted mean over bins of predicted probability, not an unweighted mean
+  over equally spaced nominal coverage levels, so the term is not claimed.
+  `docs/references.md` records that this metric has no upstream reference:
+  the aggregation and the name are this package's own.
+
+  Prefer it over `calibration_error` for new work. A median over the 20
+  nominal levels discards half the calibration curve, so a posterior whose
+  central intervals behave can hide badly miscalibrated tails. On a posterior
+  with its tails truncated at 1.2 SD, swept over 20 seeds, the mean-aggregated
+  value lands in 0.031-0.041 while the median-aggregated one lands in
+  0.001-0.017 — the median often reads as barely distinguishable from a
+  perfectly calibrated posterior
+  (`tests/test_validation/test_ece_vs_calibration_error.py`). Ratios against
+  each metric's own calibrated baseline are not quoted here: those baselines
+  are Monte Carlo noise, so the ratio swings between 3.9x and 20.4x across
+  seeds while the absolute values stay put.
+
+  It is listed in `ENCODING_UNCHANGED_AT_V2`. The metric postdates
+  encoding 2, so no pre-v2 study can hold a column for it; leaving it
+  out would mark it encoding-sensitive and block resuming studies over
+  an encoding with no history to differ from.
+
 - **`sampler_n_startup_trials` on `optimize()` and `create_study()`.** The
   `"tpe"` preset hardcoded `n_startup_trials=25` — 2.5x Optuna's own default of
   10 — with no way to change it, so a study smaller than ~40 trials spent most
@@ -43,6 +78,41 @@
   Systems, 24*, 2546–2554.
 
 ### Fixed
+
+- **`calibration_error` was documented as an Expected Calibration Error in six
+  places; it is a median, not a mean.** The metric wraps
+  `bf.diagnostics.calibration_error` with all defaults, which aggregates the
+  per-level absolute coverage deviations with `aggregation=np.median`
+  (`bayesflow/diagnostics/metrics/calibration_error.py:15`). An ECE is a mean.
+  Corrected in `validation/registry.py` (function docstring, module docstring
+  and registered description), `api.py`'s built-in metric table,
+  `docs/references.md`, `docs/validation.md` and `docs/quality_report.md`.
+
+  The conflation was inherited, not invented here: BayesFlow's own
+  `basic_workflow.py` still documents this quantity as "Expected Calibration
+  Error (ECE)" in `compute_default_diagnostics`. A reader cross-checking
+  upstream docs will find the two descriptions disagree; this package's is the
+  one that matches the code.
+
+  The `worst_raw=1.0` comment in `objectives.py` was the load-bearing one: it
+  justified the bound by calling the metric a mean of absolute deviations
+  between two probabilities. The bound itself survives -- a median of values
+  in [0, 1] is in [0, 1] -- but the recorded reason was wrong.
+
+  Registering a custom metric named `mean_calibration_error` through
+  `register_metric()` now
+  raises `ValueError` unless `overwrite=True`, and `list_metrics()` /
+  `describe_metrics()` gain a row. That is the only user-visible behaviour
+  change.
+
+  The "13 built-in validation metrics" counts in `README.md` and `CLAUDE.md`
+  were already stale before this change -- the registry held 15 -- and now
+  read 16, matching `len(list_metrics())`.
+
+  **No stored value changes.** The computation of `calibration_error` is
+  frozen on purpose so that records from earlier studies stay comparable; only
+  the documentation is corrected, and `mean_calibration_error` is added
+  alongside as the mean-aggregated variant. (issue #83)
 
 - **Unused-hparam warning no longer advises deleting live search dimensions.**
   `check_pipeline` handed `train_fn` a plain `dict(hparams)` copy, so every read

@@ -171,7 +171,18 @@ Feature implementations and their backing references.
 The following metrics wrap `bf.diagnostics.*` functions. Their methodological
 references are provided by the BayesFlow package, not this package:
 
-- `calibration_error` (ECE)
+- `calibration_error` (median absolute coverage deviation over 20
+  nominal levels -- despite the historical name, *not* an ECE)
+- `mean_calibration_error` (the same deviations aggregated with the mean)
+
+`mean_calibration_error` is the one entry in this list with **no upstream
+reference**. It calls `bf.diagnostics.calibration_error` with a non-default
+`aggregation`, and neither that aggregation choice nor the metric's name is
+taken from BayesFlow or from a cited article -- both are this package's own.
+It is deliberately *not* called an ECE: `bf.diagnostics.expected_calibration_error`
+is a different statistic (bin-weighted, over one-hot model indices, after
+Naeini et al. 2015), and the ECE of that literature is a weighted mean over
+probability bins rather than an unweighted mean over nominal coverage levels.
 - `rmse`, `nrmse`
 - `contraction` (posterior contraction)
 - `z_score` (posterior z-score)

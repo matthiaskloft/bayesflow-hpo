@@ -102,7 +102,7 @@ src/bayesflow_hpo/
 │   └── validation_callback.py  # PeriodicValidationCallback (pluggable pruning)
 ├── validation/         # Fixed-dataset validation pipeline
 │   ├── data.py         # ValidationDataset generation + save/load
-│   ├── registry.py     # 13 built-in metrics (calibration, NRMSE, SBC, etc.)
+│   ├── registry.py     # 16 built-in metrics (calibration, NRMSE, SBC, etc.)
 │   ├── pipeline.py     # run_validation_pipeline()
 │   ├── metrics.py      # compute_condition_metrics(), aggregate_condition_rows()
 │   ├── inference.py    # make_bayesflow_infer_fn()
