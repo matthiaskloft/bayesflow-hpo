@@ -633,3 +633,190 @@ class TestTheCallbackCanonicalizesItsOwnNames:
             early_stopping_monitor="objective_mean",
         )
         assert cb.early_stopping_monitor == "objective_mean"
+
+
+class TestSingleObjectiveStudy:
+    """A one-direction study, newly reachable through ``cost_metric=None``.
+
+    Before ``cost_metric`` became optional, ``optimize()`` always produced at
+    least two directions -- ``len(objective_metrics) + 1`` in pareto mode and
+    a literal 2 in mean mode -- so this branch could not be reached from the
+    public entry point at all. ``cost_metric=None`` reaches it in mean mode,
+    and in pareto mode over a single metric.
+    """
+
+    def test_reports_the_mean_not_the_first_metric(self):
+        """Mean mode's objective IS the mean; pruning must use it.
+
+        Reporting ``objective_metrics[0]`` made Optuna's pruner decide on a
+        quantity the study does not optimize: a trial with a good
+        ``calibration_error`` and a terrible ``nrmse`` reported as good.
+        """
+        study = _make_study(n_objectives=1)
+        trial = study.ask()
+        callback = PeriodicValidationCallback(
+            trial=trial,
+            approximator=None,
+            validation_data=_DUMMY_VALIDATION_DATA,
+            interval=1,
+            warmup=0,
+            pruning_strategy="none",
+            objective_metrics=["calibration_error", "nrmse"],
+        )
+
+        reported = []
+        with patch.object(
+            callback,
+            "_run_lightweight_validation",
+            return_value={"calibration_error": 0.1, "nrmse": 0.9},
+        ), patch.object(
+            trial, "report", side_effect=lambda v, step: reported.append(v)
+        ), patch.object(trial, "should_prune", return_value=False):
+            callback.on_epoch_end(epoch=0)
+
+        assert reported == [pytest.approx(0.5)], (
+            "expected the mean of both metrics, not calibration_error alone"
+        )
+
+    def test_single_metric_reports_that_metric(self):
+        """With one metric the mean is that metric — no behaviour change."""
+        study = _make_study(n_objectives=1)
+        trial = study.ask()
+        callback = PeriodicValidationCallback(
+            trial=trial,
+            approximator=None,
+            validation_data=_DUMMY_VALIDATION_DATA,
+            interval=1,
+            warmup=0,
+            pruning_strategy="none",
+            objective_metrics=["calibration_error"],
+        )
+
+        reported = []
+        with patch.object(
+            callback,
+            "_run_lightweight_validation",
+            return_value={"calibration_error": 0.25},
+        ), patch.object(
+            trial, "report", side_effect=lambda v, step: reported.append(v)
+        ), patch.object(trial, "should_prune", return_value=False):
+            callback.on_epoch_end(epoch=0)
+
+        assert reported == [pytest.approx(0.25)]
+
+    def test_warns_that_a_requested_strategy_is_ignored(self, caplog):
+        """Silently dropping the user's pruning_strategy is the trap."""
+        study = _make_study(n_objectives=1)
+        with caplog.at_level("WARNING"):
+            PeriodicValidationCallback(
+                trial=study.ask(),
+                approximator=None,
+                validation_data=_DUMMY_VALIDATION_DATA,
+                pruning_strategy="mo-sha",
+                objective_metrics=["calibration_error"],
+            )
+        assert "is ignored" in caplog.text
+        assert "mo-sha" in caplog.text
+
+    def test_multi_objective_study_does_not_warn(self, caplog):
+        study = _make_study(n_objectives=2)
+        with caplog.at_level("WARNING"):
+            PeriodicValidationCallback(
+                trial=study.ask(),
+                approximator=None,
+                validation_data=_DUMMY_VALIDATION_DATA,
+                pruning_strategy="mo-sha",
+                objective_metrics=["calibration_error", "nrmse"],
+            )
+        assert "is ignored" not in caplog.text
+
+
+class TestSingleObjectivePruningHonoursConfig:
+    """Regressions for the one-direction study ``cost_metric=None`` exposes."""
+
+    class _AlwaysPrune(optuna.pruners.BasePruner):
+        def prune(self, study, trial):
+            return True
+
+    def _run(self, scores, pruning_strategy, metrics, pruner=None):
+        study = optuna.create_study(
+            directions=["minimize"],
+            pruner=pruner or self._AlwaysPrune(),
+        )
+        callback = PeriodicValidationCallback(
+            trial=study.ask(),
+            approximator=None,
+            validation_data=_DUMMY_VALIDATION_DATA,
+            interval=1,
+            warmup=0,
+            pruning_strategy=pruning_strategy,
+            objective_metrics=metrics,
+        )
+        with patch.object(
+            callback, "_run_lightweight_validation", return_value=scores
+        ):
+            try:
+                callback.on_epoch_end(epoch=0)
+            except optuna.TrialPruned:
+                return "pruned"
+        return "kept"
+
+    def test_pruning_strategy_none_is_honoured(self):
+        """`"none"` must disable pruning here as it does multi-objective.
+
+        `_evaluate_pruning` returns False for `"none"`, but this branch
+        consulted Optuna's pruner unconditionally -- so a study that asked
+        for no pruning got the default MedianPruner's verdict anyway.
+        `optimize()` installs this callback whenever early stopping is on,
+        so the combination is reachable without asking for pruning at all.
+        """
+        assert self._run(
+            {"calibration_error": 0.3, "nrmse": 0.0},
+            pruning_strategy="none",
+            metrics=["calibration_error", "nrmse"],
+        ) == "kept"
+
+    def test_pruning_still_happens_when_a_strategy_is_configured(self):
+        """The fix must not disable pruning wholesale."""
+        assert self._run(
+            {"calibration_error": 0.3, "nrmse": 0.0},
+            pruning_strategy="dominance",
+            metrics=["calibration_error", "nrmse"],
+        ) == "pruned"
+
+    def test_reported_value_is_invariant_to_metric_order(self):
+        """The mean is commutative; the reported scalar must be too.
+
+        Reporting `objective_metrics[0]` made the pruning decision depend on
+        which metric the caller happened to list first -- with conflicting
+        rankings (`calibration_error` 0.3 against `nrmse` 0.0) the two
+        orderings reported 0.3 and 0.0, a prune and a keep on the same trial.
+        """
+        scores = {"calibration_error": 0.3, "nrmse": 0.0}
+        reported = []
+
+        for metrics in (
+            ["calibration_error", "nrmse"],
+            ["nrmse", "calibration_error"],
+        ):
+            study = optuna.create_study(directions=["minimize"])
+            trial = study.ask()
+            callback = PeriodicValidationCallback(
+                trial=trial,
+                approximator=None,
+                validation_data=_DUMMY_VALIDATION_DATA,
+                interval=1,
+                warmup=0,
+                pruning_strategy="none",
+                objective_metrics=metrics,
+            )
+            with patch.object(
+                callback, "_run_lightweight_validation", return_value=scores
+            ), patch.object(
+                trial, "report", side_effect=lambda v, step: reported.append(v)
+            ):
+                callback.on_epoch_end(epoch=0)
+
+        assert reported == [pytest.approx(0.15), pytest.approx(0.15)], (
+            f"metric order changed the reported value: {reported}"
+        )

@@ -51,7 +51,7 @@ def optimize(
 | `n_posterior_samples` | Posterior draws for validation (default 500). |
 | `objective_metrics` | Metric keys to optimize. Default `["calibration_error", "nrmse"]`. |
 | `objective_mode` | `"pareto"` (default) — each metric is its own objective. `"mean"` — arithmetic mean of metrics. |
-| `cost_metric` | Cost objective: `"inference_time"` (default) or `"param_count"`. |
+| `cost_metric` | Cost objective: `"inference_time"` (default), `"param_count"`, or `None` to optimize the quality metrics alone. With `None` the study has one direction per quality metric; `param_count` and `inference_time_s` are still stored as trial user attrs for post-hoc ranking, and `max_param_count` still applies. |
 | `training_mode` | `"fixed_budget"` (cosine, full budget) or `"open_ended"` (inverse-sqrt, validation early stopping). |
 | `epochs` | Training epochs, or safety cap in open-ended mode (default 200). |
 | `num_batches` | Online simulation batches per epoch (default 50). |
@@ -222,7 +222,7 @@ Public default implementations used by `optimize()` when no custom hooks are pro
 | `pruning_n_startup_trials` | `None` | Min completed trials before pruning (`None` = auto-detect from sampler) |
 | `objective_metrics` | `["calibration_error", "nrmse"]` | Metric keys to optimize |
 | `objective_mode` | `"pareto"` | `"pareto"` or `"mean"` |
-| `cost_metric` | `"inference_time"` | Cost objective (`"inference_time"` or `"param_count"`) |
+| `cost_metric` | `"inference_time"` | Cost objective (`"inference_time"`, `"param_count"`, or `None` for no cost direction) |
 | `checkpoint_pool` | `None` | Optional `CheckpointPool` |
 | `build_approximator_fn` | `None` | Custom build hook |
 | `train_fn` | `None` | Custom training hook |

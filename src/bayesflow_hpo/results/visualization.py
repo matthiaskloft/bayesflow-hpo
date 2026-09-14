@@ -870,11 +870,19 @@ def plot_parallel_coordinates(
     # "better" (lower cost) maps to higher normalized values, consistent
     # with the other axes where lower values are better and map to the
     # bottom of the plot.
-    cost_col = n_axes - 1
+    #
+    # Only when there IS a cost axis. A study run with `cost_metric=None`
+    # ends in an ordinary quality metric, and negating it silently reverses
+    # how that axis reads -- a worse value plotting higher, under a label
+    # claiming it was inverted on purpose. Studies written before the stamp
+    # existed all carried a cost column, so its absence defaults to True.
     display_labels = list(obj_cols)
-    data[:, cost_col] = np.log1p(np.abs(data[:, cost_col]))
-    data[:, cost_col] = -data[:, cost_col]
-    display_labels[cost_col] = f"-log({obj_cols[cost_col]})"
+    has_cost = study.user_attrs.get("bayesflow_hpo_has_cost_objective", True)
+    if has_cost:
+        cost_col = n_axes - 1
+        data[:, cost_col] = np.log1p(np.abs(data[:, cost_col]))
+        data[:, cost_col] = -data[:, cost_col]
+        display_labels[cost_col] = f"-log({obj_cols[cost_col]})"
 
     # Normalize each axis to [0, 1]
     col_min = np.nanmin(data, axis=0)

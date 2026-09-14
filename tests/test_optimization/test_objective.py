@@ -1550,6 +1550,77 @@ def test_checkpoint_pool_receives_mean_of_pareto_metrics(monkeypatch):
     assert saved_calls[0] != values[0]
 
 
+def test_checkpoint_pool_ranks_on_every_metric_without_a_cost_column(
+    monkeypatch,
+) -> None:
+    """The wiring behind the silent failure, through a real trial.
+
+    The unit test on `mean_objective_score` guards the helper; this guards
+    the call. Delete `has_cost=` at `objective.py`'s `maybe_save` call and
+    the pool ranks on `calibration_error` alone while that unit test stays
+    green.
+
+    Mirrors `test_checkpoint_pool_receives_mean_of_pareto_metrics`, with the
+    cost column removed: there `values[:-1]` and "every quality metric" name
+    the same slice, which is exactly why this case needs its own test.
+    """
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.estimate_peak_memory_mb",
+        lambda params: 1.0,
+    )
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.cleanup_trial",
+        lambda: None,
+    )
+
+    class _FakeSimulator:
+        def sample(self, shape):
+            return {}
+
+    class _FakeAdapter:
+        def __call__(self, data):
+            return data
+
+    saved_calls: list[float] = []
+
+    class _RecordingCheckpointPool:
+        def maybe_save(self, trial_number, objective_value, approximator):
+            saved_calls.append(objective_value)
+            return True
+
+    objective = GenericObjective(
+        ObjectiveConfig(
+            simulator=_FakeSimulator(),
+            adapter=_FakeAdapter(),
+            search_space=_FakeSearchSpace(),
+            validation_data=_DUMMY_VALIDATION_DATA_1COND,
+            epochs=1,
+            num_batches=1,
+            build_approximator_fn=lambda hp: _FakeApproximator(10_000),
+            train_fn=lambda approx, sim, hp, cb: None,
+            validate_fn=lambda approx, vd, n: {
+                "calibration_error": 0.05,  # good
+                "nrmse": 0.95,  # bad -- must not be dropped
+            },
+            objective_metrics=["calibration_error", "nrmse"],
+            objective_mode="pareto",
+            cost_metric=None,
+            checkpoint_pool=_RecordingCheckpointPool(),
+        )
+    )
+
+    values = objective(_FakeTrial())
+
+    # No cost column: the tuple is the two quality metrics.
+    assert len(values) == 2
+    assert values == pytest.approx((0.05, 0.95))
+
+    assert len(saved_calls) == 1
+    assert saved_calls[0] == pytest.approx(np.mean([0.05, 0.95]))
+    # The defect this guards: ranking on values[0] alone.
+    assert saved_calls[0] != pytest.approx(values[0])
+
+
 def test_hard_metric_constraints_pass_through_when_satisfied(monkeypatch):
     monkeypatch.setattr(
         "bayesflow_hpo.optimization.objective.estimate_peak_memory_mb",

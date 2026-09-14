@@ -61,6 +61,13 @@ OpenAlex API. Claims are grouped below by what actually happened to them.
   our preset and Li et al.'s Algorithm 1 default.
 - Both Optuna behavioural claims (categorical choice-order identity,
   positional `directions`/`values`), re-executed on 5.0.0.
+- Optuna 5.0.0: `create_study` raises
+  `ValueError("The number of objectives must be greater than 0.")` for an
+  empty `directions` list (`optuna/study/study.py:1264`) -- read from the
+  installed source and reproduced. This is the floor that makes
+  `objective_metrics=[]` with `cost_metric=None` an invalid configuration
+  rather than a degenerate one, and it is why `ObjectiveConfig` rejects the
+  pair up front instead of letting `create_study` fail later.
 
 ### Bulk metadata check
 
@@ -116,6 +123,7 @@ Feature implementations and their backing references.
 | End-to-end objective ranking | `tests/test_end_to_end/` | Optuna docs; Deb et al. (2002) |
 | End-to-end `log_gamma` direction | `tests/test_end_to_end/` | Sailynoja et al. (2022); Modrak et al. (2025), Sec. 4.1 |
 | Objective column ordering | `objectives.py` | Optuna 5.0.0 docs |
+| Optional cost objective (`cost_metric=None`) | `optimization/objective.py`, `api.py` | Optuna 5.0.0 source (>= 1 direction; positional `values`); Deb et al. (2002) for the Pareto-front consequence |
 | Categorical choice-order identity | `search_spaces/base.py` | Optuna 5.0.0 docs |
 | `CanonicalMetricName` type | `validation/registry.py` | PEP 484 |
 | `RawScore` / `MinimizeScore` types | `objectives.py` | PEP 484 |

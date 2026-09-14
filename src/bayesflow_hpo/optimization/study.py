@@ -92,14 +92,19 @@ def _make_constraints_func(
     return _constraints
 
 
-def _mean_ranking_key(trial: optuna.trial.FrozenTrial) -> float:
-    """Rank by the mean of objective values (excluding cost score).
+def _mean_ranking_key(
+    trial: optuna.trial.FrozenTrial, has_cost: bool = True
+) -> float:
+    """Rank by the mean of the quality objective values.
 
+    The trailing cost score is excluded when the study carries one; with
+    ``cost_metric=None`` every column is a quality metric, and dropping
+    the last would silently omit a real objective from the ranking.
     Falls back to the first objective value when multi-objective values
     are not available.
     """
     if trial.values:
-        return mean_objective_score(trial.values)
+        return mean_objective_score(trial.values, has_cost=has_cost)
     return float("inf")
 
 
@@ -483,6 +488,7 @@ def create_study(
     # positionally is a parameter nothing may ever be inserted in front of.
     *,
     sampler_n_startup_trials: int | None = None,
+    has_cost: bool = True,
 ) -> optuna.Study:
     """Create or resume an Optuna study.
 
@@ -587,6 +593,11 @@ def create_study(
         Ignored when *sampler* is a sampler instance rather than a
         preset name, for the same reason *metric_constraints_soft* is:
         sampler internals cannot be patched safely.
+    has_cost
+        Whether the last objective is a cost score. Only affects how
+        warm-start candidates are ranked: with ``cost_metric=None``
+        every column is a quality metric and none may be excluded from
+        the mean.
 
     Raises
     ------
@@ -698,6 +709,15 @@ def create_study(
         )
         for t in study.trials
     )
+    # Whether the LAST objective column is a cost score is not recoverable
+    # from the column names: `cost_metric=None` over two quality metrics and
+    # `cost_metric="param_count"` over one both produce two columns, and
+    # sniffing for the name "param_count" would misread a user metric that
+    # happens to share it. Readers that treat the last column differently --
+    # `plot_parallel_coordinates` inverts it -- need this stamp to tell them
+    # apart. Stamped after the schema check above, so a study whose columns
+    # were just proved to match cannot be relabelled with a conflicting value.
+    study.set_user_attr("bayesflow_hpo_has_cost_objective", bool(has_cost))
     if metric_names and not unlabellable:
         try:
             with warnings.catch_warnings():
@@ -762,6 +782,7 @@ def create_study(
             target_study=study,
             source_study=warm_start_from,
             top_k=warm_start_top_k,
+            has_cost=has_cost,
         )
         # Without this the target holds COMPLETE trials and no provenance --
         # the exact signature of a legacy study -- so the resume guard would
@@ -789,12 +810,13 @@ def warm_start_study(
     target_study: optuna.Study,
     source_study: optuna.Study,
     top_k: int = 25,
+    has_cost: bool = True,
 ) -> int:
     """Seed *target_study* with best completed trials from *source_study*.
 
-    Trials are ranked by the arithmetic mean of their objective values
-    (excluding cost score), falling back to the first objective when
-    only a single value is available.
+    Trials are ranked by the arithmetic mean of their quality objective
+    values, falling back to the first objective when only a single value
+    is available.
 
     Parameters
     ----------
@@ -804,6 +826,10 @@ def warm_start_study(
         Study to copy trials from.
     top_k
         Maximum number of trials to copy.
+    has_cost
+        Whether the studies' last objective is a cost score to exclude
+        from the ranking. Pass ``False`` for studies run with
+        ``cost_metric=None``.
 
     Returns
     -------
@@ -818,7 +844,10 @@ def warm_start_study(
     if not complete_trials:
         return 0
 
-    ranked = sorted(complete_trials, key=_mean_ranking_key)
+    ranked = sorted(
+        complete_trials,
+        key=lambda t: _mean_ranking_key(t, has_cost=has_cost),
+    )
 
     added = 0
     for trial in ranked[: max(0, int(top_k))]:

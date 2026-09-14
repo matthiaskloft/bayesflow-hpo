@@ -28,7 +28,7 @@ objects (e.g. `ObjectiveConfig`, `create_study`) directly.
 | `memory_safety_margin` | **0.2** | Safety margin for `max_memory_mb="auto"`. |
 | `objective_metrics` | **`["calibration_error", "nrmse"]`** | List of metric keys to optimize. |
 | `objective_mode` | **`"pareto"`** | `"pareto"` gives each metric its own Pareto direction; `"mean"` averages metrics into one scalar. |
-| `cost_metric` | **`"inference_time"`** | Cost objective (`"inference_time"` or `"param_count"`). |
+| `cost_metric` | **`"inference_time"`** | Cost objective (`"inference_time"` or `"param_count"`), or `None` for no cost direction. |
 | `pruning_strategy` | **`"dominance"`** | Multi-objective pruning strategy (`"dominance"`, `"mo-sha"`, `("primary", metric)`, `"none"`). |
 | `pruning_n_startup_trials` | **None** (auto-detect) | Min completed trials before pruning. Auto-detects from sampler when None. |
 | `sampler` | **`None`** (= `"tpe"`) | Sampler preset or instance. |
@@ -37,7 +37,7 @@ objects (e.g. `ObjectiveConfig`, `create_study`) directly.
 | `sims_per_condition` | **200** | Simulations per condition grid point in validation data. |
 | `storage` | **`"sqlite:///bayesflow_hpo.db"`** | Optuna storage for persistence & crash recovery. |
 | `study_name` | **`"bayesflow_hpo"`** | Optuna study name. |
-| `directions` | **`None`** (auto-derived) | Auto-derives `["minimize"] * n_objectives` from `objective_mode`. In mean mode: 2 directions; in pareto mode with N metrics: N+1 directions. |
+| `directions` | **`None`** (auto-derived) | Auto-derives `["minimize"] * n_objectives` from `objective_mode` and `cost_metric`. With N metrics: N+1 directions in pareto mode, 2 in mean mode; with `cost_metric=None`, N and 1 respectively. |
 | `warm_start_top_k` | **25** | Best trials to copy when warm-starting from another study. |
 | `qmc_startup_trials` | **0** (disabled) | Number of initial Sobol QMC trials before the main sampler takes over. |
 | `show_progress_bar` | **True** | Show Optuna's tqdm progress bar. |

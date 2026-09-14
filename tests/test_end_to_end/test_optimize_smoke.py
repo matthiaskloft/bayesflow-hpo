@@ -37,12 +37,18 @@ selection tests hold the cost coordinate equal.
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 import pytest
 
 from bayesflow_hpo.results.extraction import trials_to_dataframe
 
-from .conftest import assert_all_minimize, assert_trials_succeeded
+from .conftest import (
+    ATTR_ROUNDING_TOL,
+    assert_all_minimize,
+    assert_trials_succeeded,
+)
 
 pytestmark = pytest.mark.endtoend
 
@@ -100,3 +106,46 @@ def test_mean_mode_collapses_to_a_single_quality_objective(run_study):
 
     assert_trials_succeeded(study, expected=1)
     assert_all_minimize(study, expected=2)
+
+
+def test_cost_metric_none_optimizes_quality_alone(run_study: Any) -> None:
+    """``cost_metric=None`` drops the direction but keeps the measurement.
+
+    The measurement is the point of the feature: post-hoc cost ranking needs
+    ``param_count`` and ``inference_time_s`` on every trial, and only the
+    Optuna objective column goes away.
+    """
+    study = run_study(
+        objective_metrics=["calibration_error", "nrmse"],
+        cost_metric=None,
+    )
+
+    assert_trials_succeeded(study, expected=2)
+    # calibration_error, nrmse -- and no cost.
+    assert_all_minimize(study, expected=2)
+    assert list(study.metric_names or []) == ["calibration_error", "nrmse"]
+
+    for trial in study.trials:
+        for key in ("param_count", "inference_time_s"):
+            assert key in trial.user_attrs, (
+                f"trial {trial.number} is missing user attr {key!r}; cost must "
+                f"still be measured when it is not an objective"
+            )
+        # The columns hold the quality metrics, not one of them plus a cost.
+        for i, key in enumerate(("calibration_error", "nrmse")):
+            assert trial.values[i] == pytest.approx(
+                trial.user_attrs[key], abs=ATTR_ROUNDING_TOL
+            )
+
+
+def test_cost_metric_none_mean_mode_is_single_objective(run_study: Any) -> None:
+    """Mean mode without a cost column leaves exactly one direction."""
+    study = run_study(
+        n_trials=1,
+        objective_metrics=["calibration_error", "nrmse"],
+        objective_mode="mean",
+        cost_metric=None,
+    )
+
+    assert_trials_succeeded(study, expected=1)
+    assert_all_minimize(study, expected=1)

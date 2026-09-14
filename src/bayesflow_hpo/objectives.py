@@ -646,7 +646,8 @@ def extract_objective_values(
     cost_score
         Pre-computed cost objective (minimize-is-better).  Typically
         ``inference_time_s`` (seconds per dataset) or
-        ``normalized_param_count``.
+        ``normalized_param_count``.  ``None`` omits the cost column
+        entirely, so the returned tuple holds only quality values.
     objective_metric
         Key to look up inside the summary dict. Resolved through
         :func:`canonical_metric_name`, so a registered alias works here.
@@ -684,7 +685,7 @@ def extract_objective_values(
 
 def extract_multi_objective_values(
     metrics: dict[str, Any],
-    cost_score: float,
+    cost_score: float | None,
     objective_metrics: list[str],
     objective_mode: str = "mean",
 ) -> tuple[float, ...]:
@@ -697,14 +698,17 @@ def extract_multi_objective_values(
     cost_score
         Pre-computed cost objective (minimize-is-better).  Typically
         ``inference_time_s`` (seconds per dataset) or
-        ``normalized_param_count``.
+        ``normalized_param_count``.  ``None`` omits the cost column
+        entirely, so the returned tuple holds only quality values.
     objective_metrics
         List of metric keys to optimize. Each is resolved through
         :func:`canonical_metric_name`, so registered aliases work here.
     objective_mode
-        ``"mean"`` — return ``(mean_of_metrics, cost_score)`` (2 values).
+        ``"mean"`` — return ``(mean_of_metrics, cost_score)`` (2 values,
+        or 1 when *cost_score* is ``None``).
         ``"pareto"`` — return ``(*metric_values, cost_score)``
-        (one value per metric + cost).
+        (one value per metric + cost, or one per metric when
+        *cost_score* is ``None``).
     """
     from bayesflow_hpo.validation.registry import canonical_metric_name
 
@@ -733,36 +737,47 @@ def extract_multi_objective_values(
             # Already in minimize space -- do not convert it again.
             raw_values.append(worst_objective_value(key))
 
+    cost_tail: tuple[float, ...] = () if cost_score is None else (cost_score,)
     if objective_mode == "pareto":
-        return tuple(raw_values) + (cost_score,)
+        return tuple(raw_values) + cost_tail
 
     # "mean" mode — arithmetic mean of all metric values
     mean_val = float(np.mean(raw_values))
-    return (mean_val, cost_score)
+    return (mean_val,) + cost_tail
 
 
-def mean_objective_score(values: list[float] | tuple[float, ...]) -> float:
+def mean_objective_score(
+    values: list[float] | tuple[float, ...],
+    has_cost: bool = True,
+) -> float:
     """Reduce a multi-objective values tuple to a single ranking score.
 
-    Averages all elements except the last (assumed to be the cost
-    score), matching the ``(*metric_values, cost_score)`` shape
-    returned by :func:`extract_multi_objective_values` in both
-    ``"pareto"`` mode (multiple metrics + cost) and ``"mean"`` mode
-    (single metric + cost). Falls back to the sole element when only
-    one value is given.
+    Averages the quality metrics, dropping the trailing cost score when
+    the tuple carries one. That matches the ``(*metric_values,
+    cost_score)`` shape returned by
+    :func:`extract_multi_objective_values` in both ``"pareto"`` mode
+    (multiple metrics + cost) and ``"mean"`` mode (single metric + cost).
 
     Parameters
     ----------
     values
         Objective values tuple, e.g. ``(metric_1, ..., metric_n,
         cost_score)``.
+    has_cost
+        Whether the last element is a cost score to exclude. Pass
+        ``False`` for a study run with ``cost_metric=None``, where every
+        element is a quality metric -- dropping the last one there would
+        silently omit a real objective from the ranking.
 
     Returns
     -------
     float
-        Mean of all elements except the last, or the single element
-        when ``len(values) == 1``.
+        Mean of the quality elements: all but the last when *has_cost*
+        is true (or the single element, when that is all there is), and
+        all of them otherwise.
     """
+    if not has_cost:
+        return float(np.mean(values))
     if len(values) > 1:
         return float(np.mean(values[:-1]))
     return float(values[0])

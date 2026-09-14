@@ -381,12 +381,18 @@ class ObjectiveConfig:
         Default ``["calibration_error", "nrmse"]``.
     objective_mode
         ``"pareto"`` (default) — each metric becomes its own Optuna
-        objective; returns ``len(objective_metrics) + 1`` values.
+        objective; returns ``len(objective_metrics) + 1`` values (or
+        one per metric when ``cost_metric`` is ``None``).
         ``"mean"`` — arithmetic mean of the listed metrics forms a
-        single scalar; returns 2 values ``(mean, cost_score)``.
+        single scalar; returns 2 values ``(mean, cost_score)`` (or one
+        when ``cost_metric`` is ``None``).
     cost_metric
         Which cost objective to use as the last Optuna objective.
-        ``"inference_time"`` (default) or ``"param_count"``.
+        ``"inference_time"`` (default) or ``"param_count"``, or
+        ``None`` to optimize the quality metrics alone. With ``None``
+        the param count and inference time are still measured and
+        stored as trial user attributes for post-hoc ranking; they just
+        do not become an Optuna direction.
     report_frequency
         How often (in epochs) the ``OptunaReportCallback`` stores
         ``epoch_{N}_loss`` user attributes on each trial (default 10).
@@ -450,7 +456,7 @@ class ObjectiveConfig:
         default_factory=lambda: ["calibration_error", "nrmse"]
     )
     objective_mode: str = "pareto"
-    cost_metric: str = "inference_time"
+    cost_metric: str | None = "inference_time"
     checkpoint_pool: CheckpointPool | None = None
     report_frequency: int = 10
     build_approximator_fn: BuildApproximatorFn | None = None
@@ -592,10 +598,24 @@ class ObjectiveConfig:
                 f"Unknown objective_mode: {self.objective_mode!r}. "
                 f"Expected 'mean' or 'pareto'."
             )
-        if self.cost_metric not in ("inference_time", "param_count"):
+        if self.cost_metric not in ("inference_time", "param_count", None):
             raise ValueError(
                 f"Unknown cost_metric: {self.cost_metric!r}. "
-                f"Expected 'inference_time' or 'param_count'."
+                f"Expected 'inference_time', 'param_count' or None."
+            )
+        if self.cost_metric is None and not self.objective_metrics:
+            # Nothing left to optimize: the cost column was the only
+            # objective. Optuna refuses a study with no directions
+            # ("The number of objectives must be greater than 0",
+            # `optuna/study/study.py:1264` on 5.0.0), but only once
+            # `create_study` is reached -- long after the search space,
+            # validation data and pre-flight have been built, and with a
+            # message that names neither setting responsible.
+            raise ValueError(
+                "objective_metrics is empty and cost_metric is None, so the "
+                "trial would return no objective values at all. Name at "
+                "least one metric in objective_metrics, or set a "
+                "cost_metric."
             )
         if self.metric_constraints_hard is not None:
             for metric, _, direction in self.metric_constraints_hard:
@@ -773,7 +793,7 @@ def _training_loss_fallback(
     objective_mode: str,
     param_count: int,
     max_param_count: int,
-    cost_metric: str,
+    cost_metric: str | None,
     penalty: tuple[float, ...],
 ) -> tuple[float, ...]:
     """Build objective values from training loss when validation fails.
@@ -782,8 +802,9 @@ def _training_loss_fallback(
     proxy for each metric objective, paired with a cost score.  When
     ``cost_metric`` is ``"param_count"``, the real normalized param count
     is used; when ``"inference_time"``, the penalty cost is used since
-    no inference was performed.  Falls back to full penalty values if
-    the training loss is unavailable.
+    no inference was performed; when ``None``, no cost value is appended
+    at all.  Falls back to full penalty values if the training loss is
+    unavailable.
 
     Parameters
     ----------
@@ -798,7 +819,8 @@ def _training_loss_fallback(
     max_param_count
         Budget cap for param-count normalization.
     cost_metric
-        ``"inference_time"`` or ``"param_count"``.
+        ``"inference_time"``, ``"param_count"``, or ``None`` for no cost
+        objective.
     penalty
         Full penalty tuple to return if training loss is unavailable.
     """
@@ -811,11 +833,16 @@ def _training_loss_fallback(
     # scale as the metric objectives.
     clamped_loss = max(0.0, min(1.0, best_training_loss))
 
-    if cost_metric == "param_count":
-        cost_score = normalize_param_count(param_count, max_count=max_param_count)
+    cost_tail: tuple[float, ...]
+    if cost_metric is None:
+        cost_tail = ()
+    elif cost_metric == "param_count":
+        cost_tail = (
+            normalize_param_count(param_count, max_count=max_param_count),
+        )
     else:
         # No inference was performed, so use the penalty cost value.
-        cost_score = FAILED_TRIAL_COST
+        cost_tail = (FAILED_TRIAL_COST,)
 
     # The clamped loss is a [0, 1] lower-is-better proxy, so it is only on
     # scale for a metric that is itself [0, 1] and lower-is-better. Applying
@@ -830,10 +857,10 @@ def _training_loss_fallback(
         for metric in objective_metrics
     ]
     if objective_mode == "pareto":
-        return tuple(per_metric) + (cost_score,)
+        return tuple(per_metric) + cost_tail
     # "mean" mode collapses the metrics, so the proxy must too.
     mean_val = math.fsum(per_metric) / len(per_metric) if per_metric else clamped_loss
-    return (mean_val, cost_score)
+    return (mean_val,) + cost_tail
 
 
 def _log_trial_summary(
@@ -860,7 +887,8 @@ def _log_trial_summary(
         Metric keys being optimized (e.g. ``["calibration_error", "nrmse"]``).
         Each metric's value is read from ``trial.user_attrs``.
     cost_metric_name
-        Display name for the cost metric (last value in *values*).
+        Display name for the cost metric (last value in *values*), or
+        ``None`` when the trial returns no cost objective.
     """
     params_label = (
         f"{param_count / 1e6:.2f}M"
@@ -932,8 +960,10 @@ class GenericObjective:
         return f"mean({'+'.join(cfg.objective_metrics)})"
 
     @property
-    def _cost_metric_name(self) -> str:
-        """Display name for the cost metric in logs."""
+    def _cost_metric_name(self) -> str | None:
+        """Display name for the cost metric in logs, or ``None``."""
+        if self.config.cost_metric is None:
+            return None
         if self.config.cost_metric == "inference_time":
             return "inference_time_s"
         return "param_count_norm"
@@ -941,9 +971,10 @@ class GenericObjective:
     @property
     def n_objectives(self) -> int:
         """Number of objective values returned per trial."""
+        n_cost = 0 if self.config.cost_metric is None else 1
         if self.config.objective_mode == "pareto":
-            return len(self.config.objective_metrics) + 1  # metrics + cost
-        return 2  # mean + cost
+            return len(self.config.objective_metrics) + n_cost
+        return 1 + n_cost  # mean (+ cost)
 
     def _penalty(self) -> tuple[float, ...]:
         """Return penalty values matching the expected objective shape.
@@ -953,22 +984,19 @@ class GenericObjective:
         of 1.0 means ``log_gamma = -1``, an ordinary value that would not deter
         the sampler from a region where trials keep failing.
         """
-        n = self.n_objectives
         metrics = self.config.canonical_objective_metrics
+        worst = [worst_objective_value(m) for m in metrics]
+        cost_tail: tuple[float, ...] = (
+            () if self.config.cost_metric is None else (FAILED_TRIAL_COST,)
+        )
         if self.config.objective_mode == "pareto":
-            worst = [worst_objective_value(m) for m in metrics]
-            return tuple(worst) + (FAILED_TRIAL_COST,)
+            return tuple(worst) + cost_tail
         # "mean" mode collapses the metrics into one value, so the penalty is
         # the mean of their individual worst cases.
-        if n == 2:
-            worst = [worst_objective_value(m) for m in metrics]
-            mean_worst = (
-                math.fsum(worst) / len(worst)
-                if worst
-                else FAILED_TRIAL_CAL_ERROR
-            )
-            return (mean_worst, FAILED_TRIAL_COST)
-        return tuple([FAILED_TRIAL_CAL_ERROR] * (n - 1)) + (FAILED_TRIAL_COST,)
+        mean_worst = (
+            math.fsum(worst) / len(worst) if worst else FAILED_TRIAL_CAL_ERROR
+        )
+        return (mean_worst,) + cost_tail
 
     def _metric_penalty_map(self) -> dict[str, float]:
         """Per-metric RAW-space penalties for :func:`_validate_metric_keys`.
@@ -1049,7 +1077,9 @@ class GenericObjective:
         -------
         tuple[float, ...]
             Objective values (all minimize-is-better).  Shape depends on
-            ``objective_mode``: 2 values for ``"mean"``, N+1 for ``"pareto"``.
+            ``objective_mode`` and ``cost_metric``: for N metrics, N+1
+            values in ``"pareto"`` mode and 2 in ``"mean"`` mode, dropping
+            to N and 1 when ``cost_metric`` is ``None``.
             Failed or budget-rejected trials return penalty values.
         """
         config = self.config
@@ -1395,7 +1425,14 @@ class GenericObjective:
             param_count = -1
         trial.set_user_attr("param_count", param_count)
 
-        if config.cost_metric == "inference_time":
+        # `param_count` and `inference_time_s` are recorded as trial user
+        # attributes above regardless, so `cost_metric=None` still leaves a
+        # study whose trials can be ranked by cost after the fact. Only the
+        # Optuna objective column goes away.
+        cost_score: float | None
+        if config.cost_metric is None:
+            cost_score = None
+        elif config.cost_metric == "inference_time":
             cost_score = compute_inference_time_per_dataset(
                 inference_time, n_conditions,
             )
@@ -1415,7 +1452,9 @@ class GenericObjective:
         # --- Step 10: Checkpoint pool ---
         self._checkpoint_pool.maybe_save(
             trial_number=trial.number,
-            objective_value=mean_objective_score(values),
+            objective_value=mean_objective_score(
+                values, has_cost=config.cost_metric is not None,
+            ),
             approximator=approximator,
         )
 
