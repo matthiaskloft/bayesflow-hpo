@@ -13,15 +13,17 @@ changes are made by this plan.**
 Every claim about this repository below was read from the source at the cited
 line. Every claim about TARP is from Lemos et al. (2023) as recorded in
 [`references.md`](../references.md) (OpenAlex `W4319453761`), reached through
-`bayesflow_irt.sbc.compute_tarp_coverage`; §6 lists which of those claims are
-traceable and which are not.
+`bayesflow_irt.sbc.compute_tarp_coverage` and verified against full text; §6
+records the tracing.
 
 This document was revised after an independent review that verified it against
 source. The review confirmed §1's two findings and §2's contract shape, and
 refuted three integration decisions — the pinning mechanism, the summary merge,
 and the draws shape. Those are now §D7, §D3 and §D3 respectively, rewritten.
 §7 records what the first version got wrong, because an implementer who read
-only the first version would have built all three.
+only the first version would have built all three. A later pass measured the
+per-trial cost (§D9) and verified the two outstanding paper claims (§6); both
+changed conclusions, so neither is left as an assumption.
 
 ---
 
@@ -357,31 +359,78 @@ its registered `worst_raw` — which, per D5, is now a real bound rather than
 condition should be visible in the trial's user attrs, not inferable only from a
 penalty value.
 
-### D9 — Cost per trial (open question 4)
+### D9 — Cost per trial (open question 4) — **measured**
 
-Not decided here, by design: #82 asks for it to be *measured* before TARP
-becomes an axis in a search whose trials are already GPU-bound, and this session
-did not run it. The implementation session measures on the same validation
-dataset, using the `timing["metrics"]` accumulator already in place
-(`pipeline.py:64`).
+#82 asked for this to be measured before TARP becomes an axis in a search whose
+trials are already GPU-bound. It has been, on synthetic arrays of the shapes the
+validation pipeline would hand each metric (pure CPU, AMD Ryzen, numpy 2.4.2;
+harness in the session scratchpad, reproducible from `compute_tarp_coverage` at
+`bayesflow-irt` commit `ffc68d5`). Times are per **condition**; multiply by the
+study's condition count for the per-trial cost.
 
-The work per condition is `n_sims × n_samples × n_params` distance evaluations
-against one reference point per simulation, thresholded at `resolution` levels —
-to be timed at the study's actual `n_posterior_samples` and condition count, and
-reported as a fraction of `timing["inference"]`.
+| n_sims | n_draws | n_params | resolution | TARP ms/condition |
+| ---: | ---: | ---: | ---: | ---: |
+| 100 | 100 | 2 | 20 | 0.5 |
+| 100 | 1000 | 2 | 20 | 4.1 |
+| 500 | 1000 | 2 | 20 | 18.9 |
+| 100 | 1000 | 15 | 20 | 16.8 |
+| 500 | 1000 | 15 | 20 | 78.8 |
+| 500 | 1000 | 60 | 20 | 308.9 |
+| 1000 | 1000 | 60 | 20 | 587.6 |
+| 500 | 1000 | 15 | **100** | 75.2 |
 
-**One multiplier to settle before measuring, not after.**
-`PeriodicValidationCallback` (`optimization/validation_callback.py`) runs
-validation *mid-training* for pruning. If joint metrics are in the pipeline
-metric list, they run at every validation interval, so the per-trial cost is the
-per-validation cost times the number of intervals, not once. Decide whether
-joint metrics participate in mid-training validation at all — a pruning decision
-does not obviously need one — before the measurement, or the measured number
-answers the wrong question.
+Three results, and two of them were not what the design assumed:
 
-Decision rule: if the joint metric is a non-trivial fraction of inference time,
-it is computed on a sub-sample of conditions, and that sub-sample size joins
-D7's pinned settings.
+**1. TARP is cheap.** At a realistic 500 simulations × 1000 draws × 15
+parameters it is 79 ms per condition — under a second per trial for a ten-
+condition validation set, against training that is measured in minutes. It does
+not need a condition sub-sample, and it is not a reason to keep TARP off an
+axis.
+
+**2. `resolution` is free, contradicting the cost model in this plan's own
+earlier draft.** Raising it from 20 to 100 changed nothing (78.8 → 75.2 ms, i.e.
+within noise). The credibility levels are thresholds applied to an already-
+computed vector of `f_i`, not a repeated distance computation, so the
+`× resolution` factor the first draft wrote into the cost model does not exist.
+Scaling is linear in `n_draws` (×13.9 across a ×16 range), in `n_sims` and in
+`n_params` — i.e. exactly `O(n_sims · n_draws · n_params)` and nothing more.
+**`resolution` is therefore free to raise for statistical reasons**, which
+matters because it sets the `1/(resolution + 1)` floor discussed in D7.
+
+**3. L-C2ST — the metric this package already ships — is the one that cannot
+afford to be an axis.** Measured through the repository's own
+`validation.c2st.lc2st` on the same shapes:
+
+| n_sims | n_params | n_obs | L-C2ST ms/condition |
+| ---: | ---: | ---: | ---: |
+| 100 | 2 | 5 | 768 |
+| 500 | 15 | 50 | 55,667 |
+| 500 | 60 | 50 | 79,814 |
+
+At matched shapes (500 × 15) that is **~700× TARP**: 56 seconds per condition,
+so roughly nine minutes for a ten-condition validation, per trial. It fits an
+`MLPClassifier` per fold, five folds per condition, and that dominates
+everything else. `n_draws` does not enter — `lc2st` uses draw index 0 only
+(`c2st.py:330`).
+
+**Consequences for the design, which are not cosmetic:**
+
+- The sub-sampling escape hatch and the pinned sub-sample size belong to
+  **L-C2ST**, not TARP. D7's settings list keeps the field; TARP will not use it.
+- **Joint metrics must not run under `PeriodicValidationCallback` by default.**
+  This was flagged as "settle before measuring"; the measurement settles it. A
+  mid-training pruning decision that costs nine minutes per interval is not a
+  pruning decision. Joint metrics run at final validation only, unless a caller
+  opts in explicitly.
+- `lc2st`'s existing status as a usable objective deserves a documented warning
+  with these numbers next to it. Nothing in the package currently tells a user
+  that `objective_metrics=["lc2st"]` adds minutes per trial.
+
+The one thing still unmeasured is the *relative* figure #82 phrased the question
+in: TARP's cost as a fraction of `timing["inference"]` on a real approximator.
+That needs a trained model and is left to the implementation session, but with
+TARP at sub-second per trial it can only be a small fraction of any GPU-bound
+inference pass.
 
 ### D10 — Memory
 
@@ -419,7 +468,9 @@ precedent), or `requires=` is given enforcement. #75's open question is answered
   `make_irt_hooks`' closure would not reach TARP even through a fixed pipeline.
   A companion issue there is required and is out of this repository's scope.
 - **PCM/GPCM reference coordinates** (#82 constraint 4) — see D6.
-- **The per-trial cost** — see D9, and settle D9's multiplier first.
+- **TARP's cost as a fraction of real inference time** — D9 measures TARP in
+  absolute terms and settles the design questions that depended on it, but the
+  ratio against `timing["inference"]` needs a trained approximator.
 
 ## 5. Suggested order for the implementation session
 
@@ -430,9 +481,9 @@ precedent), or `requires=` is given enforcement. #75's open question is answered
    — including D3's two hazards and D8's guard.
 3. Refactor `make_lc2st_validate_fn` onto it and delete the duplicate loop. This
    is the acceptance test for the contract.
-4. Measure the per-trial cost (D9) on the L-C2ST path, which is the more
-   expensive of the two — it fits an MLP per fold — after settling whether joint
-   metrics run under `PeriodicValidationCallback`.
+4. Wire the measured costs in (D9): joint metrics off `PeriodicValidationCallback`
+   by default, the condition sub-sample available for L-C2ST, and a documented
+   cost warning on `lc2st` as an objective.
 5. TARP: the metric, the reference-provider contract (D6), the two-key mode
    split, `bayesflow_hpo_joint_metric_settings` (D7), `tarp_error`'s direction
    entry. Expand the Lemos entry in [`references.md`](../references.md) — it
@@ -447,27 +498,40 @@ ships.
 
 ## 6. Reference tracing
 
-Traceability was checked rather than assumed, per the project's source-backing
-rule.
+Traceability was checked against full text rather than assumed, per the
+project's source-backing rule. **Both claims flagged as untraced in the first
+revision have since been verified** against the PDFs in the project Zotero
+library, and [`references.md`](../references.md) has been updated with the
+section-level detail.
 
-**Traced.** Lemos et al. (2023), Algorithm 2 (the TARP estimator), Theorem 3
-(positionable regions identify the posterior), §4.2 (robustness to the distance
-metric) and §4.3 (an x-independent reference carries the same blind spot) are
-all traceable to `compute_tarp_coverage`'s docstring in `bayesflow-irt`, which
-carries a direct quotation from the paper for §4.3. Linhart et al. (2023),
-Theorem 3.1, is traced to `c2st.py:345`.
+**Lemos et al. (2023), Sec. 3.1** — verified. The section is titled "High
+posterior density coverage testing" and works the case
+`p_hat(theta|x) = p(theta)` explicitly: because the HPD generator is then
+independent of `x`, so that `H(p_hat, alpha, x) = H(p_hat, alpha)`, the paper
+concludes this estimator "has perfect HPD ECP in this case". The same section
+states the HPD region generator "is not a positionable credible region
+generator", which is why Theorem 3 does not reach it. Sec. 3.2 defines the TARP
+generator as the positionable one. The section number carried between
+repositories without a check turns out to be correct.
 
-**Untraced, and to be resolved before implementation.** The attribution of
-"expected HPD coverage is blind to a data-independent estimator" to Lemos
-**§3.1** appears in issue #82 and in this plan, and in no source this session
-could reach: the `references.md` entry for Lemos (`:433-437`) is a single
-abstract-level sentence with no section detail, and the `compute_tarp_coverage`
-docstring asserts the blindness without a section number. Likewise Modrák et al.
-(2025) is cited in `objectives.py:255-264` for `log_gamma`'s rejection
-threshold, not for the marginal-blindness claim, which reaches this plan only
-through the same docstring. Both claims are *plausible and consistently
-reported* across two repositories; neither is verified against full text here,
-and per the project rule they must be before anything is built on them.
+**Modrák et al. (2025), Sec. 4.3** — verified, and **sharper than this plan had
+claimed**. Case study 2 is "an incorrect posterior that equals the prior", and
+Figure 4 splits the parameter rank distribution by the average value of the
+corresponding data elements, reporting that "the distributions for the two cases
+exactly compensate to make the overall distribution uniform". So marginal ranks
+under a data-ignoring posterior are *exactly* uniform, not merely
+indistinguishable from uniform — which is a stronger statement of the problem
+than "blind" and makes the marginal metrics' failure structural rather than a
+matter of power. The paper's own remedy is a test quantity involving both data
+and parameters, recommending the joint log-likelihood as "a useful default" —
+which is, independently, what #75 proposes to add. Sec. 4.4 (case study 5) adds
+the companion case: correct marginals with wrong correlation structure passes
+SBC on the univariate parameters while likelihood-based quantities fail.
+
+**Lemos, Algorithm 2 / Theorem 3 / Secs. 4.2 and 4.3**, and **Linhart et al.
+(2023), Theorem 3.1**, remain traced as before — the former through
+`compute_tarp_coverage`'s docstring (which carries a direct quotation from the
+paper for Sec. 4.3), the latter through `c2st.py:345`.
 
 ## 7. What the first version of this document got wrong
 
