@@ -18,6 +18,40 @@ Suggested execution order: I, then research follow-ups A2/A3.
 
 ---
 
+### PyPI publishing (deferred until a stable release)
+
+Not planned for the 0.x line. `bayesflow-hpo` has no PyPI presence and
+nothing publishes automatically: `.github/workflows/` holds `ci.yml` only.
+Installation is from a git ref or from the artifacts attached to a release
+(v0.3.0 was the first tagged release; 0.1.0 and 0.2.0 exist as CHANGELOG
+sections only).
+
+Deliberate for now. The 0.x releases have each changed behaviour a user
+could be relying on -- 0.2.0 re-encoded stored objective values and refuses
+some 0.1.0 studies; 0.3.0 moved the `optuna` floor and corrected two pruning
+defects -- and the package name is unclaimed, so a premature upload fixes a
+name and an install base against an API still moving underneath it.
+
+Revisit when a release goes out without a "check before upgrading" section.
+At that point:
+
+1. Claim the name on PyPI (and TestPyPI first).
+2. Add a publish workflow triggered on tag push, using Trusted Publishing
+   (OIDC) rather than a long-lived API token. Gate it on the existing `test`,
+   `types` and `lint` jobs.
+3. Publish to TestPyPI and install from it in a clean venv before the first
+   real upload -- the `[dev]`/backend split means a wheel that imports
+   cleanly for us can still fail for someone who installs only the
+   dependency set.
+4. Decide whether `bayesflow` itself belongs in `dependencies` or stays an
+   extra; the README currently expects the user to install a Keras backend
+   separately, which a PyPI install should not silently change.
+
+Until then, keep attaching the sdist and wheel to each GitHub release, built
+from a checkout of the tag.
+
+---
+
 ### Package M: Spread-Calibration Diagnostic (`nrmse - sqrt(1 - r^2)`)
 
 Tracked in [issue #98](https://github.com/matthiaskloft/bayesflow-hpo/issues/98).
