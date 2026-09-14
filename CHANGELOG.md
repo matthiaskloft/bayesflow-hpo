@@ -2,6 +2,42 @@
 
 ## Unreleased
 
+## 0.3.0
+
+A feature release, and unlike 0.2.0 a safe upgrade for existing studies: no
+change here alters what a stored objective value *means*, so 0.2.0 studies
+resume and stay comparable. The `calibration_error` computation is frozen on
+purpose even though its documentation was wrong (see **Fixed**).
+
+Four things to check before upgrading. The first two change behaviour you may
+be relying on; the last two are the corrections most likely to matter.
+
+- **`optuna` now requires `>=5.0.0,<6.0.0`**, up from `>=4.0.0`. A
+  support-policy decision rather than a bug fix -- testing one optuna major
+  keeps local measurements and CI results comparable -- and it means
+  `bayesflow-hpo` can no longer be installed alongside an application pinned
+  to optuna 4. **Changed** records the behaviour difference measured directly
+  on both majors.
+- **`mean_calibration_error` is now a built-in metric name.** Registering a
+  custom metric under that name raises `ValueError` unless you pass
+  `overwrite=True`. That is the release's only user-visible change to an
+  existing API.
+- **`pruning_strategy="none"` did not actually disable pruning** on a
+  single-objective study: the callback consulted Optuna's default
+  `MedianPruner` regardless. If you run a single-objective study with early
+  stopping on, trials you expected to run to their horizon may have been
+  terminated. Fixed.
+- **`plot_parallel_coordinates` inverted its last axis unconditionally.**
+  Correct for a cost column, wrong for anything else. Only reachable with the
+  new `cost_metric=None`, so no 0.2.0 plot was affected -- but the fix adds a
+  study user attribute (`bayesflow_hpo_has_cost_objective`) that older studies
+  do not carry, and whose absence is read as "has a cost column".
+
+The headline feature is `cost_metric=None`, which lets a study search over the
+quality metrics alone. It changes the arity of the stored objective tuple, so
+a study cannot be resumed or warm-started across a change of the setting --
+the schema guard refuses the mismatch rather than mis-indexing it.
+
 ### Added
 
 - **`cost_metric=None`.** `optimize()` and `ObjectiveConfig` now accept
