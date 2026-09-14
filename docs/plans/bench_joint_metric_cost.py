@@ -4,24 +4,27 @@ Times `compute_tarp_coverage` (bayesflow-irt, commit ffc68d5) on synthetic
 arrays of the shapes the hpo validation pipeline would hand it. Pure numpy;
 no GPU, no approximator. Reports milliseconds per condition, which multiplies
 by the study's condition count to give the per-trial cost.
+
+TARP is not a dependency of this package; see `_tarp_source.py` for how to
+supply it. From a clean checkout::
+
+    git -C <bayesflow-irt> show \
+        ffc68d5...:src/bayesflow_irt/sbc.py > /tmp/irt_sbc.py
+    python docs/plans/bench_joint_metric_cost.py --tarp-source /tmp/irt_sbc.py
 """
 
 from __future__ import annotations
 
-import importlib.util
+import argparse
 import platform
 import sys
 import time
+from pathlib import Path
 
 import numpy as np
 
-HERE = __file__.rsplit("\\", 1)[0]
-spec = importlib.util.spec_from_file_location("irt_sbc", HERE + "\\irt_sbc.py")
-assert spec is not None and spec.loader is not None
-irt_sbc = importlib.util.module_from_spec(spec)
-sys.modules["irt_sbc"] = irt_sbc
-spec.loader.exec_module(irt_sbc)
-compute_tarp_coverage = irt_sbc.compute_tarp_coverage
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _tarp_source import add_tarp_argument, load_compute_tarp_coverage  # noqa: E402
 
 
 def timeit(fn, repeats: int = 3) -> float:
@@ -35,6 +38,11 @@ def timeit(fn, repeats: int = 3) -> float:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    add_tarp_argument(parser)
+    args = parser.parse_args()
+    compute_tarp_coverage = load_compute_tarp_coverage(args.tarp_source)
+
     rng = np.random.default_rng(0)
     print(f"python {platform.python_version()}  numpy {np.__version__}")
     print(f"{platform.processor() or platform.machine()}\n")

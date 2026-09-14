@@ -168,9 +168,40 @@ single-parameter studies, violating D2's shape guarantee outright;
 L-C2ST duplicate already works around exactly this (`c2st.py:629-631`, "Ensure
 draws are 3D for lc2st").
 
-**Decision: dispatch joint metrics before the per-parameter branch, and bind the
-squeezed array to a new name rather than rebinding `draws`.** The joint contract
-then holds the 3-D array unconditionally, and the marginal path is unchanged.
+**That is not the only squeeze, and moving the dispatch is not sufficient.**
+`make_bayesflow_infer_fn` *itself* collapses the trailing axis before
+`pipeline.py` ever sees the array (`validation/inference.py:57-61`):
+
+```python
+if len(param_keys) == 1:
+    draws = np.asarray(post_draws[param_keys[0]])
+    if draws.ndim == 3 and draws.shape[-1] == 1:
+        draws = np.squeeze(draws, axis=-1)
+    return draws
+```
+
+So in an ordinary scalar-parameter study the joint path receives a 2-D array no
+matter where in the loop it is dispatched, `compute_tarp_coverage` raises on
+`ndim != 3`, and **every condition takes D8's failure path** — a metric that
+appears to be configured and silently never produces a value. An earlier
+revision of this plan claimed that reordering the dispatch established the 3-D
+invariant; it does not.
+
+**Decision, in two parts:**
+
+1. Dispatch joint metrics before the per-parameter branch, and bind the
+   pipeline's squeezed array to a new name rather than rebinding `draws` — this
+   removes the `pipeline.py:96-97` hazard.
+2. **Normalize explicitly at the joint boundary**: the dispatch re-expands a
+   2-D result with `draws[..., None]` before constructing `JointMetricInputs`,
+   so D2's 3-D guarantee is established by the joint path itself rather than
+   assumed from upstream. Nothing in `infer_fn` or the marginal path changes,
+   so marginal behaviour is untouched.
+
+**Acceptance test:** a single scalar-parameter study driven through the *real*
+`make_bayesflow_infer_fn`, asserting the joint metric receives
+`(n_sims, n_samples, 1)`. A mock that returns 3-D draws passes trivially and
+would not have caught this, which is why the test must use the real closure.
 
 **(b) The multi-parameter top-level summary is built *from* the per-parameter
 summaries.** `pipeline.py:128-134` takes its key set from the first parameter's
@@ -353,11 +384,38 @@ classifier per fold, and `compute_tarp_coverage` with `standardize=True` raises
 on a constant dimension.
 
 **Decision:** joint metrics are dispatched under a per-metric guard that records
-the failure and lets the marginal metrics complete. The missing key then takes
-its registered `worst_raw` — which, per D5, is now a real bound rather than
-`inf`. The guard must not swallow the reason; a joint metric failing on every
-condition should be visible in the trial's user attrs, not inferable only from a
-penalty value.
+the failure and lets the marginal metrics complete. The guard must not swallow
+the reason; a failing joint metric should be visible in the trial's user attrs,
+not inferable only from a penalty value.
+
+**A per-condition guard is not enough on its own, because `worst_raw` may never
+be reached.** `aggregate_condition_rows` (`metrics.py:54`) derives its key set
+from `condition_rows[0]` and `nanmean`s later rows, skipping NaN. Combine that
+with a guard that simply omits the failed condition's key and the result depends
+on *which* condition failed:
+
+- condition 0 succeeds, condition 1 raises → the key exists in row 0, so the
+  summary reports the metric **averaged over the conditions that happened to
+  succeed**. The objective sees a present, finite, flattering value and never
+  applies `worst_raw`.
+- condition 0 raises → the key is absent from row 0, so it is absent from the
+  key set and **every later success is discarded**.
+
+Scores would therefore depend on failure order, and a model could *benefit* from
+failing on the conditions it finds hardest — which is the same class of defect
+as the `worst_raw` inversions D5 exists to prevent.
+
+**Decision: any required condition failing invalidates that metric for the whole
+trial.** The metric's key is omitted from the summary entirely, so the objective
+substitutes its registered `worst_raw` exactly once, and a partially computed
+joint metric is never averaged. Per-condition `worst_raw` before aggregation is
+the alternative and is rejected: it still yields a finite blend of real and
+penalty values, which reads as a mediocre model rather than a broken
+measurement.
+
+**Acceptance tests:** failure in the first condition, failure in the last
+condition, and total failure must all produce the same outcome — the metric
+absent, `worst_raw` applied once, marginal metrics intact.
 
 ### D9 — Cost per trial (open question 4) — **measured**
 
@@ -424,11 +482,33 @@ everything else. `n_draws` does not enter — `lc2st` uses draw index 0 only
 
 - The sub-sampling escape hatch and the pinned sub-sample size belong to
   **L-C2ST**, not TARP. D7's settings list keeps the field; TARP will not use it.
-- **Joint metrics must not run under `PeriodicValidationCallback` by default.**
-  This was flagged as "settle before measuring"; the measurement settles it. A
-  mid-training pruning decision that costs nine minutes per interval is not a
-  pruning decision. Joint metrics run at final validation only, unless a caller
-  opts in explicitly.
+- **Joint metrics must not run under `PeriodicValidationCallback` by default** —
+  a mid-training pruning decision costing nine minutes per interval is not a
+  pruning decision. But *simply excluding them is not implementable as stated*,
+  and this is the subtlest consequence of the measurement.
+  `_run_lightweight_validation` requires **every** `objective_metrics` key and
+  returns `None` when any is missing
+  (`optimization/validation_callback.py:421-431`); the caller then bails at
+  `if raw_scores is None: ... return` (`:258-267`), which skips pruning **and**
+  `_update_early_stopping`. So for `objective_metrics=["nrmse", "tarp_error"]`,
+  omitting the joint metric would silently disable marginal pruning and
+  validation-based early stopping as well — a cost optimization that turns off
+  stopping is a regression, not a saving.
+
+  **Decision:** the intermediate metric set becomes explicit rather than implied
+  by `objective_metrics`. Joint metrics are excluded from it by default; the
+  callback validates against *that* set, so a missing joint key is expected
+  rather than a fault. Three configurations must be specified, not discovered:
+  `objective_mean` (whose members would silently change meaning if one is
+  dropped mid-training), a study whose designated primary metric is the joint
+  one, and a joint-only study — where there is no intermediate signal at all and
+  the right behaviour is to **reject the configuration up front** or require an
+  explicit opt-in, never to degrade into a study that cannot stop early.
+
+  **Acceptance tests:** a mixed-objective study must still prune and still stop
+  early with the joint metric excluded; a joint-only study must be rejected or
+  opted into explicitly. Without both, this default can silently disable
+  stopping.
 - `lc2st`'s existing status as a usable objective deserves a documented warning
   with these numbers next to it. Nothing in the package currently tells a user
   that `objective_metrics=["lc2st"]` adds minutes per trial.
@@ -617,6 +697,26 @@ failures that choice creates (now D4), quoted a floor table from a superseded
 docstring revision whose successor exists specifically to say bare floor figures
 are not meaningful (now D7), and paraphrased `_reshape_for_bf`'s comment inside
 quotation marks (now quoted verbatim in §1).
+
+**A third pass, from PR review, corrected three more — all of the same kind, in
+that each produces a metric that looks configured and silently never reports:**
+
+4. **The shape fix was incomplete.** D3(a) had claimed that dispatching before
+   the per-parameter branch established the 3-D invariant. It does not:
+   `make_bayesflow_infer_fn` squeezes the trailing axis itself for
+   single-parameter studies, so ordinary scalar studies would have hit the
+   failure path on every condition. D3(a) now normalizes explicitly at the joint
+   boundary, and requires an acceptance test through the real closure rather
+   than a 3-D-returning mock.
+5. **D8 had no partial-failure policy.** Reusing `aggregate_condition_rows`
+   unchanged makes the reported score depend on *which* condition failed, and
+   lets a model benefit from failing on its hardest conditions. Now: any
+   required condition failing invalidates the metric for the trial.
+6. **Excluding joint metrics from `PeriodicValidationCallback` would have
+   disabled marginal pruning and early stopping too**, because the callback
+   requires every `objective_metrics` key and no-ops when one is missing. D9 now
+   specifies an explicit intermediate metric set and what to do with
+   `objective_mean`, a primary joint metric, and joint-only studies.
 
 ## References
 
