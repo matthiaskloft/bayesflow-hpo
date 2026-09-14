@@ -52,6 +52,24 @@ from a checkout of the tag.
 
 ---
 
+### Package M: Joint, data-dependent metric path
+
+Design settled in
+[`docs/plans/plan-joint-metric-path.md`](plans/plan-joint-metric-path.md),
+covering [issue #82](https://github.com/matthiaskloft/bayesflow-hpo/issues/82)
+(TARP) and [issue #75](https://github.com/matthiaskloft/bayesflow-hpo/issues/75)
+(`coverage_error`) as one capability. Nothing is implemented yet.
+
+Two items in that plan stand on their own and are worth landing first:
+
+1. Lift the joint metric dispatch into `run_validation_pipeline` and refactor
+   `make_lc2st_validate_fn` onto it, deleting its duplicated condition loop.
+2. Register `lc2st`'s direction (`worst_raw=0.25`). It has no
+   `METRIC_DIRECTIONS` entry today, so a missing `lc2st` scores `+inf` on a
+   statistic bounded above by 0.25.
+
+---
+
 ### Package L: End-to-End `optimize()` Tests
 
 Tracked in [issue #76](https://github.com/matthiaskloft/bayesflow-hpo/issues/76).
