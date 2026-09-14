@@ -37,12 +37,12 @@ import numpy as np
 from scipy.stats import norm
 
 from bayesflow_hpo.validation.data import ValidationDataset
-from bayesflow_hpo.validation.inference import make_bayesflow_infer_fn
-from bayesflow_hpo.validation.metrics import (
-    aggregate_condition_rows,
-    compute_condition_metrics,
+from bayesflow_hpo.validation.pipeline import run_validation_pipeline
+from bayesflow_hpo.validation.registry import (
+    JointMetricFn,
+    JointMetricInputs,
+    register_joint_metric,
 )
-from bayesflow_hpo.validation.registry import resolve_metrics
 
 # ---------------------------------------------------------------------------
 # Lazy sklearn import
@@ -504,6 +504,134 @@ def global_c2st(
 
 
 # ---------------------------------------------------------------------------
+# L-C2ST as a joint metric
+# ---------------------------------------------------------------------------
+
+
+def _joint_observations(inputs: JointMetricInputs) -> np.ndarray:
+    """Flatten and concatenate the data keys of one condition batch.
+
+    L-C2ST classifies on ``concat(params, observations)``, so every
+    observable has to arrive as a flat ``(n_sims, d)`` block regardless of
+    the shape the simulator produced.
+    """
+    parts = [np.asarray(inputs.sim_batch[k]) for k in inputs.data_keys]
+    flat = [
+        p.reshape(p.shape[0], -1) if p.ndim > 1 else p[:, None]
+        for p in parts
+    ]
+    return np.concatenate(flat, axis=1)
+
+
+def make_lc2st_joint_metric(
+    n_folds: int = 5,
+    n_null_trials: int = 0,
+    clf_kwargs: dict[str, Any] | None = None,
+    seed: int = 42,
+) -> JointMetricFn:
+    """Create an L-C2ST metric for the pipeline's joint dispatch.
+
+    L-C2ST is joint by construction: it asks whether a classifier can tell
+    ``(theta, x)`` drawn from the joint apart from ``(theta_hat, x)`` with
+    ``theta_hat`` from the approximate posterior, so it needs all parameters
+    at once AND the data -- which is precisely what
+    :class:`~bayesflow_hpo.validation.registry.JointMetricInputs` carries.
+
+    Parameters
+    ----------
+    n_folds
+        Number of cross-validation folds.
+    n_null_trials
+        Permutation trials for the null distribution. Default 0: during HPO
+        the statistic is compared across trials rather than against a null,
+        and each permutation costs another full cross-validation.
+    clf_kwargs
+        Classifier keyword arguments. ``None`` uses the SBIBM defaults.
+    seed
+        Base seed. Each condition uses ``seed + cond_id`` so that conditions
+        do not share a draw, which would correlate their noise.
+
+    Returns
+    -------
+    JointMetricFn
+        Callable emitting ``{"lc2st": statistic}`` for one condition.
+
+    Raises
+    ------
+    ImportError
+        If scikit-learn is not installed, raised at factory call time
+        rather than per condition.
+
+    Notes
+    -----
+    **L-C2ST is expensive**, and measurably so: at 500 simulations with 15
+    parameters one condition took ~54 s, against ~79 ms for a TARP
+    evaluation on the same draws -- a factor of roughly 700. The cost is in
+    fitting a classifier per fold, so it scales with `n_folds` and with
+    ``n_null_trials + 1``. Budget for it before making it an objective, and
+    see ``docs/plans/plan-joint-metric-path.md`` D9 for the measurements.
+
+    References
+    ----------
+    Linhart, J., Gramfort, A., & Rodrigues, P. L. C. (2023). L-C2ST: Local
+        diagnostics for posterior approximations in simulation-based
+        inference. In *Advances in Neural Information Processing Systems
+        36*. https://doi.org/10.48550/arXiv.2306.03580
+        Algorithm 1 and Theorem 3.1: the single-class MSE_0 statistic.
+    """
+    _require_sklearn()
+
+    def _lc2st_metric(inputs: JointMetricInputs) -> dict[str, float]:
+        true_params = np.column_stack([
+            np.asarray(inputs.sim_batch[k]).ravel()
+            for k in inputs.param_keys
+        ])
+        result = lc2st(
+            posterior_samples=inputs.draws,
+            true_params=true_params,
+            observations=_joint_observations(inputs),
+            n_folds=n_folds,
+            n_null_trials=n_null_trials,
+            clf_kwargs=clf_kwargs,
+            seed=seed + inputs.cond_id,
+        )
+        return {"lc2st": float(result.statistic)}
+
+    return _lc2st_metric
+
+
+def _default_lc2st_metric(inputs: JointMetricInputs) -> dict[str, float]:
+    """The registered ``"lc2st"`` name, at its default configuration.
+
+    Builds the metric per call rather than once at import, so that the
+    sklearn guard fires when the metric RUNS. Calling the factory at module
+    scope would raise `ImportError` during ``import bayesflow_hpo`` on any
+    installation without scikit-learn -- making an optional dependency
+    mandatory, which is the opposite of what `requires="sklearn"` is meant
+    to express. (`requires=` itself gates nothing today: it is read only by
+    `describe_metrics` for display. The explicit guard is the real
+    mechanism.)
+    """
+    return make_lc2st_joint_metric()(inputs)
+
+
+# Registered here rather than in `registry.py` because `c2st` imports the
+# registry and the reverse would be a cycle. `validation/__init__` imports
+# this module, so the name is present for anyone who can reach the registry
+# at all.
+register_joint_metric(
+    "lc2st",
+    _default_lc2st_metric,
+    description=(
+        "L-C2ST local posterior diagnostic on the full joint posterior "
+        "(expensive: ~700x a TARP evaluation)"
+    ),
+    requires="sklearn",
+    overwrite=True,
+)
+
+
+# ---------------------------------------------------------------------------
 # ValidateFn factory
 # ---------------------------------------------------------------------------
 
@@ -547,107 +675,49 @@ def make_lc2st_validate_fn(
     ------
     ImportError
         If scikit-learn is not installed (at factory call time).
+
+    Notes
+    -----
+    This is now a thin wrapper over
+    :func:`~bayesflow_hpo.validation.pipeline.run_validation_pipeline` with
+    one joint metric passed in. It previously reimplemented that pipeline's
+    condition loop -- inference, the per-parameter branch, the
+    single-parameter squeeze, cross-condition aggregation -- in order to
+    reach state the loop had and discarded. Everything the duplicate
+    open-coded is now shared, including two things it never had:
+    ``cleanup_trial()`` between conditions, and a guard that keeps an
+    L-C2ST failure from costing the trial its standard metrics as well.
+
+    Because L-C2ST's configuration belongs to this factory call rather than
+    to the process, the metric is passed through ``joint_metrics=`` instead
+    of being registered globally. The registry's built-in ``"lc2st"`` name
+    carries the defaults and is what ``objective_metrics=["lc2st"]``
+    resolves to.
     """
     _require_sklearn()
 
     if base_metrics is None:
         base_metrics = ["calibration_error", "nrmse"]
 
+    joint = make_lc2st_joint_metric(
+        n_folds=n_folds,
+        n_null_trials=n_null_trials,
+        clf_kwargs=clf_kwargs,
+        seed=seed,
+    )
+
     def _validate_fn(
         approximator: Any,
         validation_data: ValidationDataset,
         n_posterior_samples: int,
     ) -> dict[str, float]:
-        metric_fns = resolve_metrics(base_metrics)
-
-        # Create inference closure (reuses validation/inference.py)
-        available_keys = set(validation_data.simulations[0].keys())
-        infer_fn = make_bayesflow_infer_fn(
+        result = run_validation_pipeline(
             approximator=approximator,
-            param_keys=validation_data.param_keys,
-            data_keys=validation_data.data_keys,
-            available_keys=available_keys,
+            validation_data=validation_data,
+            n_posterior_samples=n_posterior_samples,
+            metrics=list(base_metrics),
+            joint_metrics={"lc2st": joint},
         )
-
-        condition_rows: list[dict[str, Any]] = []
-        lc2st_stats: list[float] = []
-        n_params = len(validation_data.param_keys)
-
-        for cond_id, sim_batch in enumerate(
-            validation_data.simulations
-        ):
-            # Single inference pass
-            draws = infer_fn(sim_batch, n_posterior_samples)
-
-            # --- Standard per-parameter metrics ---
-            if n_params == 1:
-                true_values = np.asarray(
-                    sim_batch[validation_data.param_keys[0]]
-                ).ravel()
-                draws_2d = (
-                    draws if draws.ndim == 2 else draws[..., 0]
-                )
-                row = compute_condition_metrics(
-                    draws_2d, true_values, cond_id, metric_fns,
-                )
-                condition_rows.append(row)
-            else:
-                # Standard metrics are computed per-parameter, then
-                # aggregated across parameters and conditions by
-                # aggregate_condition_rows() below.
-                for p_idx, p_key in enumerate(
-                    validation_data.param_keys
-                ):
-                    true_values = np.asarray(
-                        sim_batch[p_key]
-                    ).ravel()
-                    draws_2d = draws[:, :, p_idx]
-                    row = compute_condition_metrics(
-                        draws_2d, true_values, cond_id, metric_fns,
-                    )
-                    row["param_key"] = p_key
-                    condition_rows.append(row)
-
-            # --- L-C2ST on full multivariate posterior ---
-            tp = np.column_stack([
-                np.asarray(sim_batch[k]).ravel()
-                for k in validation_data.param_keys
-            ])
-
-            obs_parts = [
-                np.asarray(sim_batch[k])
-                for k in validation_data.data_keys
-            ]
-            obs_flat = [
-                p.reshape(p.shape[0], -1)
-                if p.ndim > 1
-                else p[:, None]
-                for p in obs_parts
-            ]
-            obs = np.concatenate(obs_flat, axis=1)
-
-            # Ensure draws are 3D for lc2st
-            draws_3d = (
-                draws[:, :, None] if draws.ndim == 2 else draws
-            )
-
-            result = lc2st(
-                posterior_samples=draws_3d,
-                true_params=tp,
-                observations=obs,
-                n_folds=n_folds,
-                n_null_trials=n_null_trials,
-                clf_kwargs=clf_kwargs,
-                seed=seed + cond_id,
-            )
-            lc2st_stats.append(result.statistic)
-
-        # Aggregate standard metrics across conditions
-        summary = aggregate_condition_rows(condition_rows)
-
-        # Average L-C2ST statistic across conditions
-        summary["lc2st"] = float(np.mean(lc2st_stats))
-
-        return summary
+        return dict(result.summary)
 
     return _validate_fn

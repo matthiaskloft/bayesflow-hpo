@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 import numpy as np
@@ -19,6 +19,7 @@ from bayesflow_hpo.validation.metrics import (
 )
 from bayesflow_hpo.validation.registry import (
     DEFAULT_METRICS,
+    JointMetricFn,
     JointMetricInputs,
     output_keys_for,
     resolve_joint_metrics,
@@ -178,6 +179,7 @@ def run_validation_pipeline(
     validation_data: ValidationDataset,
     n_posterior_samples: int = 1000,
     metrics: Sequence[str] | None = None,
+    joint_metrics: Mapping[str, JointMetricFn] | None = None,
 ) -> ValidationResult:
     """Run metric evaluation on a fixed dataset reused across trials.
 
@@ -192,6 +194,16 @@ def run_validation_pipeline(
     metrics
         List of metric names to compute (resolved via the registry).
         Defaults to :data:`~bayesflow_hpo.validation.registry.DEFAULT_METRICS`.
+        Names registered with
+        :func:`~bayesflow_hpo.validation.registry.register_joint_metric` are
+        routed to the joint dispatch instead of the per-parameter one.
+    joint_metrics
+        Additional joint metrics as ``{name: fn}``, merged over the ones
+        resolved from *metrics*. For a metric whose *configuration* belongs
+        to one study rather than to the process -- L-C2ST's fold count,
+        classifier and seed, say -- passing it here keeps that configuration
+        out of the global registry, where it would silently apply to every
+        other study in the same interpreter.
 
     Returns
     -------
@@ -202,6 +214,8 @@ def run_validation_pipeline(
         metrics = list(DEFAULT_METRICS)
     metric_fns = resolve_metrics(list(metrics))
     joint_metric_fns = resolve_joint_metrics(list(metrics))
+    if joint_metrics:
+        joint_metric_fns = {**joint_metric_fns, **joint_metrics}
 
     available_keys = (
         set(validation_data.simulations[0].keys())

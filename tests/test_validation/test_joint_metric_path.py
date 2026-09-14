@@ -384,3 +384,49 @@ def test_overwriting_a_joint_name_with_a_marginal_one_clears_the_marker(
         assert not is_joint_metric("joint_then_marginal")
     finally:
         _REGISTRY.pop("joint_then_marginal", None)
+
+
+# ---------------------------------------------------------------------------
+# The built-in `lc2st` joint metric
+#
+# These live here rather than beside the other L-C2ST tests because
+# `test_c2st.py` opens with `pytest.importorskip("sklearn")`. They must run
+# WITHOUT scikit-learn -- one of them asserts precisely that importing the
+# package does not need it, which is unfalsifiable in a module that skips
+# itself when it is missing.
+# ---------------------------------------------------------------------------
+
+
+def test_lc2st_is_registered_as_a_joint_metric():
+    """So that ``objective_metrics=["lc2st"]`` resolves at all.
+
+    The name has to be visible to ``producer_for_key``, which drives
+    ``_metric_names_for_pipeline``; a name it returns None for is DROPPED
+    from the pipeline's metric list, so the objective would request
+    nothing, compute nothing, and take the penalty on every trial.
+    """
+    from bayesflow_hpo.validation.registry import producer_for_key
+
+    assert is_joint_metric("lc2st")
+    assert producer_for_key("lc2st") == "lc2st"
+
+
+def test_importing_the_package_does_not_require_sklearn():
+    """The registered default must build its classifier lazily.
+
+    Calling `make_lc2st_joint_metric()` at module scope would raise
+    ImportError during ``import bayesflow_hpo`` wherever scikit-learn is
+    absent, making an optional dependency mandatory. The guard has to fire
+    when the metric RUNS, not when it is registered.
+    """
+    from unittest.mock import patch
+
+    from bayesflow_hpo.validation.c2st import _default_lc2st_metric
+
+    assert _REGISTRY["lc2st"] is _default_lc2st_metric
+    with patch(
+        "bayesflow_hpo.validation.c2st._require_sklearn",
+        side_effect=ImportError("no sklearn"),
+    ):
+        with pytest.raises(ImportError):
+            _default_lc2st_metric(None)
