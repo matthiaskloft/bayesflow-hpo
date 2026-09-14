@@ -400,7 +400,14 @@ compare_trials(study, trial_numbers, metrics=None) -> pd.DataFrame
 summarize_study(study, select_by=0) -> str
 
 select_best_trial(study, priorities) -> tuple[FrozenTrial, SelectionResult]
+
+trial_config(trial) -> dict[str, Any]
 ```
+
+`trial_config()` returns `trial.params` merged with the values the search
+space derived from them (the `derived_params` user attribute). Every helper
+above reports a trial's configuration through it, so a coupled dimension such
+as a batch-scaled `initial_lr` is not dropped from the results.
 
 ### Visualization
 

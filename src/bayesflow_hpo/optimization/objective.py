@@ -1087,6 +1087,24 @@ class GenericObjective:
         # --- Step 1: Sample hparams ---
         params = config.search_space.sample(trial)
 
+        # Optuna records only what it sampled, so a DerivedDimension's value
+        # is absent from `trial.params` -- and every results helper reads
+        # `trial.params`. Without this, `best_config()` on a study with a
+        # reparametrized learning rate returns `lr_ref` and no `initial_lr`,
+        # and a user retraining from it silently picks a different rate than
+        # the trial trained with.
+        space_constants = getattr(config.search_space, "constants", {})
+        derived_params = {
+            key: value
+            for key, value in params.items()
+            if key not in trial.params
+            and key not in space_constants
+            and not key.startswith("_")
+            and isinstance(value, (bool, int, float, str))
+        }
+        if derived_params:
+            trial.set_user_attr("derived_params", derived_params)
+
         # --- Step 2: Supply fallback training config ---
         # Search-space values (including DerivedDimension results) take
         # precedence so the optimizer schedule and train_fn share one source.

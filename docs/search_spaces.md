@@ -255,7 +255,12 @@ TrainingSpace(lr_reference_batch_size=32)
 ```
 
 The sampled Optuna parameter is then named `lr_ref`, and `initial_lr` appears
-in `hparams` as a derived value.
+in `hparams` as a derived value. Optuna's parameter-importance plots therefore
+attribute the effect to `lr_ref`, which is the coordinate being searched.
+
+Toggling the coupling changes a parameter name, so a study resumed from
+storage after the change keeps no sampler history for that axis. Decide before
+a long run, not during one.
 
 ### Fixing the simulation budget
 
@@ -280,8 +285,17 @@ TrainingSpace(
 An `epochs` dimension is required, because the objective's own `epochs`
 setting is not visible inside the search space. A budget too small to give the
 largest `batch_size` x `epochs` combination one batch per epoch is rejected
-when the space is constructed. Each trial records its realized
-`simulations` as a user attribute.
+when the space is constructed, as are bounds that allow a zero batch size or
+zero epochs. `simulations` is reported as a column by `trials_to_dataframe()`.
+
+### Derived values in results
+
+Optuna records only what it sampled, so derived values are absent from
+`trial.params`. The objective stores them under the `derived_params` trial
+user attribute, and `best_config()`, `trial_table()`, `trials_to_dataframe()`
+and `compare_trials()` merge them back in — a configuration retrained from
+`best_config()` therefore uses the learning rate and step count the winning
+trial actually trained with.
 
 ### Warmup is not a dimension
 

@@ -2,24 +2,37 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from bayesflow_hpo.search_spaces.base import (
     _UNSET,
     BaseSearchSpace,
     DerivedDimension,
+    Dimension,
     FloatDimension,
     IntDimension,
 )
 
+#: Name given to the sampled learning-rate coordinate when it is
+#: reparametrized, so that it cannot be confused with the ``initial_lr`` the
+#: optimizer receives.
+REFERENCE_LR_NAME = "lr_ref"
 
-def _upper_bound(dimension: IntDimension) -> int:
-    """Largest value an ``IntDimension`` can take."""
+
+def _bounds(dimension: IntDimension, role: str) -> tuple[int, int]:
+    """Return the smallest and largest value an ``IntDimension`` can take."""
+    if not isinstance(dimension, IntDimension):
+        raise TypeError(
+            f"{role} must be an IntDimension when simulation_budget is set, "
+            f"got {type(dimension).__name__}."
+        )
     if dimension.constant is not _UNSET:
-        return int(dimension.constant)
-    if dimension.high is None:  # pragma: no cover - IntDimension validates this
-        raise ValueError(f"IntDimension({dimension.name!r}) has no upper bound.")
-    return int(dimension.high)
+        value = int(dimension.constant)
+        return value, value
+    if dimension.low is None or dimension.high is None:
+        # pragma: no cover - IntDimension.__post_init__ rejects this
+        raise ValueError(f"IntDimension({dimension.name!r}) has no bounds.")
+    return int(dimension.low), int(dimension.high)
 
 
 @dataclass
@@ -38,8 +51,8 @@ class TrainingSpace(BaseSearchSpace):
         batch_size / lr_reference_batch_size``, so ``lr_ref`` is the peak
         learning rate *at the reference batch size* and the sampled
         ``(lr_ref, batch_size)`` rectangle follows the linear scaling
-        relationship ``B`` proportional to ``epsilon`` reported by Smith et
-        al. (2018).  Searching the coupled coordinates directly matters for
+        relationship of batch size to learning rate reported by Smith et al.
+        (2018).  Searching the coupled coordinates directly matters for
         samplers that model parameters marginally, such as Optuna's TPE.
 
     ``simulation_budget``
@@ -61,8 +74,8 @@ class TrainingSpace(BaseSearchSpace):
     ----------
     initial_lr
         Peak learning rate.  When ``lr_reference_batch_size`` is set, this
-        dimension is sampled as ``lr_ref`` and the effective ``initial_lr``
-        is derived from it.
+        dimension is sampled under the name ``lr_ref`` and the effective
+        ``initial_lr`` is derived from it.
     batch_size
         Online simulation batch size.
     epochs
@@ -75,6 +88,13 @@ class TrainingSpace(BaseSearchSpace):
     simulation_budget
         Total online simulations per trial.  ``None`` (default) leaves
         ``num_batches`` to the objective's setting.
+
+    Notes
+    -----
+    Derived values do not appear in ``trial.params``, because Optuna records
+    only what it sampled.  The objective stores them under the
+    ``derived_params`` trial user attribute, so ``best_config()`` and the
+    results tables still report the configuration a trial trained with.
 
     References
     ----------
@@ -95,8 +115,6 @@ class TrainingSpace(BaseSearchSpace):
     epochs: IntDimension | None = None
     lr_reference_batch_size: int | None = None
     simulation_budget: int | None = None
-    scaled_lr: DerivedDimension | None = field(default=None, init=False)
-    num_batches: DerivedDimension | None = field(default=None, init=False)
 
     def __post_init__(self) -> None:
         if self.lr_reference_batch_size is not None:
@@ -105,40 +123,77 @@ class TrainingSpace(BaseSearchSpace):
                     "lr_reference_batch_size must be >= 1, got "
                     f"{self.lr_reference_batch_size}."
                 )
-            # The sampled coordinate is no longer the learning rate that the
-            # optimizer receives, so it must not be recorded under that name:
-            # `initial_lr` in `trial.params` would then disagree with the
-            # `initial_lr` in `hparams`.
-            if self.initial_lr.name == "initial_lr":
-                self.initial_lr.name = "lr_ref"
-            ref_name = self.initial_lr.name
-            reference_batch = float(self.lr_reference_batch_size)
-            self.scaled_lr = DerivedDimension(
-                "initial_lr",
-                lambda p: float(p[ref_name])
-                * float(p["batch_size"])
-                / reference_batch,
+            if self.initial_lr.name == REFERENCE_LR_NAME:
+                raise ValueError(
+                    "The learning-rate dimension cannot be named "
+                    f"{REFERENCE_LR_NAME!r}: that name is assigned to it "
+                    "automatically when lr_reference_batch_size is set."
+                )
+
+        if self.simulation_budget is None:
+            return
+        if self.epochs is None:
+            raise ValueError(
+                "simulation_budget requires an 'epochs' dimension on "
+                "TrainingSpace: num_batches is derived from both, and "
+                "the objective's epochs setting is not visible here."
+            )
+        min_batch, max_batch = _bounds(self.batch_size, "batch_size")
+        min_epochs, max_epochs = _bounds(self.epochs, "epochs")
+        if min_batch < 1 or min_epochs < 1:
+            # Otherwise the floor division divides by zero at sample time,
+            # inside `search_space.sample()` -- which aborts the whole study
+            # instead of rejecting one trial.
+            raise ValueError(
+                "simulation_budget requires batch_size and epochs to be "
+                f">= 1, got batch_size >= {min_batch} and "
+                f"epochs >= {min_epochs}."
+            )
+        if self.simulation_budget < max_batch * max_epochs:
+            raise ValueError(
+                f"simulation_budget={self.simulation_budget} is too small: "
+                "the largest batch_size x epochs combination in this space "
+                f"needs {max_batch * max_epochs} simulations for a single "
+                "batch per epoch."
             )
 
+    @property
+    def dimensions(self) -> list[Dimension]:
+        """Return the declared dimensions plus any derived couplings.
+
+        The couplings are resolved here rather than stored on the instance so
+        that the dimension objects a caller passed in are never mutated: one
+        ``FloatDimension`` shared between two spaces, or a space rebuilt with
+        ``dataclasses.replace``, would otherwise inherit a rename it never
+        asked for and then sample the wrong coordinate.
+        """
+        declared = super().dimensions
+        if self.lr_reference_batch_size is None and self.simulation_budget is None:
+            return declared
+
+        resolved: list[Dimension] = []
+        for dimension in declared:
+            if dimension is self.initial_lr and self.lr_reference_batch_size:
+                resolved.append(replace(dimension, name=REFERENCE_LR_NAME))
+            else:
+                resolved.append(dimension)
+
+        if self.lr_reference_batch_size is not None:
+            reference_batch = float(self.lr_reference_batch_size)
+            resolved.append(
+                DerivedDimension(
+                    "initial_lr",
+                    lambda p: float(p[REFERENCE_LR_NAME])
+                    * float(p["batch_size"])
+                    / reference_batch,
+                )
+            )
         if self.simulation_budget is not None:
-            if self.epochs is None:
-                raise ValueError(
-                    "simulation_budget requires an 'epochs' dimension on "
-                    "TrainingSpace: num_batches is derived from both, and "
-                    "the objective's epochs setting is not visible here."
-                )
-            max_simulations_per_batch = _upper_bound(self.batch_size) * _upper_bound(
-                self.epochs
-            )
-            if self.simulation_budget < max_simulations_per_batch:
-                raise ValueError(
-                    f"simulation_budget={self.simulation_budget} is too small "
-                    f"for this space: the largest batch_size x epochs "
-                    f"combination needs {max_simulations_per_batch} "
-                    "simulations for a single batch per epoch."
-                )
             budget = int(self.simulation_budget)
-            self.num_batches = DerivedDimension(
-                "num_batches",
-                lambda p: budget // (int(p["batch_size"]) * int(p["epochs"])),
+            resolved.append(
+                DerivedDimension(
+                    "num_batches",
+                    lambda p: budget // (int(p["batch_size"]) * int(p["epochs"])),
+                )
             )
+        return resolved

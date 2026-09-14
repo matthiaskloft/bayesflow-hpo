@@ -14,7 +14,14 @@
   dimension on the space; an infeasible budget is rejected at construction.
   Off by default.
 - Trials record their realized `simulations` (`batch_size * epochs *
-  num_batches`) as a user attribute.
+  num_batches`) as a user attribute, and it is now a default column of
+  `trials_to_dataframe()`.
+- Values a search space derives rather than samples are recorded under the
+  `derived_params` trial user attribute, and `best_config()`, `trial_table()`,
+  `trials_to_dataframe()` and `compare_trials()` report them alongside
+  `trial.params`. Without this, retraining from `best_config()` on a study
+  with a reparametrized learning rate would silently use a different rate than
+  the trial that was selected.
 
 ### Fixed
 

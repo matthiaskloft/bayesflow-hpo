@@ -12,6 +12,7 @@ from bayesflow_hpo.results.extraction import (
     get_pareto_trials,
     select_best_trial,
     summarize_study,
+    trial_config,
     trial_table,
     trials_to_dataframe,
 )
@@ -46,6 +47,7 @@ __all__ = [
     "plot_study",
     "save_workflow_with_metadata",
     "summarize_study",
+    "trial_config",
     "trial_table",
     "trials_to_dataframe",
 ]
