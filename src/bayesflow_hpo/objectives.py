@@ -348,6 +348,26 @@ METRIC_DIRECTIONS: dict[str, MetricDirection] = {
         # Unlike KS, the raw chi-squared statistic is unbounded above.
         worst_raw=math.inf,
     ),
+    "lc2st": MetricDirection(
+        higher_is_better=False,
+        to_minimize=lambda v: v,
+        # The L-C2ST statistic is the mean of ``(p - 0.5) ** 2`` over the
+        # classifier's out-of-fold probabilities (validation.c2st, the
+        # single-class MSE_0 of Linhart et al. 2023, Theorem 3.1). A
+        # probability lies in [0, 1], so the squared deviation from 0.5 is
+        # bounded by 0.25 and so is its mean.
+        #
+        # `lc2st` was registrable as an objective but had no entry here, so
+        # it fell through to `worst_raw_value`'s +inf for metrics of unknown
+        # scale. That default is right for a custom metric and wrong here:
+        # the scale IS known and finite. The cost was concrete in
+        # `objective_mode="mean"`, where the penalty is
+        # `fsum(worst) / len(worst)` (optimization/objective.py:996) -- one
+        # absent `lc2st` makes the mean +inf regardless of the other
+        # objectives, so every failing trial collapses to the same value and
+        # the sampler cannot tell a near-miss from a total failure.
+        worst_raw=0.25,
+    ),
 }
 
 #: Version of the objective-value encoding written into a study.
@@ -385,10 +405,22 @@ OBJECTIVE_ENCODING_VERSION = 2
 #: ``mae`` is here for the penalty reason too: it is objective-eligible with
 #: no direction entry, so it takes the unregistered fallback, which moved from
 #: a finite 1.0 to +inf once an unknown scale stopped being assumed bounded.
+#: ``lc2st`` joins for the same penalty reason as ``mae``, one step further
+#: along: released 0.1.0 substituted a flat 1.0 for it, encoding 2 moved that
+#: to the unregistered +inf fallback, and its direction entry now pins it at
+#: its real bound of 0.25. Two of those three numbers are not the current one,
+#: so a column carrying them is not comparable with a column produced today.
+#: The second move happens WITHIN encoding 2 and deliberately does not bump
+#: the version: it changes only the value substituted for trials that failed
+#: to report the metric, and its direction is the harmless one -- an old +inf
+#: loses to every valid value, so mixing the two reorders failures among
+#: themselves and never lets a failure outrank a success. That is the same
+#: residual ``mean_calibration_error`` documents below, and the opposite of
+#: the ``correlation`` case this set exists for.
 #: `tests/test_objectives.py` derives this set by computing old and new values
 #: for every registered metric, so it cannot drift from the code again.
 ENCODING_CHANGED_AT_V2: frozenset[str] = frozenset(
-    {"log_gamma", "correlation", "sbc_chi2", "mae", "contraction"}
+    {"log_gamma", "correlation", "sbc_chi2", "mae", "contraction", "lc2st"}
 )
 
 #: Built-in metrics audited against the pre-change rule and found to store the
