@@ -79,7 +79,10 @@ class CheckpointPool:
         are discarded as before.  When the cap is reached, retention is a
         uniform random sample of every pruned trial the pool was offered:
         the *n*-th offer is kept with probability ``pruned_pool_size / n``
-        and replaces a uniformly chosen incumbent.  Not top-*k*, because
+        and replaces a uniformly chosen incumbent.  That is Algorithm R of
+        Vitter (1985), Alg. R and Def. 1, Sec. 2, p. 39, which needs no
+        advance knowledge of the population size -- a study's pruned count
+        is unknown until it ends.  Not top-*k*, because
         pruned trials stop at different rungs and their objective values
         are not comparable across rungs; a uniform sample instead gives
         coverage of the whole quality range, which is what the diagnostic
@@ -212,10 +215,10 @@ class CheckpointPool:
             evict_slot = existing_slot
         elif len(self._pruned_entries) >= self.pruned_pool_size:
             # Keep the n-th offer with probability k/n, replacing a
-            # uniformly chosen incumbent. This is what keeps every pruned
-            # trial of the study equally likely to be in the final pool,
-            # without knowing the population size up front. Verified
-            # empirically by
+            # uniformly chosen incumbent -- Vitter (1985), Alg. R, Sec. 2,
+            # p. 39. This is what keeps every pruned trial of the study
+            # equally likely to be in the final pool, without knowing the
+            # population size up front. Verified empirically by
             # ``test_retention_is_uniform_over_the_population``.
             if self._rng.random() >= self.pruned_pool_size / n_offered:
                 self._pruned_seen = n_offered

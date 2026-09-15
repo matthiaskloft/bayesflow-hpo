@@ -208,6 +208,7 @@ Feature implementations and their backing references.
 | `CanonicalMetricName` type | `validation/registry.py` | PEP 484 |
 | `RawScore` / `MinimizeScore` types | `objectives.py` | PEP 484 |
 | TPE sampler preset | `optimization/study.py` | Bergstra et al. (2011) |
+| Pruned-checkpoint retention sampling | `optimization/checkpoint_pool.py` | Vitter (1985), Alg. R |
 | BoTorch / GP sampler preset | `optimization/study.py` | Balandat et al. (2020) |
 | qEHVI acquisition | `optimization/study.py` | Daulton et al. (2020) |
 | qNEHVI acquisition | `optimization/study.py` | Daulton et al. (2021) |
@@ -950,6 +951,37 @@ observation". Uniform ranks are therefore necessary, not sufficient.
 
 (An earlier version of this entry, and three code comments, cited
 ~~Theorem 2~~ and stated the equivalence as "iff".)
+
+### Vitter, J. S. (1985)
+
+Random sampling with a reservoir. *ACM Transactions on Mathematical
+Software*, *11*(1), 37--57. https://doi.org/10.1145/3147.3165
+
+**Algorithm R**, stated in Section 2 (p. 39), is what
+`CheckpointPool.save_pruned` implements for retaining pruned trials:
+"When the (t + 1)st record in the file is being processed, for t >= n, the
+n candidates form a random sample of the first t records. The (t + 1)st
+record has a n/(t + 1) chance of being in a random sample of size n of the
+first t + 1 records, and so it is made a candidate with probability
+n/(t + 1). The candidate it replaces is chosen randomly from the n
+candidates." Definition 1 on the same page gives the first step: the first
+n records go into the reservoir unconditionally, which is the pool's fill
+phase before the cap is reached.
+
+Two things the entry records because they are easy to get wrong:
+
+- **Algorithm R is not Vitter's contribution.** The paper attributes it to
+  Alan Waterman ("a reservoir algorithm due to Alan Waterman") and calls it
+  "previously the method of choice". Vitter's own result is **Algorithm Z**
+  (Section 5), which is not what this package implements: Z optimizes the
+  *number of random variates* for a long stream, and a pruned-trial pool
+  offers at most a few hundred items, where R's O(N) cost is irrelevant.
+- The population here is the pruned trials *offered*, not records in a file,
+  and the pool never needs N in advance -- which is the property that makes
+  R applicable at all, since a study's pruned count is unknown until it ends.
+
+(Alg. R and Def. 1, Sec. 2, p. 39 -- ACM TOMS 11(1), March 1985, verified
+2026-09-15.)
 
 ### Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones, L., Gomez, A. N., Kaiser, L., & Polosukhin, I. (2017)
 
