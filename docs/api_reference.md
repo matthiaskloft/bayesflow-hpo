@@ -311,10 +311,12 @@ Set it above zero to keep a bounded sample of them under
 models (metric noise floors, integrator behaviour on a rough velocity
 field). The pruned pool is separate, so pruned trials can never evict a
 scored one. Once the cap is reached, retention is a **uniform random
-sample** of every pruned trial offered, not top-*k*: pruned trials stop
-at different rungs, so their scores are not comparable across rungs, and
-what the diagnostic use cases need is coverage of the whole quality
-range. Pass `seed` to make the sample reproducible.
+sample** of every pruned trial offered — Algorithm R of Vitter (1985),
+Sec. 2, p. 39, which needs no advance knowledge of the population size,
+and a study's pruned count is unknown until it ends. Not top-*k*: pruned
+trials stop at different rungs, so their scores are not comparable across
+rungs, and what the diagnostic use cases need is coverage of the whole
+quality range. Pass `seed` to make the sample reproducible.
 
 ```python
 from bayesflow_hpo import CheckpointPool, optimize
