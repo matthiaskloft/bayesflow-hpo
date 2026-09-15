@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import time
 from collections.abc import Mapping, Sequence
 from typing import Any
@@ -143,6 +144,30 @@ def _run_joint_metrics(
                 exc,
             )
             continue
+        # A NaN is a failure the metric chose not to raise for, and it
+        # must take the same path as one that did. Otherwise
+        # `_aggregate_joint_rows` nanmeans it away: a metric returning 0.01
+        # on one condition and NaN on another reports 0.01, a flattering
+        # finite score where D8 promises whole-trial invalidation. An
+        # infinity is left alone -- `log_gamma` shows a metric can mean it.
+        nan_keys = [
+            key
+            for key, value in result.items()
+            if isinstance(value, float | int) and math.isnan(float(value))
+        ]
+        if nan_keys:
+            failed_joint[name] = (
+                f"returned NaN for {sorted(nan_keys)} on condition {cond_id}"
+            )
+            logger.warning(
+                "Joint metric %r returned NaN for %s on condition %d and is "
+                "invalidated for this trial.",
+                name,
+                sorted(nan_keys),
+                cond_id,
+            )
+            emitted_keys.setdefault(name, set()).update(result)
+            continue
         for key, value in result.items():
             row[key] = float(value)
         # Recorded so that a LATER failure can drop what this condition
@@ -154,6 +179,45 @@ def _run_joint_metrics(
         # dropped and a partial mean would reach the objective.
         emitted_keys.setdefault(name, set()).update(result)
     return row
+
+
+#: Reserved key under which the validation run's own counts are pinned.
+#:
+#: Not a metric name, and deliberately not per-metric: these describe the
+#: RUN, and every joint metric in it shares them.
+VALIDATION_RUN_SETTINGS = "__validation_run__"
+
+
+def _declared_settings(
+    joint_metric_fns: dict[str, Any],
+    n_posterior_samples: int,
+    n_conditions: int,
+) -> dict[str, dict[str, Any]]:
+    """Settings to pin: what each metric declares, plus the run's own counts.
+
+    A joint metric's score moves with the validation run as well as with
+    its own configuration, and D7 names both. TARP's coverage fractions are
+    supported on ``{0, 1/n_draws, ..., 1}``, so resuming at 5 posterior
+    draws instead of 500 puts them on a different grid entirely; the
+    condition count moves the Monte Carlo error and, for a subsampled
+    L-C2ST, changes WHICH conditions run even at an unchanged
+    ``max_conditions``. Neither is derivable from the per-metric
+    declarations -- a metric reads ``draws.shape[1]`` rather than being told
+    -- so the pipeline contributes them.
+
+    Returns an empty mapping when nothing declares settings, so a study
+    using no joint metrics still never acquires the attribute.
+    """
+    declared = joint_metric_settings(joint_metric_fns)
+    if not declared:
+        return {}
+    return {
+        **declared,
+        VALIDATION_RUN_SETTINGS: {
+            "n_posterior_samples": int(n_posterior_samples),
+            "n_conditions": int(n_conditions),
+        },
+    }
 
 
 def _aggregate_joint_rows(
@@ -412,7 +476,9 @@ def run_validation_pipeline(
             n_posterior_samples=n_posterior_samples,
             metric_names=list(metrics),
             failed_joint_metrics=dict(failed_joint),
-            joint_metric_settings=joint_metric_settings(joint_metric_fns),
+            joint_metric_settings=_declared_settings(
+                joint_metric_fns, n_posterior_samples, n_conditions
+            ),
         )
 
     # Single-parameter case
@@ -434,5 +500,7 @@ def run_validation_pipeline(
         n_posterior_samples=n_posterior_samples,
         metric_names=list(metrics),
         failed_joint_metrics=dict(failed_joint),
-        joint_metric_settings=joint_metric_settings(joint_metric_fns),
+        joint_metric_settings=_declared_settings(
+            joint_metric_fns, n_posterior_samples, n_conditions
+        ),
     )

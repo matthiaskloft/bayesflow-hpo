@@ -290,3 +290,59 @@ def test_a_labelled_reference_is_pinned():
             n_completed_trials=1,
         )
 
+
+# ---------------------------------------------------------------------------
+# Which trials count as "completed"
+# ---------------------------------------------------------------------------
+
+
+def test_budget_rejected_trials_do_not_block_the_first_stamp():
+    """A rejected proposal is COMPLETE but measured nothing.
+
+    A trial rejected for `max_memory_mb` or `max_param_count` returns
+    `_penalty()` and Optuna records it COMPLETE. Counting it made a fresh
+    study whose FIRST proposal was oversized -- routine early in a search --
+    reach the next, feasible trial with a positive count and no stored
+    settings, so the guard aborted the whole study over trials that never
+    ran a metric.
+    """
+    from bayesflow_hpo.optimization.objective import _n_measured_trials
+
+    study = _study()
+    for reason in ("memory_budget", "param_budget"):
+        t = study.ask()
+        t.set_user_attr("rejected_reason", reason)
+        study.tell(t, 1.0)
+
+    assert _n_measured_trials(study) == 0
+    check_or_stamp_joint_metric_settings(
+        study, TARP, n_completed_trials=_n_measured_trials(study)
+    )
+    assert study.user_attrs[JOINT_METRIC_SETTINGS_ATTR] == TARP
+
+
+def test_failed_and_fallback_trials_do_not_count_either():
+    """They reach COMPLETE without producing measured joint values."""
+    from bayesflow_hpo.optimization.objective import _n_measured_trials
+
+    study = _study()
+    for marker in ("training_error", "validation_error"):
+        t = study.ask()
+        t.set_user_attr(marker, "boom")
+        study.tell(t, 1.0)
+    assert _n_measured_trials(study) == 0
+
+
+def test_a_measured_trial_does_count():
+    """The legacy-study guard has to keep working, or this is a hole."""
+    from bayesflow_hpo.optimization.objective import _n_measured_trials
+
+    study = _study()
+    study.tell(study.ask(), 1.0)
+    assert _n_measured_trials(study) == 1
+
+    with pytest.raises(ValueError, match="records no joint metric settings"):
+        check_or_stamp_joint_metric_settings(
+            study, TARP, n_completed_trials=_n_measured_trials(study)
+        )
+

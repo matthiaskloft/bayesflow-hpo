@@ -156,6 +156,43 @@ def default_validate_fn(
     return dict(result.summary)
 
 
+def _n_measured_trials(study: optuna.Study) -> int:
+    """Count COMPLETE trials that actually measured their metrics.
+
+    The joint-settings guard reads this as "trials whose values I cannot
+    vouch for", and refuses to stamp a study that has any. Counting every
+    COMPLETE trial makes that wrong in a way that bricks ordinary studies:
+    a proposal rejected for `max_memory_mb` or `max_param_count` returns
+    `_penalty()` and is recorded COMPLETE, so a fresh study whose FIRST
+    proposal is oversized -- routine early in a search -- reaches the next,
+    feasible trial with a positive count and no stored settings, and the
+    guard aborts the whole study over trials that never ran a metric at
+    all. Build failures, training failures and validation fallbacks are the
+    same case.
+
+    Those trials are all marked, so they can be excluded precisely rather
+    than guessed at. A trial with none of these markers completed its
+    validation step, which is exactly when its joint metric values are
+    real.
+
+    Parameters
+    ----------
+    study
+        The study being written to.
+
+    Returns
+    -------
+    int
+        Number of COMPLETE trials that produced measured metric values.
+    """
+    unmeasured = ("rejected_reason", "training_error", "validation_error")
+    return sum(
+        t.state == optuna.trial.TrialState.COMPLETE
+        and not any(marker in t.user_attrs for marker in unmeasured)
+        for t in study.get_trials(deepcopy=False)
+    )
+
+
 def _validate_metric_keys(
     raw: dict[str, float],
     objective_metrics: list[CanonicalMetricName],
@@ -1430,10 +1467,7 @@ class GenericObjective:
                 check_or_stamp_joint_metric_settings(
                     trial.study,
                     result.joint_metric_settings,
-                    n_completed_trials=sum(
-                        t.state == optuna.trial.TrialState.COMPLETE
-                        for t in trial.study.get_trials(deepcopy=False)
-                    ),
+                    n_completed_trials=_n_measured_trials(trial.study),
                 )
                 if result.failed_joint_metrics:
                     # The reason a joint metric produced no value, kept where

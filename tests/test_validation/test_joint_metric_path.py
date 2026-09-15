@@ -615,3 +615,118 @@ def test_an_aliased_override_suppresses_its_registry_entry():
         # Removes the alias too, which is why teardown is one call.
         unregister_metric("aliased_joint")
 
+
+# ---------------------------------------------------------------------------
+# A NaN is a failure the metric chose not to raise for
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("failing", [(0,), (2,)], ids=["first", "last"])
+def test_a_nan_invalidates_the_metric_like_an_exception(
+    joint_metric, failing
+):
+    """`nanmean` would otherwise average it away.
+
+    A metric returning 0.01 on one condition and NaN on another reported
+    0.01 -- a flattering finite score reaching the objective where D8
+    promises whole-trial invalidation. Numerical metrics signal failure
+    with NaN without raising, so the guard has to inspect values and not
+    only catch exceptions.
+    """
+
+    def sometimes_nan(inputs: JointMetricInputs) -> dict[str, float]:
+        if inputs.cond_id in failing:
+            return {"joint_nan": float("nan")}
+        return {"joint_nan": 0.01}
+
+    joint_metric("joint_nan", sometimes_nan, kind="diagnostic")
+    result = _run(["theta"], ["nrmse", "joint_nan"], n_conditions=3)
+
+    assert "joint_nan" not in result.summary, (
+        "a NaN-producing joint metric reported a finite mean, so its "
+        "registered worst case was never applied"
+    )
+    assert "joint_nan" in result.failed_joint_metrics
+    assert "NaN" in result.failed_joint_metrics["joint_nan"]
+    assert "nrmse" in result.summary
+
+
+def test_a_multi_output_metric_drops_every_key_on_a_nan(joint_metric):
+    """One NaN invalidates the producer, not just the key that carried it."""
+
+    def partly_nan(inputs: JointMetricInputs) -> dict[str, float]:
+        if inputs.cond_id == 1:
+            return {"nan_left": float("nan"), "nan_right": 2.0}
+        return {"nan_left": 1.0, "nan_right": 2.0}
+
+    joint_metric(
+        "joint_nan_pair",
+        partly_nan,
+        kind="diagnostic",
+        outputs=("nan_left", "nan_right"),
+    )
+    result = _run(["theta"], ["joint_nan_pair"], n_conditions=3)
+
+    assert "nan_left" not in result.summary
+    assert "nan_right" not in result.summary
+
+
+def test_an_infinity_is_left_alone(joint_metric):
+    """`log_gamma` shows a metric can mean an infinity."""
+    joint_metric(
+        "joint_inf",
+        lambda inputs: {"joint_inf": float("inf")},
+        kind="diagnostic",
+    )
+    result = _run(["theta"], ["joint_inf"], n_conditions=2)
+    assert result.failed_joint_metrics == {}
+    assert result.summary["joint_inf"] == float("inf")
+
+
+def test_an_empty_dict_is_still_a_valid_subsample(joint_metric):
+    """The NaN check must not catch the intentional skip path."""
+
+    def every_other(inputs: JointMetricInputs) -> dict[str, float]:
+        return {} if inputs.cond_id % 2 else {"joint_skip": 1.0}
+
+    joint_metric("joint_skip", every_other, kind="diagnostic")
+    result = _run(["theta"], ["joint_skip"], n_conditions=3)
+    assert result.failed_joint_metrics == {}
+    assert result.summary["joint_skip"] == pytest.approx(1.0)
+
+
+# ---------------------------------------------------------------------------
+# The pin carries the validation run's own counts
+# ---------------------------------------------------------------------------
+
+
+def test_the_run_counts_are_pinned_alongside_the_metric_settings(
+    joint_metric,
+):
+    """D7 names both, and neither is derivable from a metric's declaration.
+
+    TARP's coverage fractions are supported on {0, 1/n_draws, ..., 1}, so
+    resuming at 5 draws instead of 500 puts them on a different grid; the
+    condition count moves the Monte Carlo error and, for a subsampled
+    L-C2ST, changes which conditions run at an unchanged `max_conditions`.
+    """
+    from bayesflow_hpo.validation.pipeline import VALIDATION_RUN_SETTINGS
+
+    def declaring(inputs: JointMetricInputs) -> dict[str, float]:
+        return {"joint_declaring": 0.0}
+
+    declaring.joint_metric_settings = {"resolution": 20}
+    joint_metric("joint_declaring", declaring, kind="diagnostic")
+
+    result = _run(
+        ["theta"], ["joint_declaring"], n_conditions=3, n_samples=16
+    )
+    run = result.joint_metric_settings[VALIDATION_RUN_SETTINGS]
+    assert run == {"n_posterior_samples": 16, "n_conditions": 3}
+
+
+def test_a_study_with_no_declaring_metric_pins_nothing():
+    """The common case must not acquire the attribute via the run counts."""
+    result = _run(["theta"], ["nrmse"], n_conditions=2)
+    assert result.joint_metric_settings == {}
+

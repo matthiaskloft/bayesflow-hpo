@@ -25,6 +25,7 @@ from bayesflow_hpo.types import BuildApproximatorFn, TrainFn, ValidateFn
 from bayesflow_hpo.validation.data import generate_validation_dataset
 from bayesflow_hpo.validation.registry import (
     canonical_metric_name,
+    is_joint_metric,
     validate_objective_metric_kinds,
 )
 
@@ -200,7 +201,6 @@ def check_pipeline(
     train_fn: TrainFn | None = None,
     validate_fn: ValidateFn | None = None,
     objective_metrics: list[str] | None = None,
-    joint_metrics: dict[str, Any] | None = None,
     sims_per_condition: int = 5,
     n_posterior_samples: int = 2,
     validation_conditions: dict[str, list[Any]] | None = None,
@@ -243,13 +243,6 @@ def check_pipeline(
     objective_metrics
         Metric keys the objective expects. Default
         ``["calibration_error", "nrmse"]``.
-    joint_metrics
-        Configured joint metrics as ``{name: fn}``, forwarded to the
-        validation step. Required for any joint metric that cannot run at a
-        registry default -- ``tarp_error`` needs caller-supplied reference
-        points -- because this pre-flight resolves the same metric list the
-        study will, and would otherwise reject the configuration it is
-        meant to be checking.
     sims_per_condition
         Simulations per condition for tiny validation dataset.
     n_posterior_samples
@@ -390,6 +383,30 @@ def check_pipeline(
         raise PipelineError(f"Training step failed: {exc}") from exc
 
     # --- Step 6: Validate ---
+    # JOINT metrics are excluded from pre-flight, and this is a deliberate
+    # limit rather than an oversight.
+    #
+    # Pre-flight generates its own tiny batch -- five simulations per
+    # condition by default -- to check interfaces cheaply. A joint metric's
+    # configuration is sized for the PRODUCTION batch, so running the
+    # caller's real callable against that batch fails for reasons that say
+    # nothing about the configuration: `make_lc2st_joint_metric(n_folds=10)`
+    # is rejected because five simulations cannot fill ten folds, and a
+    # per-condition reference array shaped for 500 rows does not match five
+    # -- and truncating it would pair references with different, newly
+    # generated observations, which is a silently wrong check rather than a
+    # failed one. A pre-flight that always rejects a valid configuration is
+    # worse than one that does not examine it.
+    #
+    # The cost is that a joint metric's own interface errors surface at the
+    # first trial instead of before the study. The metric is still resolved
+    # there, `resolve_joint_metrics` still refuses an unconfigured
+    # placeholder, and `JointMetricConfigurationError` is re-raised rather
+    # than penalized -- so the study still stops on the first trial with the
+    # real message, one trial later than it might have.
+    marginal_metrics = [
+        name for name in objective_metrics if not is_joint_metric(name)
+    ]
     try:
         if validate_fn is not None:
             # A custom hook keeps the documented 3-argument contract.
@@ -400,18 +417,11 @@ def check_pipeline(
             # The built-in validator has to be told which metrics this run
             # optimizes, or it computes DEFAULT_METRICS only and the missing
             # key check below rejects every non-default objective.
-            # `joint_metrics` forwarded, or this pre-flight becomes the
-            # thing that blocks the feature: a name registered only as a
-            # placeholder -- `tarp_error`, which cannot run without
-            # reference points -- resolves here with no override in sight
-            # and raises before the study starts. The parameter would then
-            # exist on `optimize()` and be impossible to use.
             result = default_validate_fn(
                 approximator,
                 validation_data,
                 n_posterior_samples,
-                objective_metrics=objective_metrics,
-                joint_metrics=joint_metrics,
+                objective_metrics=marginal_metrics,
             )
     except Exception as exc:
         raise PipelineError(f"Validation step failed: {exc}") from exc
@@ -432,14 +442,14 @@ def check_pipeline(
     # three were fixed together and this one was missed.
     result = canonical_summary(result)
 
-    missing_keys = set(objective_metrics) - set(result.keys())
+    missing_keys = set(marginal_metrics) - set(result.keys())
     if missing_keys:
         raise PipelineError(
             f"validate_fn output is missing required metric keys: "
             f"{sorted(missing_keys)}. Got keys: {sorted(result.keys())}"
         )
 
-    for key in objective_metrics:
+    for key in marginal_metrics:
         val = result[key]
         if not isinstance(val, (int, float)) or math.isnan(val):
             raise PipelineError(

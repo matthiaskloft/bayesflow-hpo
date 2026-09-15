@@ -573,7 +573,6 @@ def optimize(
         train_fn=train_fn,
         validate_fn=validate_fn,
         objective_metrics=objective_metrics,
-        joint_metrics=joint_metrics,
         validation_conditions=validation_conditions,
     )
 
