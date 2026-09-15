@@ -494,7 +494,9 @@ def optimize(
         :func:`~bayesflow_hpo.create_study` for details.
     checkpoint_pool
         Optional :class:`CheckpointPool` for persisting the best
-        trial weights.
+        trial weights.  Pass one built with ``pruned_pool_size > 0`` to
+        also retain a bounded sample of *pruned* trials' weights, which
+        the default pool discards.
     show_progress_bar
         Whether to show Optuna's progress bar (default ``True``).
 

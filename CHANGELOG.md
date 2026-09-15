@@ -22,6 +22,21 @@
   `trial.params`. Without this, retraining from `best_config()` on a study
   with a reparametrized learning rate would silently use a different rate than
   the trial that was selected.
+- `CheckpointPool(pruned_pool_size=...)` opts into retaining pruned trials'
+  weights, which no `pool_size` could keep before: `maybe_save()` runs after
+  scoring, and a pruned trial raises before reaching it. Off by default (0).
+  Pruned checkpoints go to a separate pool under `pool_dir / "pruned"`, so
+  they can never evict a scored trial, and past the cap retention is a
+  uniform random sample of the pruned population rather than top-k --
+  pruned trials stop at different rungs, so their scores are not comparable
+  across rungs and top-k cannot cover the low end. Pass `seed=` for a
+  reproducible sample.
+- Every checkpoint now carries a `checkpoint.json` sidecar recording the
+  trial number, state, objective value and -- for pruned trials -- the rung
+  they stopped at, which cannot be recovered from the weights.
+- `PeriodicValidationCallback.validation_step` and `.last_scores` report the
+  rung the approximator's current weights were measured at, accounting for
+  early stopping having restored weights from an earlier rung.
 
 ### Fixed
 

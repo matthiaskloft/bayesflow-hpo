@@ -280,13 +280,49 @@ exceeds_memory_budget(params, max_memory_mb, batch_size=None) -> bool
 
 ```python
 class CheckpointPool:
-    def __init__(self, pool_dir="checkpoints", pool_size=5): ...
+    def __init__(self, pool_dir="checkpoints", pool_size=5,
+                 pruned_pool_size=0, seed=None): ...
     def maybe_save(self, trial_number, objective_value, approximator) -> bool
+    def save_pruned(self, trial_number, approximator,
+                    step=None, objective_value=None) -> bool
     @property
     def best_checkpoint_dir(self) -> Path | None
     @property
     def trial_numbers(self) -> list[int]
+    @property
+    def pruned_trial_numbers(self) -> list[int]
+    @property
+    def pruned_pool_dir(self) -> Path
     def cleanup(self) -> None
+```
+
+Each checkpoint directory holds `weights.weights.h5` plus a
+`checkpoint.json` sidecar (trial number, state, objective value, and for
+pruned trials the rung they stopped at). Only weights are written, so
+`keras.saving.load_model()` on one of these fails: rebuild the
+approximator from `trial.params`, then `load_weights()`.
+
+#### Retaining pruned trials
+
+`pruned_pool_size` is 0 by default, so pruned trials' weights are
+discarded — a pruned trial raises before the objective ever scores it.
+Set it above zero to keep a bounded sample of them under
+`pool_dir / "pruned"`, for diagnostic work that needs under-trained
+models (metric noise floors, integrator behaviour on a rough velocity
+field). The pruned pool is separate, so pruned trials can never evict a
+scored one. Once the cap is reached, retention is a **uniform random
+sample** of every pruned trial offered, not top-*k*: pruned trials stop
+at different rungs, so their scores are not comparable across rungs, and
+what the diagnostic use cases need is coverage of the whole quality
+range. Pass `seed` to make the sample reproducible.
+
+```python
+from bayesflow_hpo import CheckpointPool, optimize
+
+study = optimize(
+    ...,
+    checkpoint_pool=CheckpointPool(pruned_pool_size=20, seed=0),
+)
 ```
 
 ### Cleanup
