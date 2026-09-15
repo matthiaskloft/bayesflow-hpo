@@ -211,7 +211,9 @@ Since Optuna doesn't support `trial.report()` for multi-objective studies, `Peri
 
 Trials can be rejected pre-training based on:
 - **Parameter count** — `estimate_param_count()` heuristics by network type
-- **Memory** — `estimate_peak_memory_mb()` or GPU-memory auto-detection (`max_memory_mb="auto"`)
+- **Memory** — `estimate_peak_memory_mb()` (training) and
+  `estimate_validation_memory_mb()` (one validation `sample()` call), or
+  GPU-memory auto-detection (`max_memory_mb="auto"`)
 - **Metric constraints** — Hard rejection after validation
 
 Budget-rejected trials don't count toward `n_trials`, ensuring efficient resource use.

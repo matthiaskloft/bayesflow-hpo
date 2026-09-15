@@ -46,6 +46,10 @@ from bayesflow_hpo.optimization.pruning_strategies import (
 )
 from bayesflow_hpo.types import ValidateFn
 from bayesflow_hpo.validation.data import ValidationDataset
+from bayesflow_hpo.validation.inference import (
+    DEFAULT_MAX_SAMPLES_PER_CALL,
+    validate_max_samples_per_call,
+)
 from bayesflow_hpo.validation.registry import (
     CanonicalMetricName,
     JointMetricConfigurationError,
@@ -91,6 +95,10 @@ class PeriodicValidationCallback(Callback):
     n_posterior_samples
         Number of posterior draws for intermediate validation.
         Default 250.
+    max_samples_per_call
+        Cap on posterior draws per ``approximator.sample()`` call, forwarded
+        to :func:`~bayesflow_hpo.validation.pipeline.run_validation_pipeline`.
+        ``None`` samples each condition in a single call.
     n_startup_trials
         Minimum completed trials before multi-objective pruning
         activates.  ``None`` (the default) resolves to
@@ -165,6 +173,7 @@ class PeriodicValidationCallback(Callback):
         early_stopping_monitor: str = "objective_mean",
         include_joint_metrics: bool = False,
         joint_metrics: dict[str, Any] | None = None,
+        max_samples_per_call: int | None = DEFAULT_MAX_SAMPLES_PER_CALL,
     ):
         super().__init__()
         self.trial = trial
@@ -173,6 +182,13 @@ class PeriodicValidationCallback(Callback):
         self.interval = interval
         self.warmup = warmup
         self.n_posterior_samples = n_posterior_samples
+        # Rejected here rather than at the first scheduled validation, where
+        # `make_bayesflow_infer_fn` would raise mid-training and the guard
+        # around intermediate validation would record it as a validation
+        # failure -- an argument error reported as a bad model.
+        self.max_samples_per_call = validate_max_samples_per_call(
+            max_samples_per_call
+        )
         # `optimize()` auto-detects this from the sampler, but building an
         # objective directly leaves it None, and every pruning strategy
         # compares it against an int.
@@ -568,6 +584,7 @@ class PeriodicValidationCallback(Callback):
                     approximator=self.approximator,
                     validation_data=self.validation_data,
                     n_posterior_samples=self.n_posterior_samples,
+                    max_samples_per_call=self.max_samples_per_call,
                     metrics=self.intermediate_metrics,
                     # Filtered, not forwarded whole. `run_validation_pipeline`
                     # merges the override dict UNCONDITIONALLY -- independent

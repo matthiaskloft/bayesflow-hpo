@@ -34,6 +34,10 @@ from bayesflow_hpo.validation.data import (
     ValidationDataset,
     generate_validation_dataset,
 )
+from bayesflow_hpo.validation.inference import (
+    DEFAULT_MAX_SAMPLES_PER_CALL,
+    validate_max_samples_per_call,
+)
 from bayesflow_hpo.validation.registry import (
     canonical_metric_name,
     validate_objective_metric_kinds,
@@ -167,6 +171,11 @@ def optimize(
     # positionally bindable and inserting into the middle would silently
     # rebind a caller's trailing positional arguments.
     *,
+    # Keyword-only for the reason stated just above: inserting it among the
+    # positionally bindable parameters would rebind `objective_metrics` and
+    # everything after it, so a caller passing a metric list positionally
+    # would have it arrive here and fail the `< 1` check.
+    max_samples_per_call: int | None = DEFAULT_MAX_SAMPLES_PER_CALL,
     sampler_n_startup_trials: int | None = None,
     joint_metrics: dict[str, Any] | None = None,
     include_joint_metrics: bool = False,
@@ -239,6 +248,15 @@ def optimize(
         Simulations per condition grid point (default 200).
     n_posterior_samples
         Posterior draws for validation (default 500).
+    max_samples_per_call
+        Cap on posterior draws materialized by one ``approximator.sample()``
+        call during validation (default
+        :data:`~bayesflow_hpo.validation.inference.DEFAULT_MAX_SAMPLES_PER_CALL`).
+        Validation allocates ``sims_per_condition x n_posterior_samples``
+        draws per condition -- 100,000 at the defaults -- which the
+        pre-training memory budget does not cover, since neither factor is a
+        hyperparameter.  Raise it to trade memory for fewer calls, or pass
+        ``None`` to sample each condition in a single call.
     objective_metrics
         List of metric keys to optimize simultaneously.  Default
         ``["calibration_error", "nrmse"]``.
@@ -541,6 +559,11 @@ def optimize(
     # already called optuna.delete_study() for a non-resumed run: a malformed
     # option would destroy the previous study and its trials before failing,
     # and leave no replacement behind.
+    # Checked here as well as in `make_bayesflow_infer_fn`, which builds its
+    # closure inside `run_validation_pipeline` -- i.e. AFTER a trial has
+    # trained. A value that is knowable at call time must not cost a full
+    # training run to be rejected.
+    max_samples_per_call = validate_max_samples_per_call(max_samples_per_call)
     if qmc_startup_trials < 0:
         raise ValueError(
             f"qmc_startup_trials must be >= 0, got {qmc_startup_trials}"
@@ -619,6 +642,7 @@ def optimize(
         metric_constraints_hard=metric_constraints_hard,
         metric_constraints_soft=metric_constraints_soft,
         n_posterior_samples=n_posterior_samples,
+        max_samples_per_call=max_samples_per_call,
         objective_metrics=objective_metrics,
         objective_mode=objective_mode,
         cost_metric=cost_metric,
@@ -750,6 +774,7 @@ def _build_objective(
     metric_constraints_hard: list[MetricConstraintSpec] | None,
     metric_constraints_soft: list[MetricConstraintSpec] | None = None,
     n_posterior_samples: int,
+    max_samples_per_call: int | None = DEFAULT_MAX_SAMPLES_PER_CALL,
     objective_metrics: list[str],
     objective_mode: str,
     cost_metric: str | None,
@@ -781,6 +806,7 @@ def _build_objective(
             metric_constraints_hard=metric_constraints_hard,
             metric_constraints_soft=metric_constraints_soft,
             n_posterior_samples=n_posterior_samples,
+            max_samples_per_call=max_samples_per_call,
             joint_metrics=joint_metrics,
             include_joint_metrics=include_joint_metrics,
             objective_metrics=objective_metrics,

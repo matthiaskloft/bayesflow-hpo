@@ -43,6 +43,7 @@ DEFAULT_STORAGE = "sqlite:///bayesflow_hpo.db"
 
 _PRE_TRAINING_REJECTIONS = {
     "memory_budget",
+    "validation_memory_budget",
     "param_budget",
     "build_failed",
     "compile_failed",

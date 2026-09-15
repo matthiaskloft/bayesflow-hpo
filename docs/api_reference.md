@@ -35,6 +35,7 @@ def optimize(
     directions=None, warm_start_from=None, warm_start_top_k=25,
     qmc_startup_trials=0,
     checkpoint_pool=None, show_progress_bar=True,
+    *, max_samples_per_call=20_000,
 ) -> optuna.Study
 ```
 
@@ -49,6 +50,7 @@ def optimize(
 | `validation_conditions` | Condition grid (e.g. `{"N": [50, 100, 200]}`). |
 | `sims_per_condition` | Simulations per condition grid point (default 200). |
 | `n_posterior_samples` | Posterior draws for validation (default 500). |
+| `max_samples_per_call` | Keyword-only, `int` or `None` (a float is rejected). Cap on posterior draws per `approximator.sample()` call during validation (default `20_000`). `None` samples each condition in a single call. Not read by a custom `validate_fn`, which sets its own cap — `make_lc2st_validate_fn()` takes one. |
 | `objective_metrics` | Metric keys to optimize. Default `["calibration_error", "nrmse"]`. |
 | `objective_mode` | `"pareto"` (default) — each metric is its own objective. `"mean"` — arithmetic mean of metrics. |
 | `cost_metric` | Cost objective: `"inference_time"` (default), `"param_count"`, or `None` to optimize the quality metrics alone. With `None` the study has one direction per quality metric; `param_count` and `inference_time_s` are still stored as trial user attrs for post-hoc ranking, and `max_param_count` still applies. |
@@ -63,7 +65,7 @@ def optimize(
 | `lr_warmup_fraction` | Fixed-budget fraction; `None` selects 5%, maximum 10%. A sequence enables categorical HPO. |
 | `pruning_strategy` | Multi-objective pruning: `"dominance"` (default), `"mo-sha"`, `("primary", "metric")`, or `"none"`. |
 | `max_param_count` | Reject trials exceeding this param count pre-training (default 1 000 000). |
-| `max_memory_mb` | Optional peak-memory budget in MB, or `"auto"` for CUDA free-memory auto-detection. |
+| `max_memory_mb` | Optional peak-memory budget in MB, or `"auto"` for CUDA free-memory auto-detection. Checked against both the training estimate and the validation-sampling estimate. |
 | `metric_constraints_hard` | Optional hard metric constraints `[(metric, threshold, "above" \| "below"), ...]` (reject after validation). |
 | `metric_constraints_soft` | Optional soft metric constraints `[(metric, threshold, "above" \| "below"), ...]` (feasibility-guided sampling for sampler presets). |
 | `memory_safety_margin` | Safety margin for `max_memory_mb="auto"` (default `0.2`). |
@@ -218,6 +220,7 @@ Public default implementations used by `optimize()` when no custom hooks are pro
 | `max_memory_mb` | `None` | Peak-memory budget (disabled) |
 | `metric_constraints_hard` | `None` | Hard metric constraints (post-validation rejection) |
 | `n_posterior_samples` | `500` | Posterior draws for final validation |
+| `max_samples_per_call` | `20_000` | Posterior-draw cap per `sample()` call (`None` disables chunking) |
 | `pruning_strategy` | `"dominance"` | Multi-objective pruning strategy (`"dominance"`, `"mo-sha"`, `("primary", metric)`, `"none"`) |
 | `pruning_n_startup_trials` | `None` | Min completed trials before pruning (`None` = auto-detect from sampler) |
 | `objective_metrics` | `["calibration_error", "nrmse"]` | Metric keys to optimize |
@@ -268,6 +271,8 @@ PeriodicValidationCallback(trial, approximator, validation_data, ...)
 ```python
 estimate_param_count(params) -> int
 estimate_peak_memory_mb(params, batch_size=None, dtype_bytes=4) -> float
+estimate_validation_memory_mb(params, n_sims, n_posterior_samples,
+                              max_samples_per_call=None, dtype_bytes=4) -> float
 exceeds_memory_budget(params, max_memory_mb, batch_size=None) -> bool
 ```
 
@@ -311,9 +316,11 @@ load_validation_dataset(path) -> ValidationDataset
 
 ```python
 run_validation_pipeline(approximator, validation_data, n_posterior_samples=1000,
-                        metrics=None) -> ValidationResult
+                        metrics=None, joint_metrics=None,
+                        max_samples_per_call=20_000) -> ValidationResult
 validate_once(approximator, validation_data, n_sims=2,
-              n_posterior_samples=10, metrics=None) -> ValidationResult
+              n_posterior_samples=10, metrics=None, joint_metrics=None,
+              max_samples_per_call=20_000) -> ValidationResult
 ```
 
 ### ValidationResult
@@ -364,7 +371,8 @@ lc2st(posterior_samples, true_params, observations, *,
 global_c2st(samples_p, samples_q, *, clf_kwargs=None, seed=42) -> GlobalC2STResult
 
 make_lc2st_validate_fn(base_metrics=None, n_folds=5, n_null_trials=0,
-                        clf_kwargs=None, seed=42) -> ValidateFn
+                        clf_kwargs=None, seed=42, max_conditions=None,
+                        max_samples_per_call=20_000) -> ValidateFn
 ```
 
 `make_lc2st_validate_fn()` returns a `ValidateFn` compatible with `optimize(validate_fn=...)` that computes standard per-parameter metrics and L-C2ST from a single inference pass.

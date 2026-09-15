@@ -13,7 +13,10 @@ import pandas as pd
 
 from bayesflow_hpo.optimization.cleanup import cleanup_trial
 from bayesflow_hpo.validation.data import ValidationDataset
-from bayesflow_hpo.validation.inference import make_bayesflow_infer_fn
+from bayesflow_hpo.validation.inference import (
+    DEFAULT_MAX_SAMPLES_PER_CALL,
+    make_bayesflow_infer_fn,
+)
 from bayesflow_hpo.validation.metrics import (
     aggregate_condition_rows,
     compute_condition_metrics,
@@ -309,6 +312,7 @@ def run_validation_pipeline(
     n_posterior_samples: int = 1000,
     metrics: Sequence[str] | None = None,
     joint_metrics: Mapping[str, JointMetricFn] | None = None,
+    max_samples_per_call: int | None = DEFAULT_MAX_SAMPLES_PER_CALL,
 ) -> ValidationResult:
     """Run metric evaluation on a fixed dataset reused across trials.
 
@@ -339,6 +343,12 @@ def run_validation_pipeline(
         classifier and seed, say -- passing it here keeps that configuration
         out of the global registry, where it would silently apply to every
         other study in the same interpreter.
+    max_samples_per_call
+        Cap on posterior draws requested from the approximator per
+        ``sample()`` call; the condition batch is sampled in slices that
+        respect it.  See
+        :func:`~bayesflow_hpo.validation.inference.make_bayesflow_infer_fn`.
+        ``None`` samples each condition in a single call.
 
     Returns
     -------
@@ -386,6 +396,7 @@ def run_validation_pipeline(
         param_keys=validation_data.param_keys,
         data_keys=validation_data.data_keys,
         available_keys=available_keys,
+        max_samples_per_call=max_samples_per_call,
     )
 
     timing: dict[str, float] = {"inference": 0.0, "metrics": 0.0}

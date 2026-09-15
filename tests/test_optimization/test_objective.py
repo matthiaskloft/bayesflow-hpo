@@ -2,6 +2,7 @@
 
 import logging
 import math
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
@@ -2037,3 +2038,342 @@ def test_objective_mean_monitor_is_not_canonicalized() -> None:
         early_stopping_monitor="objective_mean",
     )
     assert config.early_stopping_monitor == "objective_mean"
+
+
+def test_objective_rejects_trial_exceeding_validation_memory_budget(monkeypatch):
+    """Validation sampling is budgeted BEFORE training (#101).
+
+    The training estimate is forced under budget, so the only thing that
+    can reject this trial is the sampling estimate. Before it existed,
+    such a trial trained in full and then OOMed in validation, recording a
+    model-quality penalty for a resource problem.
+    """
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.estimate_peak_memory_mb",
+        lambda params: 1.0,
+    )
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.estimate_validation_memory_mb",
+        lambda params, **kwargs: 5_000.0,
+    )
+
+    def _must_not_build(params, adapter, search_space):
+        raise AssertionError("rejection must happen before the build")
+
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.build_continuous_approximator",
+        _must_not_build,
+    )
+
+    class _FakeSimulator:
+        def sample(self, shape):
+            return {}
+
+    class _FakeAdapter:
+        def __call__(self, data):
+            return data
+
+    objective = GenericObjective(
+        ObjectiveConfig(
+            simulator=_FakeSimulator(),
+            adapter=_FakeAdapter(),
+            search_space=_FakeSearchSpace(),
+            epochs=1,
+            num_batches=1,
+            validation_data=_DUMMY_VALIDATION_DATA_1COND,
+            max_memory_mb=1_000.0,
+        )
+    )
+
+    trial = _FakeTrial()
+    values = objective(trial)
+
+    assert values[-1] == FAILED_TRIAL_COST
+    assert trial.user_attrs["rejected_reason"] == "validation_memory_budget"
+    assert trial.user_attrs["estimated_validation_memory_mb"] == 5_000.0
+
+
+def test_objective_records_validation_memory_estimate_when_within_budget(
+    monkeypatch,
+):
+    """The estimate is recorded even when it does not reject."""
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.estimate_peak_memory_mb",
+        lambda params: 1.0,
+    )
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.estimate_validation_memory_mb",
+        lambda params, **kwargs: 10.0,
+    )
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.build_continuous_approximator",
+        lambda params, adapter, search_space: _FakeApproximator(
+            param_count=50_000
+        ),
+    )
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.cleanup_trial",
+        lambda: None,
+    )
+
+    class _FakeSimulator:
+        def sample(self, shape):
+            return {}
+
+    class _FakeAdapter:
+        def __call__(self, data):
+            return data
+
+    objective = GenericObjective(
+        ObjectiveConfig(
+            simulator=_FakeSimulator(),
+            adapter=_FakeAdapter(),
+            search_space=_FakeSearchSpace(),
+            epochs=1,
+            num_batches=1,
+            validation_data=_DUMMY_VALIDATION_DATA_1COND,
+            max_memory_mb=1_000.0,
+        )
+    )
+
+    trial = _FakeTrial()
+    objective(trial)
+
+    assert trial.user_attrs["estimated_validation_memory_mb"] == 10.0
+    assert trial.user_attrs.get("rejected_reason") != "validation_memory_budget"
+
+
+def test_largest_validation_condition_uses_the_biggest_batch():
+    """An unbalanced grid is budgeted by its largest condition."""
+    from bayesflow_hpo.optimization.objective import (
+        _largest_validation_condition,
+    )
+
+    data = ValidationDataset(
+        simulations=[
+            {"x": np.zeros((5, 3)), "p": np.zeros((5,))},
+            {"x": np.zeros((40, 3)), "p": np.zeros((40,))},
+        ],
+        condition_labels=[{}, {}],
+        param_keys=["p"],
+        data_keys=["x"],
+        seed=0,
+    )
+
+    assert _largest_validation_condition(data) == 40
+
+
+def test_largest_validation_condition_handles_an_empty_dataset():
+    from bayesflow_hpo.optimization.objective import (
+        _largest_validation_condition,
+    )
+
+    assert _largest_validation_condition(_DUMMY_VALIDATION_DATA) == 1
+
+
+def test_largest_validation_condition_ignores_a_leading_broadcast():
+    """Dictionary order must not decide the budgeted batch size.
+
+    Taking the first shaped value scored this condition at 1 row while
+    sampling requests 200, so the guard budgeted a fraction of the
+    allocation it exists to bound.
+    """
+    from bayesflow_hpo.optimization.objective import (
+        _largest_validation_condition,
+    )
+
+    data = ValidationDataset(
+        simulations=[
+            {
+                "ctx": np.ones((1, 3)),
+                "x": np.zeros((200, 50)),
+                "p": np.zeros((200,)),
+            }
+        ],
+        condition_labels=[{}],
+        param_keys=["p"],
+        data_keys=["ctx", "x"],
+        seed=0,
+    )
+
+    assert _largest_validation_condition(data) == 200
+
+
+def test_largest_validation_condition_matches_the_actual_chunk():
+    """The estimated batch is the one `infer_fn` will really sample."""
+    from bayesflow_hpo.optimization.objective import (
+        _largest_validation_condition,
+    )
+    from bayesflow_hpo.validation.inference import make_bayesflow_infer_fn
+
+    sim = {
+        "ctx": np.ones((1, 3)),
+        "x": np.arange(200, dtype=float).reshape(200, 1),
+        "p": np.zeros((200,)),
+    }
+    data = ValidationDataset(
+        simulations=[sim],
+        condition_labels=[{}],
+        param_keys=["p"],
+        data_keys=["ctx", "x"],
+        seed=0,
+    )
+
+    calls: list[int] = []
+
+    class _Approx:
+        def sample(self, *, conditions, num_samples):
+            rows = int(np.asarray(conditions["x"]).shape[0])
+            calls.append(rows)
+            return {"p": np.zeros((rows, num_samples, 1))}
+
+    infer_fn = make_bayesflow_infer_fn(
+        approximator=_Approx(),
+        param_keys=["p"],
+        data_keys=["ctx", "x"],
+        max_samples_per_call=1_000,
+    )
+    infer_fn(sim, n_posterior_samples=10)
+
+    # 1000 // 10 = 100 rows per call over the 200 the estimate budgets.
+    assert calls == [100, 100]
+    assert _largest_validation_condition(data) == 200
+
+
+def test_validation_memory_maximizes_over_estimates_not_sample_counts():
+    """Peak rows are not monotonic in draws per simulation.
+
+    At a 20,000 cap, 15,000 draws hold 15,000 rows (one simulation per
+    call) while 10,000 draws hold 20,000 (two). Taking the larger COUNT
+    would budget the smaller allocation.
+    """
+    from bayesflow_hpo.optimization.constraints import (
+        estimate_validation_memory_mb,
+    )
+    from bayesflow_hpo.optimization.objective import (
+        _estimate_validation_memory,
+    )
+
+    params = {"fm_subnet_width": 128, "fm_subnet_depth": 2, "n_params": 4}
+    config = ObjectiveConfig(
+        simulator=MagicMock(),
+        adapter=MagicMock(),
+        search_space=_FakeSearchSpace(),
+        validation_data=_DUMMY_VALIDATION_DATA_1COND,
+        n_posterior_samples=15_000,
+        n_intermediate_posterior_samples=10_000,
+        max_samples_per_call=20_000,
+    )
+
+    intermediate = estimate_validation_memory_mb(
+        params, n_sims=2, n_posterior_samples=10_000,
+        max_samples_per_call=20_000,
+    )
+    final = estimate_validation_memory_mb(
+        params, n_sims=2, n_posterior_samples=15_000,
+        max_samples_per_call=20_000,
+    )
+    assert intermediate > final  # the non-monotonicity this guards
+
+    assert _estimate_validation_memory(config, params) == intermediate
+
+
+def test_validation_memory_ignores_intermediate_count_when_unused():
+    """A setting no callback reads must not reject a trial."""
+    from bayesflow_hpo.optimization.constraints import (
+        estimate_validation_memory_mb,
+    )
+    from bayesflow_hpo.optimization.objective import (
+        _estimate_validation_memory,
+    )
+
+    params = {"fm_subnet_width": 128, "fm_subnet_depth": 2, "n_params": 4}
+    config = ObjectiveConfig(
+        simulator=MagicMock(),
+        adapter=MagicMock(),
+        search_space=_FakeSearchSpace(),
+        validation_data=_DUMMY_VALIDATION_DATA_1COND,
+        n_posterior_samples=15_000,
+        n_intermediate_posterior_samples=10_000,
+        max_samples_per_call=20_000,
+        pruning_strategy="none",
+        training_mode="fixed_budget",
+    )
+
+    assert _estimate_validation_memory(config, params) == (
+        estimate_validation_memory_mb(
+            params, n_sims=2, n_posterior_samples=15_000,
+            max_samples_per_call=20_000,
+        )
+    )
+
+
+def test_validation_memory_declines_to_estimate_for_a_custom_hook():
+    """A hook samples on its own terms and never sees the study's cap.
+
+    Enforcing the study's cap on it rejects a safely chunked hook and
+    passes an unchunked one -- wrong in both directions -- so no estimate
+    is recorded and no rejection can come from one.
+    """
+    from bayesflow_hpo.optimization.objective import (
+        _estimate_validation_memory,
+    )
+
+    config = ObjectiveConfig(
+        simulator=MagicMock(),
+        adapter=MagicMock(),
+        search_space=_FakeSearchSpace(),
+        validation_data=_DUMMY_VALIDATION_DATA_1COND,
+        validate_fn=lambda approximator, data, n: {"calibration_error": 0.1},
+        max_samples_per_call=20_000,
+    )
+
+    assert _estimate_validation_memory(config, {"fm_subnet_width": 128}) is None
+
+
+def test_custom_validate_fn_is_never_rejected_by_the_validation_budget(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.estimate_peak_memory_mb",
+        lambda params: 1.0,
+    )
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.estimate_validation_memory_mb",
+        lambda params, **kwargs: 10_000.0,
+    )
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.build_continuous_approximator",
+        lambda params, adapter, search_space: _FakeApproximator(
+            param_count=50_000
+        ),
+    )
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.cleanup_trial",
+        lambda: None,
+    )
+
+    class _FakeSimulator:
+        def sample(self, shape):
+            return {}
+
+    objective = GenericObjective(
+        ObjectiveConfig(
+            simulator=_FakeSimulator(),
+            adapter=lambda data: data,
+            search_space=_FakeSearchSpace(),
+            epochs=1,
+            num_batches=1,
+            validation_data=_DUMMY_VALIDATION_DATA_1COND,
+            max_memory_mb=1_000.0,
+            validate_fn=lambda approximator, data, n: {
+                "calibration_error": 0.1, "nrmse": 0.2,
+            },
+        )
+    )
+
+    trial = _FakeTrial()
+    objective(trial)
+
+    assert trial.user_attrs.get("rejected_reason") != "validation_memory_budget"
+    assert "estimated_validation_memory_mb" not in trial.user_attrs

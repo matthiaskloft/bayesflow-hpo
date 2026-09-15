@@ -11,6 +11,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from bayesflow_hpo.validation.data import ValidationDataset
+from bayesflow_hpo.validation.inference import DEFAULT_MAX_SAMPLES_PER_CALL
 from bayesflow_hpo.validation.pipeline import run_validation_pipeline
 from bayesflow_hpo.validation.registry import JointMetricConfigurationError
 from bayesflow_hpo.validation.result import ValidationResult
@@ -23,6 +24,7 @@ def validate_once(
     n_posterior_samples: int = 10,
     metrics: Sequence[str] | None = None,
     joint_metrics: dict[str, Any] | None = None,
+    max_samples_per_call: int | None = DEFAULT_MAX_SAMPLES_PER_CALL,
 ) -> ValidationResult:
     """Run a lightweight validation pass to verify data compatibility.
 
@@ -47,6 +49,12 @@ def validate_once(
         Configured joint metrics as ``{name: fn}``, forwarded to the
         pipeline. Needed for any joint metric that cannot run at a registry
         default, such as ``tarp_error``.
+    max_samples_per_call
+        Cap on posterior draws per ``approximator.sample()`` call, forwarded
+        to :func:`~bayesflow_hpo.validation.pipeline.run_validation_pipeline`
+        (default
+        :data:`~bayesflow_hpo.validation.inference.DEFAULT_MAX_SAMPLES_PER_CALL`).
+        ``None`` samples the condition in a single call.
     """
     import numpy as np
 
@@ -76,6 +84,7 @@ def validate_once(
             n_posterior_samples=n_posterior_samples,
             metrics=metrics,
             joint_metrics=joint_metrics,
+            max_samples_per_call=max_samples_per_call,
         )
     except JointMetricConfigurationError:
         # A configuration problem, with its own message naming the fix.

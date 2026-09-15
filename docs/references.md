@@ -1029,3 +1029,20 @@ against it, so objective columns are matched by position and never by name.
 This backs the resume-guard schema comparison in `objectives.py`
 (`normalize_schema_entry`, `schema_matches`) and the ordering claim recorded
 with `MinimizeScore`.
+
+**Tsitouras, Ch. (2011). Runge–Kutta pairs of order 5(4) satisfying only the
+first column simplifying assumption.** *Computers & Mathematics with
+Applications, 62*(2), 770–775. https://doi.org/10.1016/j.camwa.2011.06.002
+
+Verified via the OpenAlex API (title, year, venue, volume/issue, pages and
+sole author as printed above). Backs the stage count in
+`optimization/constraints.py`: the Tsitouras 5(4) pair is a seven-stage
+embedded Runge–Kutta method, and BayesFlow's implementation of it
+(`bayesflow/utils/integrate.py`, `tsit5_step`) holds `k1..k7` live
+simultaneously alongside `state`, `new_state` and the error estimate. Seven is
+therefore a floor on the number of batch-sized tensors an adaptive
+flow-matching sampler keeps allocated at once, which is what
+`estimate_validation_memory_mb` multiplies its per-row activation proxy by.
+That this pair is the default is read from BayesFlow itself
+(`bayesflow/networks/defaults.py`: `FLOW_MATCHING_INTEGRATE_DEFAULTS =
+{"method": "tsit5", "steps": "adaptive"}`, bayesflow 2.0.12), not assumed.

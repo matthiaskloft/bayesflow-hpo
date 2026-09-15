@@ -63,10 +63,16 @@ from bayesflow_hpo.optimization.cleanup import cleanup_trial
 from bayesflow_hpo.optimization.constraints import (
     MetricConstraintSpec,
     estimate_peak_memory_mb,
+    estimate_validation_memory_mb,
 )
 from bayesflow_hpo.search_spaces.composite import CompositeSearchSpace
 from bayesflow_hpo.types import BuildApproximatorFn, TrainFn, ValidateFn
 from bayesflow_hpo.validation.data import ValidationDataset
+from bayesflow_hpo.validation.inference import (
+    DEFAULT_MAX_SAMPLES_PER_CALL,
+    condition_batch_size,
+    validate_max_samples_per_call,
+)
 from bayesflow_hpo.validation.registry import (
     CanonicalMetricName,
     JointMetricConfigurationError,
@@ -111,12 +117,108 @@ def default_train_fn(
     )
 
 
+def _largest_validation_condition(validation_data: ValidationDataset) -> int:
+    """Rows in the biggest condition of *validation_data*.
+
+    The budget has to hold for every condition, and a grid need not be
+    balanced -- `generate_validation_dataset` gives each grid point
+    `sims_per_condition` rows, but a hand-built dataset can vary them --
+    so the peak is set by the largest, not by the first or the mean.
+
+    Delegates to `condition_batch_size`, the SAME rule the inference
+    closure chunks by, rather than reading a leading dimension here. An
+    earlier version took the first shaped value it found, which made the
+    answer depend on dictionary order: a condition whose first entry is a
+    broadcast covariate (`{"ctx": (1, 3), "x": (200, 50), ...}`) scored 1
+    row where sampling would request 200, and the guard then budgeted a
+    fraction of the allocation it exists to bound.
+    """
+    sizes: list[int] = []
+    for sim in validation_data.simulations:
+        conditions = {k: sim[k] for k in validation_data.data_keys if k in sim}
+        try:
+            rows = condition_batch_size(conditions)
+        except ValueError:
+            # Inconsistent batch sizes fail loudly at validation time, with
+            # a message naming the keys. Failing HERE would reject every
+            # trial of the study with a budget error, which points at the
+            # wrong thing entirely -- so budget the largest leading
+            # dimension present and let the real check report it.
+            rows = max(
+                (
+                    int(tuple(getattr(v, "shape", ()) or ())[0])
+                    for v in conditions.values()
+                    if tuple(getattr(v, "shape", ()) or ())
+                ),
+                default=None,
+            )
+        if rows:
+            sizes.append(int(rows))
+    return max(sizes, default=1)
+
+
+def _intermediate_validation_runs(config: ObjectiveConfig) -> bool:
+    """Whether `PeriodicValidationCallback` is attached for this config.
+
+    Mirrors the condition the callback is actually created under. A study
+    with pruning off and a fixed budget never samples at
+    `n_intermediate_posterior_samples`, so budgeting that count would let
+    a setting nothing uses reject a trial.
+    """
+    strategy = (
+        config.pruning_strategy[0]
+        if isinstance(config.pruning_strategy, tuple)
+        else config.pruning_strategy
+    )
+    return strategy != "none" or config.training_mode == "open_ended"
+
+
+def _estimate_validation_memory(
+    config: ObjectiveConfig, params: dict[str, Any]
+) -> float | None:
+    """Peak MB over every validation `sample()` call this trial will make.
+
+    Returns ``None`` when the trial supplies its own `validate_fn`: a hook
+    performs its own sampling and never receives
+    `config.max_samples_per_call`, so an estimate taken over that cap
+    describes a call the hook will not make. `make_lc2st_validate_fn`
+    takes its own cap for exactly this reason. Enforcing the study's cap
+    on a hook would reject a safely chunked one and pass an unchunked one
+    -- wrong in both directions -- so the guard declines to answer instead
+    of answering wrongly.
+
+    The maximum is taken over MEMORY, not over the sample counts. Chunking
+    keeps whole simulations together, so peak rows are not monotonic in
+    the per-simulation count: at a 20,000 cap, 15,000 draws per simulation
+    hold 15,000 rows while 10,000 draws hold 20,000. Picking the larger
+    count would budget the smaller allocation.
+    """
+    if config.validate_fn is not None:
+        return None
+
+    n_sims = _largest_validation_condition(config.validation_data)
+    counts = [int(config.n_posterior_samples)]
+    if _intermediate_validation_runs(config):
+        counts.append(int(config.n_intermediate_posterior_samples))
+
+    return max(
+        estimate_validation_memory_mb(
+            params,
+            n_sims=n_sims,
+            n_posterior_samples=count,
+            max_samples_per_call=config.max_samples_per_call,
+        )
+        for count in counts
+    )
+
+
 def default_validate_fn(
     approximator: Any,
     validation_data: ValidationDataset,
     n_posterior_samples: int,
     objective_metrics: list[str] | None = None,
     joint_metrics: dict[str, Any] | None = None,
+    max_samples_per_call: int | None = DEFAULT_MAX_SAMPLES_PER_CALL,
 ) -> dict[str, float]:
     """Run the built-in validation pipeline and return metric dict.
 
@@ -139,6 +241,10 @@ def default_validate_fn(
         *not* default, so pre-flight reported them as missing keys and
         rejected the run before training started -- the headline metric could
         not be optimized through the public workflow at all.
+    max_samples_per_call
+        Cap on posterior draws per ``approximator.sample()`` call, forwarded
+        to ``run_validation_pipeline``.  ``None`` samples each condition in
+        a single call.
 
     Returns
     -------
@@ -153,6 +259,7 @@ def default_validate_fn(
         n_posterior_samples=n_posterior_samples,
         metrics=_pipeline_metrics(objective_metrics or []),
         joint_metrics=joint_metrics,
+        max_samples_per_call=max_samples_per_call,
     )
     return dict(result.summary)
 
@@ -539,6 +646,14 @@ class ObjectiveConfig:
     #: fires. Recorded so the pipeline metric list can include them.
     metric_constraints_soft: list[MetricConstraintSpec] | None = None
     n_posterior_samples: int = 500
+    #: Cap on posterior draws per ``approximator.sample()`` call during
+    #: validation. Validation inference allocates
+    #: ``n_sims x n_posterior_samples`` draws, neither of which is a
+    #: search-space hyperparameter, so `estimate_peak_memory_mb` -- a
+    #: TRAINING estimate -- cannot reject a trial that will die there. The
+    #: cap bounds that allocation instead; `None` restores one call per
+    #: condition. See issue #101.
+    max_samples_per_call: int | None = DEFAULT_MAX_SAMPLES_PER_CALL
     #: Whether joint metrics are computed at every intermediate validation
     #: as well as at final validation. False by default because they are
     #: expensive enough to change what pruning is for -- L-C2ST measured
@@ -571,6 +686,13 @@ class ObjectiveConfig:
 
     def __post_init__(self) -> None:
         validate_objective_metric_kinds(self.objective_metrics)
+        # Checked at THIS boundary too, not only in `optimize()`. Building a
+        # config directly skips that check, and the memory estimator clamps
+        # a sub-1 cap to 1 -- so an invalid value would reach training and
+        # then raise inside validation, after the trial has been paid for.
+        self.max_samples_per_call = validate_max_samples_per_call(
+            self.max_samples_per_call
+        )
         # Canonicalize aliases HERE, once, so every downstream consumer agrees
         # on the key. They did not: `list_metrics()` returns canonical names,
         # so `cal_error` was excluded from the pipeline's metric list; the
@@ -1330,6 +1452,41 @@ class GenericObjective:
             )
             return self._penalty()
 
+        # Validation sampling is a SEPARATE allocation from training, and
+        # the larger one at the defaults: its batch is
+        # `n_sims x n_posterior_samples` rather than `batch_size`. Checked
+        # here, before training, because the alternative is discovering it
+        # after -- the most expensive moment -- and recording a
+        # model-quality penalty for a resource problem (issue #101).
+        estimated_validation_memory = _estimate_validation_memory(config, params)
+        if estimated_validation_memory is not None:
+            trial.set_user_attr(
+                "estimated_validation_memory_mb",
+                float(estimated_validation_memory),
+            )
+            if (
+                config.max_memory_mb is not None
+                and estimated_validation_memory > config.max_memory_mb
+            ):
+                trial.set_user_attr(
+                    "rejected_reason", "validation_memory_budget"
+                )
+                # The levers are named because none of them is a
+                # search-space hyperparameter: no amount of re-sampling the
+                # space makes this trial fit, so a reader who is not told
+                # what to change reads a rejection they cannot act on.
+                logger.info(
+                    "Trial #%d rejected: validation sampling needs an "
+                    "estimated %.0f MB > budget %.0f MB. Lower "
+                    "sims_per_condition, n_posterior_samples, or "
+                    "max_samples_per_call (currently %s).",
+                    trial.number,
+                    estimated_validation_memory,
+                    config.max_memory_mb,
+                    config.max_samples_per_call,
+                )
+                return self._penalty()
+
         # --- Step 4: BUILD approximator ---
         try:
             if config.build_approximator_fn is not None:
@@ -1442,6 +1599,7 @@ class GenericObjective:
                     interval=config.intermediate_validation_interval,
                     warmup=config.intermediate_validation_warmup,
                     n_posterior_samples=config.n_intermediate_posterior_samples,
+                    max_samples_per_call=config.max_samples_per_call,
                     n_startup_trials=config.pruning_n_startup_trials,
                     validate_fn=config.validate_fn,
                     pruning_strategy=config.pruning_strategy,
@@ -1533,6 +1691,7 @@ class GenericObjective:
                     approximator=approximator,
                     validation_data=config.validation_data,
                     n_posterior_samples=config.n_posterior_samples,
+                    max_samples_per_call=config.max_samples_per_call,
                     # UNION, not restriction. Without the objectives the
                     # pipeline computes only DEFAULT_METRICS, so a configured
                     # objective missing from that list falls through to a

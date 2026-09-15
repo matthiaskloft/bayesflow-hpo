@@ -9,6 +9,7 @@ from bayesflow_hpo.optimization.cleanup import cleanup_trial
 from bayesflow_hpo.optimization.constraints import (
     estimate_param_count,
     estimate_peak_memory_mb,
+    estimate_validation_memory_mb,
     exceeds_memory_budget,
 )
 from bayesflow_hpo.optimization.objective import GenericObjective, ObjectiveConfig
@@ -36,6 +37,7 @@ __all__ = [
     "create_study",
     "estimate_param_count",
     "estimate_peak_memory_mb",
+    "estimate_validation_memory_mb",
     "exceeds_memory_budget",
     "optimize_until",
     "resume_study",

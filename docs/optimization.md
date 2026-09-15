@@ -182,6 +182,33 @@ memory ≈ (4 × param_count × dtype_bytes)     # weights + grads + Adam states
 
 Trials exceeding `max_memory_mb` are rejected before training.
 
+`max_memory_mb` is checked against a **second** estimate as well, because
+validation sampling is a different allocation from training: it holds no
+gradients and no optimizer state, but its batch is
+`sims_per_condition × n_posterior_samples` rows rather than `batch_size`, and
+BayesFlow's default flow-matching integrator (`tsit5`) keeps seven stages of
+that batch live at once.
+
+```
+validation ≈ (param_count × dtype_bytes)                      # weights only
+           + (rows_per_call × (summary_dim + subnet_width) × depth
+              × stages × dtype_bytes × 13)
+```
+
+`rows_per_call` is the chunk `max_samples_per_call` permits, and `stages` is the
+number of batch-sized tensors that network's sampling loop keeps live, read from
+BayesFlow: 7 for `fm_` (`tsit5` holds `k1..k7`) and `dm_` (`two_step_adaptive`, a
+predictor–corrector of the same order), 3 for the consistency models `cm_` and
+`scm_` (one consistency-function call per step, keeping `x`, `x_n` and `noise`),
+and 1 for a coupling flow, which inverts layer by layer. The factor of 13 is
+calibrated against the measurement in
+[#101](https://github.com/matthiaskloft/bayesflow-hpo/issues/101) (40,000 draws
+completed under a 6.29 GiB cap, 60,000 did not). A trial over budget here is
+rejected pre-training with `rejected_reason="validation_memory_budget"` and
+recorded as `estimated_validation_memory_mb`; the levers are
+`sims_per_condition`, `n_posterior_samples` and `max_samples_per_call`, none of
+which is a search-space hyperparameter.
+
 `optimize(max_memory_mb="auto")` enables GPU-memory auto-detection:
 
 - Uses `torch.cuda.mem_get_info()` and takes **free** VRAM (not total).

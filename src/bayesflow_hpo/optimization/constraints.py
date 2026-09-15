@@ -194,6 +194,198 @@ def estimate_param_count(params: dict[str, Any]) -> int:
     return max(1, int(summary_params + inference_params))
 
 
+def _subnet_width(params: dict[str, Any]) -> int:
+    """Width of the widest subnet named in *params*, or 128."""
+    return _safe_int(
+        params.get(
+            "cf_subnet_width",
+            params.get(
+                "fm_subnet_width",
+                params.get(
+                    "dm_subnet_width",
+                    params.get(
+                        "cm_subnet_width",
+                        params.get(
+                            "scm_subnet_width",
+                            params.get("hidden_dim", params.get("width", 128)),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+        128,
+    )
+
+
+def _subnet_depth(params: dict[str, Any]) -> int:
+    """Depth of the subnet named in *params*, or 2."""
+    return _safe_int(
+        params.get(
+            "cf_subnet_depth",
+            params.get(
+                "fm_subnet_depth",
+                params.get(
+                    "dm_subnet_depth",
+                    params.get(
+                        "cm_subnet_depth",
+                        params.get("scm_subnet_depth", params.get("depth", 2)),
+                    ),
+                ),
+            ),
+        ),
+        2,
+    )
+
+
+#: Batch-sized tensors each sampler family keeps live at once, by
+#: search-space prefix. Read from the installed BayesFlow (2.0.12), not
+#: assumed: the sampling loop of each network is what sets the multiplier on
+#: one batch-sized activation.
+#:
+#: - ``fm_`` -- flow matching defaults to ``tsit5``
+#:   (``networks/defaults.py``: ``FLOW_MATCHING_INTEGRATE_DEFAULTS``), and
+#:   ``tsit5_step`` (``utils/integrate.py``) evaluates seven stages
+#:   ``k1..k7`` that are all alive simultaneously, on top of ``state``,
+#:   ``new_state`` and the error estimate. This is the case measured in
+#:   issue #101: the 500x1000 run failed inside ``integrate_adaptive ->
+#:   tsit5_step`` on a ``(500000, 256)`` activation.
+#: - ``dm_`` -- diffusion defaults to ``two_step_adaptive``
+#:   (``DIFFUSION_INTEGRATE_DEFAULTS``), a predictor-corrector whose step
+#:   holds ``state``, ``state_euler``, ``drift_mid``, ``diffusion_mid``,
+#:   ``state_euler_mid``, ``state_heun`` and ``noise`` at once -- the same
+#:   order as tsit5, so it shares the figure.
+#: - ``cm_`` / ``scm_`` -- consistency models do NOT integrate an ODE.
+#:   ``ConsistencyModel._inverse`` and ``StableConsistencyModel._inverse``
+#:   apply the consistency function once per discretization step, keeping
+#:   only ``x``, ``x_n`` and ``noise`` batch-sized (``t`` is ``(..., 1)``).
+#:   Giving them the seven-stage figure inflated their activation term by
+#:   more than seven times and enforced that as a hard rejection, which
+#:   biases a network-selection study against them for a cost they do not
+#:   pay.
+#:
+#: A coupling flow is absent deliberately: it inverts layer by layer,
+#: keeping one intermediate live at a time, and takes the default of 1.
+_SAMPLER_LIVE_STATES: dict[str, int] = {
+    "fm_": 7,
+    "dm_": 7,
+    "cm_": 3,
+    "scm_": 3,
+}
+
+#: Multiplier reconciling the per-row activation proxy with measurement.
+#:
+#: Calibrated against the #101 benchmark rather than assumed. That harness
+#: (`docs/plans/bench_inference_ratio.py`) sampled a FlowMatching network
+#: with subnet widths ``(128, 128)`` and a DeepSet with ``summary_dim=32,
+#: depth=2``: the proxy below scores ``(32 + 128) * 2 = 320`` elements per
+#: row, which at four bytes and seven live stages is 8.75 KiB per row. The
+#: run completed 40,000 rows and went out of memory at 60,000 under a
+#: 6.29 GiB process cap, so the true peak is above 107 KiB per row -- a
+#: factor of roughly 12.6, which this rounds up. The gap is everything the
+#: proxy does not name: per-layer activations inside each subnet call, the
+#: time and residual embeddings, the adaptive integrator's error estimate,
+#: the returned sample buffer, and allocator fragmentation.
+#:
+#: It is a floor on the overhead of ONE measured configuration, not a law.
+#: Deliberately so: this module rejects rather than crashes, and a rejected
+#: viable config costs one trial where an OOM costs a whole training run.
+_SAMPLING_OVERHEAD_FACTOR = 13
+
+
+def _sampler_live_states(params: dict[str, Any]) -> int:
+    """Live batch-sized tensors for the inference network in *params*.
+
+    Looks up :data:`_SAMPLER_LIVE_STATES` by search-space prefix, taking the
+    largest match so a params dict carrying more than one network's keys --
+    which `NetworkSelectionSpace` can produce -- is budgeted for the
+    costlier of them rather than for whichever key is encountered first.
+    """
+    matches = [
+        factor
+        for prefix, factor in _SAMPLER_LIVE_STATES.items()
+        if any(key.startswith(prefix) for key in params)
+    ]
+    return max(matches, default=1)
+
+
+def estimate_validation_memory_mb(
+    params: dict[str, Any],
+    n_sims: int,
+    n_posterior_samples: int,
+    max_samples_per_call: int | None = None,
+    dtype_bytes: int = 4,
+) -> float:
+    """Estimate approximate peak memory of ONE validation ``sample()`` call.
+
+    A different allocation from :func:`estimate_peak_memory_mb`, which
+    covers training: sampling holds no gradients and no optimizer state,
+    but its batch is ``n_sims x n_posterior_samples`` rows rather than
+    ``batch_size``, and an adaptive ODE sampler keeps
+    :data:`_SAMPLER_LIVE_STATES` copies of that batch live at once. At the
+    ``optimize()`` defaults the sampling batch is 100,000 rows against a
+    training batch of a few hundred, which is why a trial could pass the
+    training budget and still die in validation (issue #101).
+
+    *max_samples_per_call* is the same cap
+    :func:`~bayesflow_hpo.validation.inference.make_bayesflow_infer_fn`
+    applies, and is what the estimate is taken over: the peak is one
+    CHUNK, not the whole condition. Passing ``None`` estimates the
+    unchunked call.
+
+    The heuristic keeps this module's convention of overestimating: a
+    rejected viable config costs one trial, an OOM costs a full training
+    run. Its per-row proxy is calibrated by
+    :data:`_SAMPLING_OVERHEAD_FACTOR` against the measurement in #101.
+
+    Known to be approximate in two directions: the summary network's own
+    activations scale with the observation count, which is not a
+    search-space key and is not modelled here, and the calibration comes
+    from one architecture on one card.
+
+    Parameters
+    ----------
+    params
+        Hyperparameter dict from the search space.
+    n_sims
+        Simulations in the largest validation condition.
+    n_posterior_samples
+        Posterior draws requested per simulation.
+    max_samples_per_call
+        Cap on draws per ``sample()`` call, or ``None`` for no chunking.
+    dtype_bytes
+        Bytes per element (default 4 for float32).
+
+    Returns
+    -------
+    float
+        Estimated peak megabytes for one sampling call.
+    """
+    summary_params, summary_dim = _estimate_summary_params(params)
+    inference_params = _estimate_inference_params(params, summary_dim)
+    total_params = max(1, summary_params + inference_params)
+
+    n_sims = max(1, _safe_int(n_sims, 1))
+    n_samples = max(1, _safe_int(n_posterior_samples, 1))
+    rows = n_sims * n_samples
+    if max_samples_per_call is not None:
+        cap = max(1, _safe_int(max_samples_per_call, rows))
+        # Mirrors the closure: whole rows, at least one simulation.
+        rows = min(rows, max(1, cap // n_samples) * n_samples)
+
+    width = _subnet_width(params)
+    depth = max(1, _subnet_depth(params) * max(1, _safe_int(params.get("cf_depth"), 1)))
+    stages = _sampler_live_states(params)
+
+    activation_elements = max(1, rows * max(1, summary_dim + width) * depth)
+    # Weights only -- no gradients, no optimizer state at sampling time.
+    param_bytes = total_params * dtype_bytes
+    activation_bytes = (
+        activation_elements * dtype_bytes * stages * _SAMPLING_OVERHEAD_FACTOR
+    )
+
+    return float((param_bytes + activation_bytes) / (1024**2))
+
+
 def estimate_peak_memory_mb(
     params: dict[str, Any],
     batch_size: int | None = None,
@@ -227,41 +419,8 @@ def estimate_peak_memory_mb(
     if batch_size is None:
         batch_size = _safe_int(params.get("batch_size"), 256)
 
-    subnet_width = _safe_int(
-        params.get(
-            "cf_subnet_width",
-            params.get(
-                "fm_subnet_width",
-                params.get(
-                    "dm_subnet_width",
-                    params.get(
-                        "cm_subnet_width",
-                        params.get(
-                            "scm_subnet_width",
-                            params.get("hidden_dim", params.get("width", 128)),
-                        ),
-                    ),
-                ),
-            ),
-        ),
-        128,
-    )
-    subnet_depth = _safe_int(
-        params.get(
-            "cf_subnet_depth",
-            params.get(
-                "fm_subnet_depth",
-                params.get(
-                    "dm_subnet_depth",
-                    params.get(
-                        "cm_subnet_depth",
-                        params.get("scm_subnet_depth", params.get("depth", 2)),
-                    ),
-                ),
-            ),
-        ),
-        2,
-    )
+    subnet_width = _subnet_width(params)
+    subnet_depth = _subnet_depth(params)
     flow_depth = _safe_int(params.get("cf_depth"), 1)
     activation_depth = max(1, subnet_depth * flow_depth)
 
