@@ -273,3 +273,102 @@ def test_entry_locator_matching(
 ) -> None:
     """Alias spellings resolve; a longer number is not a prefix match."""
     assert check_citations._entry_states_locator(entry, kind, number) is expected
+
+
+# --- Review findings on PR #105 ------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("Talts et al. (2018), Theorem 1", {("theorem", "1")}),
+        (
+            "Talts et al. (2018), Theorems 1 and 99",
+            {("theorem", "1"), ("theorem", "99")},
+        ),
+        (
+            "Talts et al. (2018), Theorems 1--99",
+            {("theorem", "1"), ("theorem", "99")},
+        ),
+        (
+            "Linhart et al. (2023), Algs. 1--2",
+            {("algorithm", "1"), ("algorithm", "2")},
+        ),
+        # A comma is not a run separator on the source side, or the year in
+        # "Sec. 3, 2018 edition" would be read as a second locator.
+        ("Shallue et al. (2019, Sec. 3, 2018 edition)", {("section", "3")}),
+    ],
+)
+def test_source_locator_runs_yield_every_number(
+    text: str, expected: set[tuple[str, str]]
+) -> None:
+    """A list or range in a docstring is checked at every number it names.
+
+    Taking only the head let the rest through unchecked: "Theorems 1 and 99"
+    reported Theorem 1 alone, so an entry stating Theorem 1 silently accepted
+    the unsupported Theorem 99.
+    """
+    matches = [
+        match
+        for match in check_citations._CITATION_RE.finditer(text)
+        if check_citations._looks_like_a_citation(text, match)
+    ]
+    assigned = check_citations._assign_locators(
+        text, [(m.start(), m.end()) for m in matches]
+    )
+
+    assert assigned[0] == expected
+
+
+def test_unsupported_number_in_a_run_fails(tmp_path: Path) -> None:
+    """An integration case: the head is recorded, a later number is not."""
+    entry = "### Talts, S. (2018)\n\nThe entry states Theorem 1 and nothing else.\n\n"
+    root = _write_tree(
+        tmp_path,
+        _matrix_with(_MIN_ENTRIES, entry),
+        _many_citations(_MIN_CITATIONS)
+        + '\n"""Talts et al. (2018), Theorems 1 and 99."""\n',
+    )
+
+    assert check_citations.main(["--root", str(root)]) == 1
+
+
+@pytest.mark.parametrize(
+    ("author", "year", "kind", "number", "expected"),
+    [
+        # The two errors this PR corrected must not be re-acceptable.
+        ("linhart", "2023", "theorem", "3.1", False),
+        ("linhart", "2023", "theorem", "3", True),
+        ("shallue", "2019", "section", "5.1", False),
+        ("shallue", "2019", "section", "5", True),
+        ("shallue", "2019", "section", "4", True),
+        # Ditto the first- and second-pass corrections.
+        ("talts", "2018", "theorem", "2", False),
+        ("talts", "2018", "theorem", "1", True),
+        # Struck as a complexity-bound citation, still valid as the
+        # scalarization result stated earlier in the entry.
+        ("emmerich", "2018", "proposition", "9", True),
+    ],
+)
+def test_rejected_locators_are_not_accepted(
+    author: str, year: str, kind: str, number: str, expected: bool
+) -> None:
+    """Correction history must not license the error it records.
+
+    An entry naming the locator it rejects used to satisfy a citation of that
+    locator, so reverting `objectives.py` to "Theorem 3.1" or `training.py` to
+    "Sec. 5.1" would have passed CI -- the precise errors this check exists to
+    catch. Rejected locators are struck through and excluded.
+    """
+    references = (REPO_ROOT / "docs" / "references.md").read_text(encoding="utf-8")
+    entry = check_citations.parse_matrix_entries(references)[(author, year)]
+
+    assert check_citations._entry_states_locator(entry, kind, number) is expected
+
+
+def test_strikethrough_is_stripped_from_the_accepted_set() -> None:
+    """The mechanism behind the test above, in isolation."""
+    entry = "Cited ~~Theorem 3.1~~ in error; the statistic is Theorem 3."
+
+    assert check_citations._entry_states_locator(entry, "theorem", "3") is True
+    assert check_citations._entry_states_locator(entry, "theorem", "3.1") is False

@@ -440,10 +440,10 @@ always lies on the Pareto front, convex or not. What fails on a non-convex
 front is *coverage*, not correctness, and Definition 15 is where "convex
 Pareto front" is defined.
 
-(An earlier version of this entry cited "non-dominated sorting (Eqs. 3--4)"
-and "complexity bounds (Props. 7, 9)". The equations do not survive the full
-text, and the complexity bound we rely on is Deb et al.'s, not this
-tutorial's. The second-pass audit then over-corrected, recording that
+(An earlier version of this entry cited non-dominated sorting at
+~~Eqs. 3--4~~ and complexity bounds at ~~Props. 7, 9~~. The equations do not
+survive the full text, and the complexity bound we rely on is Deb et al.'s,
+not this tutorial's. The second-pass audit then over-corrected, recording that
 "Props. 3--4 and 7--9 are cone-order results" and that neither existed as
 cited; Proposition 9 does exist and is the scalarization result quoted
 above. Found by `scripts/check_citations.py`, which flagged the
@@ -486,7 +486,9 @@ Section 6 does suggest quasi-random sampling as a promising extension:
 "Quasi-random methods like Sobol or latin hypercube [...] may improve the
 performance of Hyperband by giving better coverage of the search space."
 
-(An earlier version of this entry placed the eta=3 default in Section 3.6.)
+(An earlier version of this entry placed the eta=3 default in
+~~Section 3.6~~; it is in Algorithm 1's input line. Section 3.6 is still a
+valid locator for the "3 or 4" recommendation, stated above.)
 
 ### Linhart, J., Gramfort, A., & Rodrigues, P. L. C. (2023)
 
@@ -516,7 +518,7 @@ The paper numbers its theorems flat (1, 2, 3), not by section. Theorem 1 is
 the accuracy-based oracle C2ST and Theorem 2 the regression C2ST of Kim et
 al.
 
-(An earlier version of the `objectives.py` comment cited "Theorem 3.1",
+(An earlier version of the `objectives.py` comment cited ~~Theorem 3.1~~,
 which does not exist. Found by `scripts/check_citations.py`. Secs. 2--3,
 Thms. 1--3 -- arXiv:2306.03580, verified 2026-09-15.)
 
@@ -893,7 +895,7 @@ they change the batch size or they risk masking the true behavior of the
 training procedure".
 
 Note what this does *not* say. An earlier version of the `training.py`
-docstring cited "Sec. 5.1" for the claim that a third correlated schedule
+docstring cited ~~Sec. 5.1~~ for the claim that a third correlated schedule
 axis "made their own tuning unreliable". Section 5 has no subsections, and
 the paper reports the opposite: the decay schedule was tuned successfully
 alongside the learning rate. What the paper supports is the *cost* of
@@ -946,8 +948,8 @@ uniformity, not the converse, and the paper is explicit that SBC "offers no
 guarantee that the posterior will cover the ground truth for any single
 observation". Uniform ranks are therefore necessary, not sufficient.
 
-(An earlier version of this entry, and three code comments, cited "Theorem 2"
-and stated the equivalence as "iff".)
+(An earlier version of this entry, and three code comments, cited
+~~Theorem 2~~ and stated the equivalence as "iff".)
 
 ### Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones, L., Gomez, A. N., Kaiser, L., & Polosukhin, I. (2017)
 

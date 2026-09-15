@@ -120,12 +120,34 @@ _CITATION_RE = re.compile(
     r"[,\s]*(?P<open>\()?(?P<year>(?:19|20)\d{2})(?P<close>\))?"
 )
 
-#: "Thm. 1", "Section 3.2", "Algs. 1--2", "Equation (7)".
+#: Separators inside a locator run. Kept to unambiguous list and range joins:
+#: a bare comma would let "Sec. 3, 2018 edition" read the year as a locator.
+#: The matrix side adds the comma back (see ``_ENTRY_RUN_SEPARATORS``), because
+#: bibliographic prose lists locators that way and the year sits in the
+#: heading, not mid-sentence.
+_RUN_SEPARATORS = r"--|\u2013|-|and"
+
+#: The matrix writes "Secs. 1, 4--5"; the comma is load-bearing there.
+_ENTRY_RUN_SEPARATORS = rf"{_RUN_SEPARATORS}|,"
+
+_NUMBER = r"\d+(?:\.\d+)*"
+
+#: "Thm. 1", "Section 3.2", "Algs. 1--2", "Equation (7)", "Theorems 1 and 3".
+#:
+#: The ``numbers`` group captures the whole run, not just its head. A plural
+#: kind that stopped at the first number let the rest through unchecked:
+#: "Theorems 1 and 99" reported only Theorem 1, so an entry stating Theorem 1
+#: silently accepted the unsupported Theorem 99.
 _LOCATOR_RE = re.compile(
     r"\b(?P<kind>" + "|".join(sorted(_LOCATOR_KINDS, key=len, reverse=True)) + r")"
-    r"\.?\s*\(?(?P<number>\d+(?:\.\d+)*)\)?",
+    rf"\.?\s*\(?(?P<numbers>{_NUMBER}(?:\s*(?:{_RUN_SEPARATORS})\s*{_NUMBER})*)\)?",
     re.IGNORECASE,
 )
+
+#: Markdown strikethrough. Entries use it to mark a locator a correction note
+#: is *rejecting*, so that recording the history of an error does not quietly
+#: license the error. See ``_accepted_text``.
+_STRIKETHROUGH_RE = re.compile(r"~~.+?~~", re.DOTALL)
 
 #: Floors below which the check is assumed broken rather than satisfied. Set
 #: well under the current counts (~29 entries, ~48 citations) so ordinary
@@ -246,7 +268,8 @@ def _assign_locators(
     if not spans:
         return assigned
     for match in _LOCATOR_RE.finditer(text):
-        locator = (_LOCATOR_KINDS[match.group("kind").lower()], match.group("number"))
+        kind = _LOCATOR_KINDS[match.group("kind").lower()]
+        numbers = re.split(rf"\s*(?:{_RUN_SEPARATORS})\s*", match.group("numbers"))
         best: int | None = None
         best_distance = float("inf")
         for index, (start, end) in enumerate(spans):
@@ -261,7 +284,7 @@ def _assign_locators(
             if distance <= limit and distance < best_distance:
                 best, best_distance = index, distance
         if best is not None:
-            assigned[best].add(locator)
+            assigned[best].update((kind, number) for number in numbers)
     return assigned
 
 
@@ -290,6 +313,25 @@ def collect_source_citations(root: Path) -> list[Citation]:
     return citations
 
 
+def _accepted_text(entry: str) -> str:
+    """Return ``entry`` with its rejected locators removed.
+
+    Entries record the history of a corrected citation on purpose -- it is the
+    only evidence that a sentence has been contested. But a correction note
+    names the locator it is rejecting, and scanning the whole entry therefore
+    accepts it: before this, reverting `objectives.py` to "Theorem 3.1" or
+    `training.py` to "Sec. 5.1" -- the two errors this check was written to
+    catch -- passed, because the entries mention those locators while saying
+    they are wrong.
+
+    The convention is markdown strikethrough, which `docs/TODO.md` already
+    uses for the same purpose and which renders as the note means it. A
+    locator inside ``~~ ~~`` is stated as rejected and never satisfies a
+    citation.
+    """
+    return _STRIKETHROUGH_RE.sub(" ", entry)
+
+
 def _entry_states_locator(entry: str, kind: str, number: str) -> bool:
     """Whether ``entry`` mentions the ``kind number`` locator in any spelling.
 
@@ -304,14 +346,14 @@ def _entry_states_locator(entry: str, kind: str, number: str) -> bool:
     separately would make the entry worse to read in order to please the
     check.
     """
-    folded = _fold(entry)
+    folded = _fold(_accepted_text(entry))
     aliases = [
         alias for alias, canonical in _LOCATOR_KINDS.items() if canonical == kind
     ]
+    run = rf"{_NUMBER}(?:\s*(?:{_ENTRY_RUN_SEPARATORS})\s*{_NUMBER})*"
     for alias in aliases:
-        run = r"\d+(?:\.\d+)*(?:\s*(?:--|-|–|,|and)\s*\d+(?:\.\d+)*)*"
         for match in re.finditer(rf"\b{re.escape(alias)}\.?\s*\(?({run})", folded):
-            stated = re.split(r"\s*(?:--|-|–|,|and)\s*", match.group(1))
+            stated = re.split(rf"\s*(?:{_ENTRY_RUN_SEPARATORS})\s*", match.group(1))
             # A dotted subsection satisfies its parent: an entry that locates
             # the claim at "Section 3.1" has not contradicted a docstring
             # citing "Section 3", it has been more precise than it.

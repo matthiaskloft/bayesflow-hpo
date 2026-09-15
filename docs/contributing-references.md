@@ -76,7 +76,7 @@ unstamped rather than implying otherwise, and list it in the audit section.
 The point of (1) is that an unchecked claim is indistinguishable from a
 checked one unless the difference is recorded.
 
-### Corrections stay in the entry
+### Corrections stay in the entry, struck through
 
 When a locator turns out to be wrong, fix it and keep a short note saying
 what it used to be. Several entries carry these. They cost two lines and they
@@ -84,6 +84,26 @@ are the only evidence that a given sentence has been contested -- including
 when a *correction* was itself wrong, as happened to Emmerich & Deutz's
 Proposition 9, dismissed as non-existent by the second-pass audit and
 reinstated by the third.
+
+**Write the rejected locator in `~~strikethrough~~`:**
+
+```
+(An earlier version of the `objectives.py` comment cited ~~Theorem 3.1~~,
+which does not exist. The statistic is Theorem 3.)
+```
+
+This is not cosmetic. The check scans an entry for the locators it states,
+and a correction note names the locator it is rejecting -- so before this
+convention, an entry saying "cited Theorem 3.1, which does not exist"
+*accepted* a docstring citing Theorem 3.1. Reverting either error this
+tooling was built to catch would have passed CI. Struck locators are removed
+before matching, so the history stays readable and stops licensing the
+mistake it records.
+
+Strike only the rejected reading. A locator that is wrong in one role and
+right in another stays live in the second: Section 3.6 of Li et al. is not
+where the `eta = 3` default lives, but it is where the "3 or 4"
+recommendation lives, and the entry states both.
 
 ## The check
 
