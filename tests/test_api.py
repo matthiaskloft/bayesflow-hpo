@@ -245,6 +245,25 @@ def test_optimize_rejects_invalid_report_frequency():
         )
 
 
+def test_optimize_rejects_invalid_max_samples_per_call():
+    """Rejected before training, not inside post-training validation.
+
+    `make_bayesflow_infer_fn` raises on the same value, but it builds its
+    closure inside `run_validation_pipeline` -- after a trial has paid for
+    a full training run.
+    """
+    from conftest import canonical_adapter
+
+    with pytest.raises(ValueError, match="max_samples_per_call must be >= 1"):
+        optimize(
+            simulator=MagicMock(),
+            adapter=canonical_adapter(),
+            search_space=_make_fake_search_space(),
+            storage=None,
+            max_samples_per_call=0,
+        )
+
+
 def test_optimize_uses_validation_simulator_for_dataset():
     """validation_simulator is passed to generate_validation_dataset."""
     val_sim = MagicMock(name="val_simulator")

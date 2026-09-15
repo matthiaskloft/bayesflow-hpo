@@ -100,6 +100,7 @@ _NON_METRIC_FIELDS = {
     "max_param_count",
     "n_intermediate_posterior_samples",
     "n_posterior_samples",
+    "max_samples_per_call",
     "num_batches",
     "objective_mode",
     "pruning_n_startup_trials",

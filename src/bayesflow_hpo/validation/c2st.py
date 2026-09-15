@@ -37,6 +37,7 @@ import numpy as np
 from scipy.stats import norm
 
 from bayesflow_hpo.validation.data import ValidationDataset
+from bayesflow_hpo.validation.inference import DEFAULT_MAX_SAMPLES_PER_CALL
 from bayesflow_hpo.validation.pipeline import run_validation_pipeline
 from bayesflow_hpo.validation.registry import (
     JointMetricFn,
@@ -792,6 +793,7 @@ def make_lc2st_validate_fn(
     clf_kwargs: dict[str, Any] | None = None,
     seed: int = 42,
     max_conditions: int | None = None,
+    max_samples_per_call: int | None = DEFAULT_MAX_SAMPLES_PER_CALL,
 ) -> Callable[[Any, ValidationDataset, int], dict[str, float]]:
     """Create a ``ValidateFn`` that computes standard metrics + L-C2ST.
 
@@ -819,6 +821,13 @@ def make_lc2st_validate_fn(
         Evaluate L-C2ST on at most this many conditions, spread evenly over
         the grid. ``None`` (default) uses all of them. See
         :func:`make_lc2st_joint_metric`.
+    max_samples_per_call
+        Cap on posterior draws per ``approximator.sample()`` call, forwarded
+        to :func:`~bayesflow_hpo.validation.pipeline.run_validation_pipeline`.
+        Set here rather than read from ``optimize()``: the ``ValidateFn``
+        contract is ``(approximator, validation_data, n_posterior_samples)``,
+        so a hook cannot receive ``optimize(max_samples_per_call=...)`` and
+        this factory call is the only place to change it.
 
     Returns
     -------
@@ -872,6 +881,7 @@ def make_lc2st_validate_fn(
             n_posterior_samples=n_posterior_samples,
             metrics=list(base_metrics),
             joint_metrics={"lc2st": joint},
+            max_samples_per_call=max_samples_per_call,
         )
         return dict(result.summary)
 

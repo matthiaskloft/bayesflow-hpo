@@ -15,6 +15,7 @@ def optimize(
     build_approximator_fn=None, train_fn=None, validate_fn=None,
     # Validation data
     validation_conditions=None, sims_per_condition=200, n_posterior_samples=500,
+    max_samples_per_call=20_000,
     # Objectives
     objective_metrics=None, objective_mode="pareto", cost_metric="inference_time",
     # Training
@@ -49,6 +50,7 @@ def optimize(
 | `validation_conditions` | Condition grid (e.g. `{"N": [50, 100, 200]}`). |
 | `sims_per_condition` | Simulations per condition grid point (default 200). |
 | `n_posterior_samples` | Posterior draws for validation (default 500). |
+| `max_samples_per_call` | Cap on posterior draws per `approximator.sample()` call during validation (default `20_000`). `None` samples each condition in a single call. |
 | `objective_metrics` | Metric keys to optimize. Default `["calibration_error", "nrmse"]`. |
 | `objective_mode` | `"pareto"` (default) — each metric is its own objective. `"mean"` — arithmetic mean of metrics. |
 | `cost_metric` | Cost objective: `"inference_time"` (default), `"param_count"`, or `None` to optimize the quality metrics alone. With `None` the study has one direction per quality metric; `param_count` and `inference_time_s` are still stored as trial user attrs for post-hoc ranking, and `max_param_count` still applies. |
@@ -218,6 +220,7 @@ Public default implementations used by `optimize()` when no custom hooks are pro
 | `max_memory_mb` | `None` | Peak-memory budget (disabled) |
 | `metric_constraints_hard` | `None` | Hard metric constraints (post-validation rejection) |
 | `n_posterior_samples` | `500` | Posterior draws for final validation |
+| `max_samples_per_call` | `20_000` | Posterior-draw cap per `sample()` call (`None` disables chunking) |
 | `pruning_strategy` | `"dominance"` | Multi-objective pruning strategy (`"dominance"`, `"mo-sha"`, `("primary", metric)`, `"none"`) |
 | `pruning_n_startup_trials` | `None` | Min completed trials before pruning (`None` = auto-detect from sampler) |
 | `objective_metrics` | `["calibration_error", "nrmse"]` | Metric keys to optimize |
@@ -311,7 +314,8 @@ load_validation_dataset(path) -> ValidationDataset
 
 ```python
 run_validation_pipeline(approximator, validation_data, n_posterior_samples=1000,
-                        metrics=None) -> ValidationResult
+                        metrics=None, joint_metrics=None,
+                        max_samples_per_call=20_000) -> ValidationResult
 validate_once(approximator, validation_data, n_sims=2,
               n_posterior_samples=10, metrics=None) -> ValidationResult
 ```

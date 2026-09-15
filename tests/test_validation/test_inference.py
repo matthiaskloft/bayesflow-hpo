@@ -79,3 +79,256 @@ class TestPipelinePassesAvailableKeys:
                 approximator=_make_approximator(["theta"]),
                 validation_data=vdata,
             )
+
+
+class TestChunkedSampling:
+    """Chunking bounds the peak allocation of validation inference (#101)."""
+
+    @staticmethod
+    def _chunking_approximator(param_keys: list[str], n_params_axis: bool = True):
+        """Approximator whose draws depend on the rows it was handed."""
+        approx = MagicMock()
+        calls: list[int] = []
+
+        def _sample(*, conditions, num_samples):
+            rows = int(np.asarray(next(iter(conditions.values()))).shape[0])
+            calls.append(rows)
+            # Values encode the row index so the assembled array can be
+            # checked for order, not merely for shape.
+            base = np.asarray(conditions["x"])[:, :1]
+            draws = np.repeat(base, num_samples, axis=1)
+            if n_params_axis:
+                return {k: draws[..., None] for k in param_keys}
+            return {k: draws for k in param_keys}
+
+        approx.sample.side_effect = _sample
+        approx.calls = calls
+        return approx
+
+    def test_batch_is_split_into_slices_under_the_cap(self):
+        approx = self._chunking_approximator(["theta"])
+        fn = make_bayesflow_infer_fn(
+            approximator=approx,
+            param_keys=["theta"],
+            data_keys=["x"],
+            max_samples_per_call=40,
+        )
+        sim_data = {"x": np.arange(10, dtype=float).reshape(10, 1)}
+
+        draws = fn(sim_data, n_posterior_samples=10)
+
+        # 40 // 10 = 4 rows per call over 10 rows.
+        assert approx.calls == [4, 4, 2]
+        assert draws.shape == (10, 10)
+        # Rows come back in their original order.
+        assert np.array_equal(draws[:, 0], np.arange(10, dtype=float))
+
+    def test_chunked_and_unchunked_agree(self):
+        sim_data = {"x": np.arange(12, dtype=float).reshape(12, 1)}
+        whole = make_bayesflow_infer_fn(
+            approximator=self._chunking_approximator(["theta"]),
+            param_keys=["theta"],
+            data_keys=["x"],
+            max_samples_per_call=None,
+        )(sim_data, n_posterior_samples=5)
+        chunked = make_bayesflow_infer_fn(
+            approximator=self._chunking_approximator(["theta"]),
+            param_keys=["theta"],
+            data_keys=["x"],
+            max_samples_per_call=10,
+        )(sim_data, n_posterior_samples=5)
+        assert np.array_equal(whole, chunked)
+
+    def test_multi_parameter_draws_keep_their_layout(self):
+        approx = self._chunking_approximator(["a", "b"], n_params_axis=False)
+        fn = make_bayesflow_infer_fn(
+            approximator=approx,
+            param_keys=["a", "b"],
+            data_keys=["x"],
+            max_samples_per_call=12,
+        )
+        sim_data = {"x": np.arange(8, dtype=float).reshape(8, 1)}
+
+        draws = fn(sim_data, n_posterior_samples=4)
+
+        assert approx.calls == [3, 3, 2]
+        assert draws.shape == (8, 4, 2)
+        assert np.array_equal(draws[:, 0, 0], np.arange(8, dtype=float))
+
+    def test_sample_count_above_the_cap_is_honoured(self):
+        """One row per call rather than a silently reduced sample count."""
+        approx = self._chunking_approximator(["theta"])
+        fn = make_bayesflow_infer_fn(
+            approximator=approx,
+            param_keys=["theta"],
+            data_keys=["x"],
+            max_samples_per_call=10,
+        )
+        draws = fn({"x": np.arange(3, dtype=float).reshape(3, 1)}, 50)
+
+        assert approx.calls == [1, 1, 1]
+        assert draws.shape == (3, 50)
+
+    def test_single_call_when_the_batch_already_fits(self):
+        approx = self._chunking_approximator(["theta"])
+        fn = make_bayesflow_infer_fn(
+            approximator=approx,
+            param_keys=["theta"],
+            data_keys=["x"],
+            max_samples_per_call=1000,
+        )
+        fn({"x": np.arange(4, dtype=float).reshape(4, 1)}, 10)
+
+        assert approx.calls == [4]
+
+    def test_non_positive_cap_is_rejected(self):
+        with pytest.raises(ValueError, match="max_samples_per_call"):
+            make_bayesflow_infer_fn(
+                approximator=_make_approximator(["theta"]),
+                param_keys=["theta"],
+                data_keys=["x"],
+                max_samples_per_call=0,
+            )
+
+    def test_broadcast_row_does_not_disable_chunking(self):
+        """A leading dim of 1 is broadcast, not a one-row batch.
+
+        Counting it as the batch size made ``rows_per_call >= n_rows``
+        trivially true, so a condition carrying any broadcast covariate
+        went through in a single unchunked call -- the exact allocation
+        the cap exists to bound, with the cap set and looking effective.
+        """
+        approx = self._chunking_approximator(["theta"])
+        fn = make_bayesflow_infer_fn(
+            approximator=approx,
+            param_keys=["theta"],
+            data_keys=["x", "ctx"],
+            max_samples_per_call=40,
+        )
+        sim_data = {
+            "x": np.arange(10, dtype=float).reshape(10, 1),
+            "ctx": np.ones((1, 3)),
+        }
+
+        draws = fn(sim_data, n_posterior_samples=10)
+
+        assert approx.calls == [4, 4, 2]
+        # The broadcast value reaches every chunk whole; slicing it would
+        # have handed chunks 2 and 3 an empty array.
+        ctx_rows = [
+            np.asarray(call.kwargs["conditions"]["ctx"]).shape[0]
+            for call in approx.sample.call_args_list
+        ]
+        assert ctx_rows == [1, 1, 1]
+        assert np.array_equal(draws[:, 0], np.arange(10, dtype=float))
+
+    def test_zero_dim_condition_does_not_disable_chunking(self):
+        approx = self._chunking_approximator(["theta"])
+        fn = make_bayesflow_infer_fn(
+            approximator=approx,
+            param_keys=["theta"],
+            data_keys=["x", "n_obs"],
+            max_samples_per_call=40,
+        )
+        sim_data = {
+            "x": np.arange(10, dtype=float).reshape(10, 1),
+            "n_obs": np.float64(50.0),
+        }
+
+        fn(sim_data, n_posterior_samples=10)
+
+        assert approx.calls == [4, 4, 2]
+
+    def test_mismatched_batch_sizes_raise(self):
+        """Slicing to the shorter array would silently drop the tail."""
+        fn = make_bayesflow_infer_fn(
+            approximator=self._chunking_approximator(["theta"]),
+            param_keys=["theta"],
+            data_keys=["x", "y"],
+            max_samples_per_call=40,
+        )
+        sim_data = {
+            "x": np.arange(10, dtype=float).reshape(10, 1),
+            "y": np.zeros((6, 2)),
+        }
+
+        with pytest.raises(ValueError, match="disagree on their batch size"):
+            fn(sim_data, n_posterior_samples=10)
+
+    def test_unreadable_shape_falls_back_to_one_call(self):
+        """Shape probing is new and must not reject what used to work."""
+
+        class _NoShape:
+            """A conditioning value NumPy cannot describe."""
+
+            def __array__(self, *args, **kwargs):
+                raise TypeError("not arrayable")
+
+        approx = MagicMock()
+        approx.sample.return_value = {"theta": np.zeros((3, 5, 1))}
+        fn = make_bayesflow_infer_fn(
+            approximator=approx,
+            param_keys=["theta"],
+            data_keys=["x"],
+            max_samples_per_call=10,
+        )
+
+        draws = fn({"x": _NoShape()}, n_posterior_samples=5)
+
+        assert approx.sample.call_count == 1
+        assert draws.shape == (3, 5)
+
+    def test_zero_posterior_samples_does_not_divide_by_zero(self):
+        approx = self._chunking_approximator(["theta"])
+        fn = make_bayesflow_infer_fn(
+            approximator=approx,
+            param_keys=["theta"],
+            data_keys=["x"],
+            max_samples_per_call=10,
+        )
+
+        draws = fn({"x": np.arange(4, dtype=float).reshape(4, 1)}, 0)
+
+        assert draws.shape == (4, 0)
+
+    def test_empty_condition_batch(self):
+        approx = self._chunking_approximator(["theta"])
+        fn = make_bayesflow_infer_fn(
+            approximator=approx,
+            param_keys=["theta"],
+            data_keys=["x"],
+            max_samples_per_call=10,
+        )
+
+        fn({"x": np.zeros((0, 1))}, n_posterior_samples=5)
+
+        assert approx.sample.call_count == 1
+
+
+class TestPipelineForwardsTheCap:
+    """The knob has to reach the closure, not merely be accepted."""
+
+    def test_run_validation_pipeline_forwards_max_samples_per_call(self):
+        approx = TestChunkedSampling._chunking_approximator(["theta"])
+        vdata = ValidationDataset(
+            simulations=[
+                {
+                    "x": np.arange(8, dtype=float).reshape(8, 1),
+                    "theta": np.arange(8, dtype=float),
+                }
+            ],
+            condition_labels=[{"cond": "a"}],
+            param_keys=["theta"],
+            data_keys=["x"],
+            seed=0,
+        )
+
+        run_validation_pipeline(
+            approximator=approx,
+            validation_data=vdata,
+            n_posterior_samples=4,
+            metrics=["nrmse"],
+            max_samples_per_call=12,
+        )
+
+        assert approx.calls == [3, 3, 2]

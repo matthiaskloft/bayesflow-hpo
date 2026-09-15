@@ -67,6 +67,7 @@ from bayesflow_hpo.optimization.constraints import (
 from bayesflow_hpo.search_spaces.composite import CompositeSearchSpace
 from bayesflow_hpo.types import BuildApproximatorFn, TrainFn, ValidateFn
 from bayesflow_hpo.validation.data import ValidationDataset
+from bayesflow_hpo.validation.inference import DEFAULT_MAX_SAMPLES_PER_CALL
 from bayesflow_hpo.validation.registry import (
     CanonicalMetricName,
     JointMetricConfigurationError,
@@ -117,6 +118,7 @@ def default_validate_fn(
     n_posterior_samples: int,
     objective_metrics: list[str] | None = None,
     joint_metrics: dict[str, Any] | None = None,
+    max_samples_per_call: int | None = DEFAULT_MAX_SAMPLES_PER_CALL,
 ) -> dict[str, float]:
     """Run the built-in validation pipeline and return metric dict.
 
@@ -139,6 +141,10 @@ def default_validate_fn(
         *not* default, so pre-flight reported them as missing keys and
         rejected the run before training started -- the headline metric could
         not be optimized through the public workflow at all.
+    max_samples_per_call
+        Cap on posterior draws per ``approximator.sample()`` call, forwarded
+        to ``run_validation_pipeline``.  ``None`` samples each condition in
+        a single call.
 
     Returns
     -------
@@ -153,6 +159,7 @@ def default_validate_fn(
         n_posterior_samples=n_posterior_samples,
         metrics=_pipeline_metrics(objective_metrics or []),
         joint_metrics=joint_metrics,
+        max_samples_per_call=max_samples_per_call,
     )
     return dict(result.summary)
 
@@ -539,6 +546,14 @@ class ObjectiveConfig:
     #: fires. Recorded so the pipeline metric list can include them.
     metric_constraints_soft: list[MetricConstraintSpec] | None = None
     n_posterior_samples: int = 500
+    #: Cap on posterior draws per ``approximator.sample()`` call during
+    #: validation. Validation inference allocates
+    #: ``n_sims x n_posterior_samples`` draws, neither of which is a
+    #: search-space hyperparameter, so `estimate_peak_memory_mb` -- a
+    #: TRAINING estimate -- cannot reject a trial that will die there. The
+    #: cap bounds that allocation instead; `None` restores one call per
+    #: condition. See issue #101.
+    max_samples_per_call: int | None = DEFAULT_MAX_SAMPLES_PER_CALL
     #: Whether joint metrics are computed at every intermediate validation
     #: as well as at final validation. False by default because they are
     #: expensive enough to change what pruning is for -- L-C2ST measured
@@ -1442,6 +1457,7 @@ class GenericObjective:
                     interval=config.intermediate_validation_interval,
                     warmup=config.intermediate_validation_warmup,
                     n_posterior_samples=config.n_intermediate_posterior_samples,
+                    max_samples_per_call=config.max_samples_per_call,
                     n_startup_trials=config.pruning_n_startup_trials,
                     validate_fn=config.validate_fn,
                     pruning_strategy=config.pruning_strategy,
@@ -1533,6 +1549,7 @@ class GenericObjective:
                     approximator=approximator,
                     validation_data=config.validation_data,
                     n_posterior_samples=config.n_posterior_samples,
+                    max_samples_per_call=config.max_samples_per_call,
                     # UNION, not restriction. Without the objectives the
                     # pipeline computes only DEFAULT_METRICS, so a configured
                     # objective missing from that list falls through to a
