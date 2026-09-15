@@ -329,3 +329,163 @@ def test_the_training_path_re_raises_configuration_errors() -> None:
         "the catch-all turns the refusal into a per-trial penalty"
     )
 
+
+# ---------------------------------------------------------------------------
+# Configuration is rejected before it costs a training run
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("factory", "kwargs", "match"),
+    [
+        ("tarp", {"metric": "l2"}, "euclidean"),
+        ("tarp", {"resolution": 0}, "resolution must be at least 1"),
+        ("lc2st", {"max_conditions": 0}, "max_conditions must be at least 1"),
+        ("lc2st", {"n_folds": 1}, "n_folds must be at least 2"),
+        ("lc2st", {"n_null_trials": -1}, "non-negative"),
+    ],
+)
+def test_invalid_factory_settings_are_rejected_at_construction(
+    factory: str, kwargs: dict[str, Any], match: str
+) -> None:
+    """None of these depend on the data, so none need data to be checked.
+
+    Left to the per-condition numerical guard, a typo becomes an exception
+    the guard converts into the metric's registered worst case -- so every
+    trial trains to completion and scores an identical penalty, and the
+    study optimizes a constant behind a warning log. The low-level
+    functions do reject these, but only once called.
+    """
+    if factory == "lc2st":
+        pytest.importorskip("sklearn")
+        from bayesflow_hpo.validation.c2st import (
+            make_lc2st_joint_metric as make,
+        )
+    else:
+        make = make_tarp_joint_metric
+
+    with pytest.raises(ValueError, match=match):
+        make(**kwargs)
+
+
+def test_valid_factory_settings_still_construct() -> None:
+    """The guard must not reject the boundary values themselves."""
+    assert make_tarp_joint_metric(metric="manhattan", resolution=1) is not None
+
+
+# ---------------------------------------------------------------------------
+# The resume guard must fire before pruning can exit the trial
+# ---------------------------------------------------------------------------
+
+
+def test_planned_settings_match_what_validation_will_declare() -> None:
+    """The pre-training check is only useful if it predicts the real thing.
+
+    It is computed from the resolved callables and the config; the
+    post-validation check is computed from the metrics that actually ran. If
+    the two disagreed, the early check would either refuse valid resumes or
+    stamp settings the run then contradicts.
+    """
+    from bayesflow_hpo.optimization.objective import (
+        ObjectiveConfig,
+        _planned_joint_settings,
+    )
+    from bayesflow_hpo.validation.pipeline import VALIDATION_RUN_SETTINGS
+
+    data = _dataset(n_conditions=2, n_sims=30)
+    configured = make_tarp_joint_metric(
+        reference_points=lambda inputs: np.asarray(
+            inputs.sim_batch["x"]
+        )[:, :2],
+        resolution=13,
+    )
+    config = ObjectiveConfig(
+        simulator=None,
+        adapter=None,
+        search_space=None,
+        validation_data=data,
+        objective_metrics=["nrmse", "tarp_error"],
+        joint_metrics={"tarp_error": configured},
+        n_posterior_samples=32,
+    )
+
+    planned = _planned_joint_settings(config)
+
+    actual = run_validation_pipeline(
+        approximator=_Approximator(["a", "b"], 30),
+        validation_data=data,
+        n_posterior_samples=32,
+        metrics=["nrmse", "tarp_error"],
+        joint_metrics={"tarp_error": configured},
+    ).joint_metric_settings
+
+    assert planned == actual, (
+        "the pre-training prediction disagrees with what validation "
+        "declares, so the early check would refuse valid resumes or stamp "
+        "settings the run contradicts"
+    )
+    assert planned["tarp_error"]["resolution"] == 13
+    assert planned[VALIDATION_RUN_SETTINGS] == {
+        "n_posterior_samples": 32,
+        "n_conditions": 2,
+    }
+
+
+def test_a_study_with_no_joint_metrics_plans_nothing() -> None:
+    """The common case must not acquire the attribute via the early check."""
+    from bayesflow_hpo.optimization.objective import (
+        ObjectiveConfig,
+        _planned_joint_settings,
+    )
+
+    config = ObjectiveConfig(
+        simulator=None,
+        adapter=None,
+        search_space=None,
+        validation_data=_dataset(),
+        objective_metrics=["nrmse"],
+    )
+    assert _planned_joint_settings(config) == {}
+
+
+def test_a_custom_validate_fn_plans_nothing() -> None:
+    """The hook owns its validation step and declares no settings."""
+    from bayesflow_hpo.optimization.objective import (
+        ObjectiveConfig,
+        _planned_joint_settings,
+    )
+
+    config = ObjectiveConfig(
+        simulator=None,
+        adapter=None,
+        search_space=None,
+        validation_data=_dataset(),
+        objective_metrics=["nrmse", "tarp_error"],
+        joint_metrics={"tarp_error": make_tarp_joint_metric(
+            reference_points=lambda inputs: None
+        )},
+        validate_fn=lambda a, d, n: {"nrmse": 0.1},
+    )
+    assert _planned_joint_settings(config) == {}
+
+
+def test_the_settings_check_precedes_training_in_the_source() -> None:
+    """Order is the fix, so order is what is asserted.
+
+    A resumed study with `include_joint_metrics=True` lets the callback
+    compute the new-scale statistic, report it, and prune -- exiting the
+    trial before a post-training check ever runs. The run could then spend
+    its whole budget pruning without issuing the incompatibility error.
+    """
+    import inspect
+
+    from bayesflow_hpo.optimization import objective as objective_module
+
+    source = inspect.getsource(objective_module.GenericObjective)
+    check = source.index("check_or_stamp_joint_metric_settings(")
+    training = source.index("Step 7: TRAIN")
+    assert check < training, (
+        "the settings check must precede training, or intermediate pruning "
+        "can exit the trial before the incompatibility is ever noticed"
+    )
+

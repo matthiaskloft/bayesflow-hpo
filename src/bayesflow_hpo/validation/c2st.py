@@ -650,6 +650,23 @@ def make_lc2st_joint_metric(
         Algorithm 1 and Theorem 3.1: the single-class MSE_0 statistic.
     """
     _require_sklearn()
+    # Validated HERE, not per condition. These options do not depend on the
+    # data, so leaving them to the numerical guard turns a typo into a
+    # per-condition exception, which the guard converts into the metric's
+    # registered worst case -- so every trial trains to completion and
+    # scores an identical 0.25, and the study optimizes a constant behind a
+    # warning log. A configuration error the caller can fix in a line must
+    # not cost a training run, let alone a whole study's worth.
+    if n_folds < 2:
+        raise ValueError(f"n_folds must be at least 2, got {n_folds}.")
+    if n_null_trials < 0:
+        raise ValueError(
+            f"n_null_trials must be non-negative, got {n_null_trials}."
+        )
+    if max_conditions is not None and max_conditions < 1:
+        raise ValueError(
+            f"max_conditions must be at least 1, got {max_conditions}."
+        )
 
     def _lc2st_metric(inputs: JointMetricInputs) -> dict[str, float]:
         if max_conditions is not None:

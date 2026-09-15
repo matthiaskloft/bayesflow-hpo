@@ -59,6 +59,10 @@ _TARP_CHUNK_ELEMENTS = 2e7
 # image of its own truth.
 _TARP_REFERENCE_STREAM = 0x7A89
 
+#: Distance metrics `compute_tarp_coverage` accepts. Named here so the
+#: factory can reject a bad one before any data is touched.
+_TARP_METRICS = frozenset({"euclidean", "manhattan"})
+
 
 def compute_tarp_coverage(
     posterior_draws: np.ndarray,
@@ -196,7 +200,7 @@ def compute_tarp_coverage(
         raise ValueError("posterior_draws must contain at least one simulation.")
     if n_draws < 2:
         raise ValueError("posterior_draws needs at least 2 draws per simulation.")
-    if metric not in {"euclidean", "manhattan"}:
+    if metric not in _TARP_METRICS:
         raise ValueError("metric must be 'euclidean' or 'manhattan'.")
     if resolution < 1:
         raise ValueError("resolution must be >= 1.")
@@ -557,6 +561,20 @@ def make_tarp_joint_metric(
         Sampling-based accuracy testing of posterior estimators for general
         inference. *ICML 2023*. Algorithm 2; Section 4.3.
     """
+    # Validated at construction for the same reason `make_lc2st_joint_metric`
+    # validates its own: `compute_tarp_coverage` rejects these too, but only
+    # once it is CALLED, so a typo becomes a per-condition exception that the
+    # joint guard converts into the metric's registered worst case -- an
+    # identical score on every trial, after paying for every trial's
+    # training. Neither option depends on the data, so neither needs the
+    # data to be checked.
+    if metric not in _TARP_METRICS:
+        raise ValueError(
+            f"metric must be one of {sorted(_TARP_METRICS)}, got {metric!r}."
+        )
+    if resolution < 1:
+        raise ValueError(f"resolution must be at least 1, got {resolution}.")
+
     key = "tarp_error_random" if reference_points is None else "tarp_error"
 
     def _tarp_metric(inputs: JointMetricInputs) -> dict[str, float]:

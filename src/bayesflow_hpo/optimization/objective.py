@@ -157,6 +157,55 @@ def default_validate_fn(
     return dict(result.summary)
 
 
+def _planned_joint_settings(config: ObjectiveConfig) -> dict[str, Any]:
+    """Settings the final validation WILL declare, resolved before training.
+
+    Everything here is knowable without running anything: which joint
+    metrics the run resolves to, what each declares, and the validation
+    run's own counts. Computing it early is what lets the study refuse an
+    incompatible resume before paying for a training run.
+
+    Returns an empty mapping when no joint metric declares anything, so a
+    study that uses none is untouched.
+
+    Raises
+    ------
+    JointMetricConfigurationError
+        If a joint metric cannot be resolved -- an unconfigured placeholder,
+        or a failed resolve-time precondition. Raising here rather than at
+        final validation means the refusal costs nothing.
+    """
+    from bayesflow_hpo.validation.pipeline import VALIDATION_RUN_SETTINGS
+    from bayesflow_hpo.validation.registry import (
+        joint_metric_settings,
+        resolve_joint_metrics,
+    )
+
+    if config.validate_fn is not None:
+        # The hook owns its validation step and reports no settings, so
+        # there is nothing to plan for. Documented on the pin itself.
+        return {}
+
+    overrides = config.joint_metrics or {}
+    names = _pipeline_metrics(
+        config.objective_metrics, _constraint_metric_names(config)
+    )
+    resolved = {
+        **resolve_joint_metrics(list(names), overridden=overrides.keys()),
+        **overrides,
+    }
+    declared = joint_metric_settings(resolved)
+    if not declared:
+        return {}
+    return {
+        **declared,
+        VALIDATION_RUN_SETTINGS: {
+            "n_posterior_samples": int(config.n_posterior_samples),
+            "n_conditions": len(config.validation_data.simulations),
+        },
+    }
+
+
 def _n_measured_trials(study: optuna.Study) -> int:
     """Count COMPLETE trials that actually measured their metrics.
 
@@ -1403,6 +1452,24 @@ class GenericObjective:
                     early_stopping_monitor=config.early_stopping_monitor,
                 )
             )
+
+        # --- Settings compatibility, BEFORE training ---
+        # The post-validation check below is too late on a resumed study
+        # with `include_joint_metrics=True`: `PeriodicValidationCallback`
+        # computes the new-scale statistic, reports it, and compares it
+        # against old trials during training -- and if it prunes, the trial
+        # exits before the check runs at all. A run whose new-scale scores
+        # keep losing could then spend its whole budget pruning without ever
+        # issuing the incompatibility error it was promised.
+        #
+        # Everything needed is knowable without running anything, so the
+        # refusal costs nothing. The post-validation check stays, because it
+        # compares what ACTUALLY ran rather than what was planned.
+        check_or_stamp_joint_metric_settings(
+            trial.study,
+            _planned_joint_settings(config),
+            n_completed_trials=_n_measured_trials(trial.study),
+        )
 
         # --- Step 7: TRAIN ---
         t_train_start = time.perf_counter()
