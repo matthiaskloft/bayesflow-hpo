@@ -597,7 +597,8 @@ class ObjectiveConfig:
         ``epoch_{N}_loss`` user attributes on each trial (default 10).
     checkpoint_pool
         Optional :class:`CheckpointPool` to persist the best trial
-        weights.  When ``None`` a default pool of size 5 is created.
+        weights.  When ``None`` a default pool of size 5 is created,
+        which retains no pruned trials; see ``pruned_pool_size``.
     build_approximator_fn
         Optional custom build function ``(hparams) -> Approximator``.
         Must return an **uncompiled** approximator.
@@ -935,6 +936,33 @@ def _extract_best_training_loss(callbacks: list[Any]) -> float | None:
     return None
 
 
+def _pruning_rung(callbacks: list[Any]) -> tuple[int | None, float | None]:
+    """Recover the rung a pruned trial stopped at, and its score there.
+
+    Returns ``(step, mean_score)`` from the
+    :class:`PeriodicValidationCallback` in *callbacks*, or ``(None, None)``
+    when no intermediate validation ever ran -- a trial pruned before its
+    warmup has no rung, and recording a fabricated one would make its
+    retained weights unreadable.
+    """
+    from bayesflow_hpo.optimization.validation_callback import (
+        PeriodicValidationCallback,
+    )
+
+    for cb in callbacks:
+        if isinstance(cb, PeriodicValidationCallback):
+            if cb.validation_step == 0:
+                return None, None
+            scores = cb.last_scores
+            mean = (
+                sum(float(v) for v in scores.values()) / len(scores)
+                if scores
+                else None
+            )
+            return cb.validation_step, mean
+    return None, None
+
+
 def _accepts_training_loss_proxy(metric: CanonicalMetricName) -> bool:
     """Is a clamped [0, 1] lower-is-better loss on scale for this metric?
 
@@ -1190,6 +1218,37 @@ class GenericObjective:
     def checkpoint_pool(self) -> CheckpointPool:
         """The checkpoint pool used by this objective."""
         return self._checkpoint_pool
+
+    def _retain_pruned(
+        self, trial: Any, approximator: Any, callbacks: list[Any],
+    ) -> None:
+        """Offer a pruned trial's weights to the pruned checkpoint pool.
+
+        A no-op unless the pool was constructed with ``pruned_pool_size >
+        0``.  Called on the way out of a ``TrialPruned``, before
+        ``cleanup_trial()`` frees the approximator -- pruned trials are the
+        only under-trained models a study produces, and nothing else in the
+        run keeps them (bayesflow-hpo#106).  Failures here must not change
+        what the study records, so they are swallowed: the trial is being
+        pruned either way.
+        """
+        if self._checkpoint_pool.pruned_pool_size <= 0:
+            return
+        try:
+            step, score = _pruning_rung(callbacks)
+            self._checkpoint_pool.save_pruned(
+                trial_number=trial.number,
+                approximator=approximator,
+                step=step,
+                objective_value=score,
+            )
+            if step is not None:
+                trial.set_user_attr("pruned_at_step", step)
+        except Exception:
+            logger.debug(
+                "Could not retain pruned checkpoint for trial %d",
+                trial.number, exc_info=True,
+            )
 
     @property
     def _metric_label(self) -> str:
@@ -1647,6 +1706,7 @@ class GenericObjective:
             cleanup_trial()
             raise
         except optuna.TrialPruned:
+            self._retain_pruned(trial, approximator, callbacks)
             cleanup_trial()
             raise
         except Exception as exc:
@@ -1784,6 +1844,7 @@ class GenericObjective:
             cleanup_trial()
             raise
         except optuna.TrialPruned:
+            self._retain_pruned(trial, approximator, callbacks)
             cleanup_trial()
             raise
         except Exception as exc:

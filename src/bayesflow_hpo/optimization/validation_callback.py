@@ -199,6 +199,7 @@ class PeriodicValidationCallback(Callback):
         )
         self.validate_fn = validate_fn
         self._step = 0  # monotonic step counter for Optuna
+        self._last_scores: dict[str, float] | None = None
         self._consecutive_failures = 0
         self._is_multi_objective = len(trial.study.directions) > 1
         # Every strategy in `pruning_strategies` compares several objectives,
@@ -366,6 +367,25 @@ class PeriodicValidationCallback(Callback):
                 )
 
 
+    @property
+    def validation_step(self) -> int:
+        """Number of intermediate validations run so far.
+
+        Zero before the first one.  This is the rung a pruned trial
+        stopped at, which is the only thing that makes its retained
+        weights interpretable (see
+        :class:`~bayesflow_hpo.optimization.checkpoint_pool.CheckpointPool`).
+        """
+        return self._step
+
+    @property
+    def last_scores(self) -> dict[str, float] | None:
+        """Most recent intermediate scores, converted to minimize-space.
+
+        ``None`` until the first successful intermediate validation.
+        """
+        return self._last_scores
+
     def on_epoch_end(self, epoch: int, logs: Any = None) -> None:
         """Run validation and check for pruning at scheduled intervals.
 
@@ -400,6 +420,7 @@ class PeriodicValidationCallback(Callback):
             )
             for metric in self.intermediate_metrics
         }
+        self._last_scores = scores
 
         if self._is_multi_objective:
             # Store per-metric user attrs for strategy functions.

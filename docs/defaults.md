@@ -219,6 +219,8 @@ on individual dimensions or creating the space with overridden fields.
 | Pool size | **5** | `CheckpointPool` |
 | Pool directory | `checkpoints/` | `CheckpointPool` |
 | Behavior | Keep best 5 trial weights, auto-evict worst | `CheckpointPool.maybe_save()` |
+| Pruned pool size | **0** (off) | `CheckpointPool` |
+| Pruned retention | Uniform random sample of pruned trials, separate pool | `CheckpointPool.save_pruned()` |
 
 ---
 
