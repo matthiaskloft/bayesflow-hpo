@@ -489,3 +489,114 @@ def test_the_settings_check_precedes_training_in_the_source() -> None:
         "can exit the trial before the incompatibility is ever noticed"
     )
 
+
+def test_a_custom_metric_declaring_nothing_still_pins_the_run_counts() -> None:
+    """The plan must match validation for an ORDINARY custom joint metric.
+
+    `joint_metric_settings` is optional, and most custom metrics will not
+    set it. Such a metric still reads `draws.shape[1]` and the condition
+    count, so validation pins `__validation_run__` for it -- and a planner
+    that gated on the per-metric declarations planned nothing at all. A
+    resume at a different condition count could then be pruned against the
+    old scores before the guard that exists to refuse it ever ran.
+    """
+    from bayesflow_hpo.optimization.objective import (
+        ObjectiveConfig,
+        _planned_joint_settings,
+    )
+    from bayesflow_hpo.validation.pipeline import VALIDATION_RUN_SETTINGS
+    from bayesflow_hpo.validation.registry import (
+        register_joint_metric,
+        unregister_metric,
+    )
+
+    def plain(inputs: Any) -> dict[str, float]:
+        return {"custom_score": float(inputs.n_conditions)}
+
+    assert not hasattr(plain, "joint_metric_settings")
+    register_joint_metric("custom_score", plain, kind="objective")
+    try:
+        data = _dataset(n_conditions=2, n_sims=30)
+        config = ObjectiveConfig(
+            simulator=None,
+            adapter=None,
+            search_space=None,
+            validation_data=data,
+            objective_metrics=["nrmse", "custom_score"],
+            n_posterior_samples=32,
+        )
+
+        planned = _planned_joint_settings(config)
+        actual = run_validation_pipeline(
+            approximator=_Approximator(["a", "b"], 30),
+            validation_data=data,
+            n_posterior_samples=32,
+            metrics=["nrmse", "custom_score"],
+        ).joint_metric_settings
+
+        assert planned == actual, (
+            "the planner and the pipeline disagree for a metric that "
+            "declares nothing, so the pre-training guard is inert exactly "
+            "where the counts still matter"
+        )
+        assert planned[VALIDATION_RUN_SETTINGS] == {
+            "n_posterior_samples": 32,
+            "n_conditions": 2,
+        }
+    finally:
+        unregister_metric("custom_score")
+
+
+def test_a_resume_at_a_different_condition_count_is_refused_before_training(
+) -> None:
+    """End of the same chain: the plan is what the guard compares.
+
+    With the planner inert, this stamp/compare pair passed silently and the
+    trial proceeded to training -- where an intermediate report could prune
+    it against scores computed on the other condition count.
+    """
+    from bayesflow_hpo.optimization.objective import (
+        ObjectiveConfig,
+        _n_measured_trials,
+        _planned_joint_settings,
+    )
+    from bayesflow_hpo.validation.registry import (
+        register_joint_metric,
+        unregister_metric,
+    )
+
+    def plain(inputs: Any) -> dict[str, float]:
+        return {"custom_score": float(inputs.n_conditions)}
+
+    register_joint_metric("custom_score", plain, kind="objective")
+    try:
+        study = optuna.create_study(directions=["minimize", "minimize"])
+
+        def _config(n_conditions: int) -> ObjectiveConfig:
+            return ObjectiveConfig(
+                simulator=None,
+                adapter=None,
+                search_space=None,
+                validation_data=_dataset(n_conditions=n_conditions),
+                objective_metrics=["nrmse", "custom_score"],
+                n_posterior_samples=32,
+            )
+
+        # First run stamps the study.
+        check_or_stamp_joint_metric_settings(
+            study,
+            _planned_joint_settings(_config(2)),
+            n_completed_trials=_n_measured_trials(study),
+        )
+        assert JOINT_METRIC_SETTINGS_ATTR in study.user_attrs
+
+        # A resume at a different condition count must be refused.
+        with pytest.raises(ValueError, match="n_conditions"):
+            check_or_stamp_joint_metric_settings(
+                study,
+                _planned_joint_settings(_config(3)),
+                n_completed_trials=_n_measured_trials(study),
+            )
+    finally:
+        unregister_metric("custom_score")
+

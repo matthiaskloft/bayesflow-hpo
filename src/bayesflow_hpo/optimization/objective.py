@@ -165,7 +165,7 @@ def _planned_joint_settings(config: ObjectiveConfig) -> dict[str, Any]:
     run's own counts. Computing it early is what lets the study refuse an
     incompatible resume before paying for a training run.
 
-    Returns an empty mapping when no joint metric declares anything, so a
+    Returns an empty mapping when the run resolves NO joint metric, so a
     study that uses none is untouched.
 
     Raises
@@ -175,11 +175,8 @@ def _planned_joint_settings(config: ObjectiveConfig) -> dict[str, Any]:
         or a failed resolve-time precondition. Raising here rather than at
         final validation means the refusal costs nothing.
     """
-    from bayesflow_hpo.validation.pipeline import VALIDATION_RUN_SETTINGS
-    from bayesflow_hpo.validation.registry import (
-        joint_metric_settings,
-        resolve_joint_metrics,
-    )
+    from bayesflow_hpo.validation.pipeline import _declared_settings
+    from bayesflow_hpo.validation.registry import resolve_joint_metrics
 
     if config.validate_fn is not None:
         # The hook owns its validation step and reports no settings, so
@@ -194,16 +191,20 @@ def _planned_joint_settings(config: ObjectiveConfig) -> dict[str, Any]:
         **resolve_joint_metrics(list(names), overridden=overrides.keys()),
         **overrides,
     }
-    declared = joint_metric_settings(resolved)
-    if not declared:
-        return {}
-    return {
-        **declared,
-        VALIDATION_RUN_SETTINGS: {
-            "n_posterior_samples": int(config.n_posterior_samples),
-            "n_conditions": len(config.validation_data.simulations),
-        },
-    }
+    # The pipeline's own helper, CALLED rather than reimplemented. These two
+    # must agree exactly -- the early check is only useful if it predicts
+    # what final validation will declare -- and a parallel implementation
+    # already drifted once: when `_declared_settings` was changed to pin the
+    # run counts whenever any joint metric RUNS, this copy kept gating on
+    # whether one DECLARED settings. An ordinary custom metric that declares
+    # nothing then planned `{}` while validation stored
+    # `__validation_run__`, so a resume at a different condition count could
+    # be pruned against the old scores before the guard ever saw it.
+    return _declared_settings(
+        resolved,
+        n_posterior_samples=int(config.n_posterior_samples),
+        n_conditions=len(config.validation_data.simulations),
+    )
 
 
 def _n_measured_trials(study: optuna.Study) -> int:
