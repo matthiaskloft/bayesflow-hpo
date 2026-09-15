@@ -71,6 +71,7 @@ from bayesflow_hpo.validation.registry import (
     CanonicalMetricName,
     JointMetricConfigurationError,
     canonical_metric_name,
+    output_keys_for,
     validate_objective_metric_kinds,
 )
 
@@ -1100,9 +1101,24 @@ class GenericObjective:
         if constraints is None:
             return None
 
+        failed_keys = set(trial.user_attrs.get("failed_metric_keys", ()))
         for metric, threshold, direction in constraints:
             value = metrics_summary.get(metric)
             if value is None:
+                if metric in failed_keys:
+                    # Missing because its producer FAILED, not because it
+                    # was never requested. Skipping would admit the trial on
+                    # a measurement that did not happen, which is the one
+                    # thing a hard constraint exists to prevent.
+                    logger.warning(
+                        "Trial #%d: hard metric constraint %r could not be "
+                        "measured (%s); rejecting the trial.",
+                        trial.number,
+                        metric,
+                        trial.user_attrs.get("failed_joint_metrics", {}),
+                    )
+                    trial.set_user_attr("rejected_reason", "metric_constraint")
+                    return self._penalty()
                 logger.warning(
                     "Trial #%d: hard metric constraint skipped; missing metric %r",
                     trial.number,
@@ -1395,6 +1411,15 @@ class GenericObjective:
                 config.train_fn(approximator, config.simulator, params, callbacks)
             else:
                 default_train_fn(approximator, config.simulator, params, callbacks)
+        except JointMetricConfigurationError:
+            # Reaches here from `PeriodicValidationCallback`, which runs
+            # DURING training. The catch-all below would record it as a
+            # `training_error` and return `_penalty()`, so the study would
+            # spend its whole cap on a misconfiguration -- the same defect
+            # already fixed for final validation, one layer out, and now
+            # reachable because joint metrics no longer run in pre-flight.
+            cleanup_trial()
+            raise
         except optuna.TrialPruned:
             cleanup_trial()
             raise
@@ -1477,6 +1502,22 @@ class GenericObjective:
                     trial.set_user_attr(
                         "failed_joint_metrics",
                         dict(result.failed_joint_metrics),
+                    )
+                    # The KEYS those metrics would have written, for the
+                    # constraint paths. A constraint names an output key
+                    # rather than its producer, and both paths read a
+                    # missing key as "not violated": the hard check skips it
+                    # with a warning, the soft callback returns zero
+                    # violation. So a trial whose constrained joint metric
+                    # FAILED was classified feasible on the strength of a
+                    # measurement that never happened.
+                    trial.set_user_attr(
+                        "failed_metric_keys",
+                        sorted(
+                            key
+                            for name in result.failed_joint_metrics
+                            for key in output_keys_for(name)
+                        ),
                     )
                 metrics_summary = _validate_metric_keys(
                     dict(result.summary), config.canonical_objective_metrics,

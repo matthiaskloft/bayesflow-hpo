@@ -621,9 +621,14 @@ def test_an_aliased_override_suppresses_its_registry_entry():
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize(
+    "dtype",
+    [float, np.float16, np.float32, np.float64],
+    ids=["python_float", "float16", "float32", "float64"],
+)
 @pytest.mark.parametrize("failing", [(0,), (2,)], ids=["first", "last"])
 def test_a_nan_invalidates_the_metric_like_an_exception(
-    joint_metric, failing
+    joint_metric, failing, dtype
 ):
     """`nanmean` would otherwise average it away.
 
@@ -635,9 +640,15 @@ def test_a_nan_invalidates_the_metric_like_an_exception(
     """
 
     def sometimes_nan(inputs: JointMetricInputs) -> dict[str, float]:
+        # Parameterized over NumPy scalar types, not only Python float.
+        # `np.float64` subclasses float but `np.float32` and `np.float16`
+        # do NOT, so an `isinstance(value, float | int)` test before the
+        # conversion let a float32 NaN -- the ordinary result of reducing a
+        # float32 array -- straight through the guard and back into the
+        # partial-average bug one line later.
         if inputs.cond_id in failing:
-            return {"joint_nan": float("nan")}
-        return {"joint_nan": 0.01}
+            return {"joint_nan": dtype("nan")}
+        return {"joint_nan": dtype(0.01)}
 
     joint_metric("joint_nan", sometimes_nan, kind="diagnostic")
     result = _run(["theta"], ["nrmse", "joint_nan"], n_conditions=3)
@@ -729,4 +740,18 @@ def test_a_study_with_no_declaring_metric_pins_nothing():
     """The common case must not acquire the attribute via the run counts."""
     result = _run(["theta"], ["nrmse"], n_conditions=2)
     assert result.joint_metric_settings == {}
+
+
+def test_a_non_numeric_return_invalidates_the_metric(joint_metric):
+    """The conversion itself can fail, and must not abort the whole run."""
+
+    def returns_text(inputs: JointMetricInputs) -> dict[str, float]:
+        return {"joint_text": "not a number"}  # type: ignore[dict-item]
+
+    joint_metric("joint_text", returns_text, kind="diagnostic")
+    result = _run(["theta"], ["nrmse", "joint_text"], n_conditions=2)
+
+    assert "joint_text" not in result.summary
+    assert "non-numeric" in result.failed_joint_metrics["joint_text"]
+    assert "nrmse" in result.summary
 

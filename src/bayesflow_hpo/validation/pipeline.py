@@ -150,10 +150,31 @@ def _run_joint_metrics(
         # on one condition and NaN on another reports 0.01, a flattering
         # finite score where D8 promises whole-trial invalidation. An
         # infinity is left alone -- `log_gamma` shows a metric can mean it.
+        #
+        # Converted FIRST, then inspected. An earlier version tested
+        # `isinstance(value, float | int)` before converting, which is not
+        # the same set: `np.float64` subclasses Python float but
+        # `np.float32` and `np.float16` do not, so a NaN from a float32
+        # reduction -- an ordinary result of reducing a float32 array --
+        # passed the guard untouched and was then converted to a Python NaN
+        # one line later, restoring the exact bug the guard was added for.
+        try:
+            converted = {key: float(value) for key, value in result.items()}
+        except (TypeError, ValueError) as exc:
+            failed_joint[name] = (
+                f"returned a non-numeric value on condition {cond_id}: {exc}"
+            )
+            logger.warning(
+                "Joint metric %r returned a non-numeric value on condition "
+                "%d and is invalidated for this trial: %s",
+                name,
+                cond_id,
+                exc,
+            )
+            emitted_keys.setdefault(name, set()).update(result)
+            continue
         nan_keys = [
-            key
-            for key, value in result.items()
-            if isinstance(value, float | int) and math.isnan(float(value))
+            key for key, value in converted.items() if math.isnan(value)
         ]
         if nan_keys:
             failed_joint[name] = (
@@ -168,8 +189,7 @@ def _run_joint_metrics(
             )
             emitted_keys.setdefault(name, set()).update(result)
             continue
-        for key, value in result.items():
-            row[key] = float(value)
+        row.update(converted)
         # Recorded so that a LATER failure can drop what this condition
         # already contributed. The registry's declared outputs are not
         # enough on their own: a metric passed through `joint_metrics=`

@@ -201,3 +201,131 @@ def test_a_missing_optional_dependency_refuses_at_resolve_time() -> None:
 def test_a_present_dependency_resolves_normally() -> None:
     pytest.importorskip("sklearn")
     assert set(resolve_joint_metrics(["lc2st"])) == {"lc2st"}
+
+
+# ---------------------------------------------------------------------------
+# A failed joint metric must not read as a satisfied constraint
+# ---------------------------------------------------------------------------
+
+
+def test_a_failed_constraint_metric_rejects_a_hard_constrained_trial() -> None:
+    """A constraint names an output key, and a missing key read as "fine".
+
+    When the constrained metric is a joint one that FAILED, the key is
+    missing because nothing measured it -- not because the constraint was
+    satisfied. The hard path skipped it with a warning, so the trial
+    completed on its good NRMSE and was classified feasible on the strength
+    of a measurement that never happened.
+    """
+    from bayesflow_hpo.optimization.objective import (
+        GenericObjective,
+        ObjectiveConfig,
+    )
+
+    study = optuna.create_study(directions=["minimize", "minimize"])
+    trial = study.ask()
+    trial.set_user_attr("failed_metric_keys", ["tarp_error_random"])
+
+    config = ObjectiveConfig(
+        simulator=None,
+        adapter=None,
+        search_space=None,
+        validation_data=_dataset(),
+        objective_metrics=["nrmse"],
+        metric_constraints_hard=[("tarp_error_random", 0.1, "above")],
+    )
+    objective = GenericObjective(config)
+
+    penalty = objective._check_hard_constraints({"nrmse": 0.2}, trial)
+    assert penalty is not None, (
+        "an unmeasured hard constraint let the trial through as feasible"
+    )
+    assert trial.user_attrs.get("rejected_reason") == "metric_constraint"
+
+
+def test_a_measured_constraint_metric_still_passes() -> None:
+    """The guard must not reject a constraint that simply was not requested."""
+    from bayesflow_hpo.optimization.objective import (
+        GenericObjective,
+        ObjectiveConfig,
+    )
+
+    study = optuna.create_study(directions=["minimize", "minimize"])
+    trial = study.ask()
+
+    config = ObjectiveConfig(
+        simulator=None,
+        adapter=None,
+        search_space=None,
+        validation_data=_dataset(),
+        objective_metrics=["nrmse"],
+        metric_constraints_hard=[("tarp_error_random", 0.9, "above")],
+    )
+    objective = GenericObjective(config)
+
+    # Present and within bounds.
+    assert objective._check_hard_constraints(
+        {"nrmse": 0.2, "tarp_error_random": 0.1}, trial
+    ) is None
+    # Absent and NOT marked failed: skipped, as before.
+    assert objective._check_hard_constraints({"nrmse": 0.2}, trial) is None
+
+
+def test_an_unmeasured_soft_constraint_reports_a_positive_violation() -> None:
+    """Zero violation means satisfied, which is what was reported."""
+    from bayesflow_hpo.optimization.study import _make_constraints_func
+
+    constraints = _make_constraints_func(
+        budget_aware=False,
+        soft_thresholds=[("tarp_error_random", 0.1, "above")],
+    )
+
+    study = optuna.create_study(directions=["minimize"])
+    study.tell(study.ask(), 1.0)
+    failed, measured = study.trials[0], study.trials[0]
+
+    failed = optuna.trial.create_trial(
+        params={},
+        distributions={},
+        value=1.0,
+        user_attrs={"failed_metric_keys": ["tarp_error_random"]},
+    )
+    assert constraints(failed)[0] > 0.0, (
+        "an unmeasured soft constraint reported zero violation, which "
+        "Optuna reads as feasible"
+    )
+
+    measured = optuna.trial.create_trial(
+        params={}, distributions={}, value=1.0,
+        user_attrs={"tarp_error_random": 0.05},
+    )
+    assert constraints(measured)[0] == 0.0
+
+    unrequested = optuna.trial.create_trial(
+        params={}, distributions={}, value=1.0, user_attrs={},
+    )
+    assert constraints(unrequested)[0] == 0.0
+
+
+def test_the_training_path_re_raises_configuration_errors() -> None:
+    """`PeriodicValidationCallback` runs DURING training.
+
+    Its re-raise is undone by the catch-all around training, which records
+    a `training_error` and returns `_penalty()` -- so a misconfiguration
+    consumes the study's whole trial cap instead of stopping on the first.
+    Now reachable in practice, because joint metrics no longer run in
+    pre-flight.
+    """
+    import inspect
+
+    from bayesflow_hpo.optimization import objective as objective_module
+
+    source = inspect.getsource(objective_module.GenericObjective)
+    training = source.index("failed during training")
+    reraise = source.rindex("except JointMetricConfigurationError:", 0, training)
+    catchall = source.rindex("except Exception as exc:", 0, training)
+    assert reraise < catchall, (
+        "the configuration handler must precede the training catch-all, or "
+        "the catch-all turns the refusal into a per-trial penalty"
+    )
+

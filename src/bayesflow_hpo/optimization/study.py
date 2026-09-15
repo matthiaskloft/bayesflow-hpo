@@ -50,6 +50,12 @@ _PRE_TRAINING_REJECTIONS = {
 }
 
 
+#: Soft-constraint violation recorded when a constrained metric could not be
+#: measured at all. Positive, because zero means "satisfied"; flat, because
+#: no distance from the threshold exists when there is no value.
+_UNMEASURED_CONSTRAINT_VIOLATION = 1.0
+
+
 def _make_constraints_func(
     budget_aware: bool = True,
     soft_thresholds: list[MetricConstraintSpec] | None = None,
@@ -72,9 +78,19 @@ def _make_constraints_func(
                 1.0 if rejected_reason in _PRE_TRAINING_REJECTIONS else 0.0
             )
 
+        failed_keys = set(trial.user_attrs.get("failed_metric_keys", ()))
         for metric, threshold, direction in thresholds:
             raw = trial.user_attrs.get(metric)
             if raw is None:
+                if metric in failed_keys:
+                    # Requested and could not be measured, so zero would
+                    # report the constraint SATISFIED on the strength of a
+                    # measurement that never happened. The magnitude is not
+                    # meaningful -- there is no value to take a distance
+                    # from -- so it is a flat positive, which is all
+                    # "infeasible" requires.
+                    values.append(_UNMEASURED_CONSTRAINT_VIOLATION)
+                    continue
                 values.append(0.0)
                 continue
             metric_value = float(raw)
