@@ -685,6 +685,18 @@ class ObjectiveConfig:
 
     def __post_init__(self) -> None:
         validate_objective_metric_kinds(self.objective_metrics)
+        # Checked at THIS boundary too, not only in `optimize()`. Building a
+        # config directly skips that check, and the memory estimator clamps
+        # a sub-1 cap to 1 -- so an invalid value would reach training and
+        # then raise inside validation, after the trial has been paid for.
+        if (
+            self.max_samples_per_call is not None
+            and self.max_samples_per_call < 1
+        ):
+            raise ValueError(
+                "max_samples_per_call must be >= 1 or None (no chunking), "
+                f"got {self.max_samples_per_call}."
+            )
         # Canonicalize aliases HERE, once, so every downstream consumer agrees
         # on the key. They did not: `list_metrics()` returns canonical names,
         # so `cal_error` was excluded from the pipeline's metric list; the

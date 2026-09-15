@@ -18,8 +18,11 @@ count is substantial: a FlowMatching + DeepSet approximator (15 parameters, 50
 observations) ran 40,000 draws on an RTX 5090 and went out of memory at 60,000.
 Neither ``n_sims`` nor ``n_posterior_samples`` is a search-space
 hyperparameter, so ``estimate_peak_memory_mb`` -- which covers training only --
-cannot reject such a trial, and the failure lands after training has been paid
-for. See issue #101.
+never saw this allocation, and the failure landed after training had been paid
+for. ``estimate_validation_memory_mb`` now budgets it pre-training against the
+cap applied here; the two belong together, since that estimate is taken over
+the CHUNK this module samples rather than over the whole condition. See issue
+#101.
 """
 
 from __future__ import annotations
@@ -195,8 +198,16 @@ def make_bayesflow_infer_fn(
                 )
             )
 
-        chunks = [
-            _assemble(
+        # Written into a preallocated array rather than collected and
+        # concatenated. `np.concatenate` holds every chunk AND the finished
+        # result live at once, so assembling peaked at twice the returned
+        # array -- a transient the cap does not bound, since the cap
+        # governs one `sample()` call. The result itself is unavoidable:
+        # the metric contract is one assembled
+        # `(n_sims, n_samples, n_params)` array.
+        out: np.ndarray | None = None
+        for start in range(0, n_rows, rows_per_call):
+            chunk = _assemble(
                 approximator.sample(
                     conditions={
                         k: _slice(v, start, rows_per_call)
@@ -205,8 +216,10 @@ def make_bayesflow_infer_fn(
                     num_samples=n_samples,
                 )
             )
-            for start in range(0, n_rows, rows_per_call)
-        ]
-        return np.concatenate(chunks, axis=0)
+            if out is None:
+                out = np.empty((n_rows, *chunk.shape[1:]), dtype=chunk.dtype)
+            out[start : start + chunk.shape[0]] = chunk
+        assert out is not None  # n_rows > rows_per_call >= 1
+        return out
 
     return infer_fn

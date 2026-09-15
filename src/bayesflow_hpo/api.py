@@ -125,7 +125,6 @@ def optimize(
     validation_conditions: dict[str, list[Any]] | None = None,
     sims_per_condition: int = 200,
     n_posterior_samples: int = 500,
-    max_samples_per_call: int | None = DEFAULT_MAX_SAMPLES_PER_CALL,
     # Objectives
     objective_metrics: list[str] | None = None,
     objective_mode: str = "pareto",
@@ -169,6 +168,11 @@ def optimize(
     # positionally bindable and inserting into the middle would silently
     # rebind a caller's trailing positional arguments.
     *,
+    # Keyword-only for the reason stated just above: inserting it among the
+    # positionally bindable parameters would rebind `objective_metrics` and
+    # everything after it, so a caller passing a metric list positionally
+    # would have it arrive here and fail the `< 1` check.
+    max_samples_per_call: int | None = DEFAULT_MAX_SAMPLES_PER_CALL,
     sampler_n_startup_trials: int | None = None,
     joint_metrics: dict[str, Any] | None = None,
     include_joint_metrics: bool = False,

@@ -179,6 +179,15 @@ class PeriodicValidationCallback(Callback):
         self.interval = interval
         self.warmup = warmup
         self.n_posterior_samples = n_posterior_samples
+        # Rejected here rather than at the first scheduled validation, where
+        # `make_bayesflow_infer_fn` would raise mid-training and the guard
+        # around intermediate validation would record it as a validation
+        # failure -- an argument error reported as a bad model.
+        if max_samples_per_call is not None and max_samples_per_call < 1:
+            raise ValueError(
+                "max_samples_per_call must be >= 1 or None (no chunking), "
+                f"got {max_samples_per_call}."
+            )
         self.max_samples_per_call = max_samples_per_call
         # `optimize()` auto-detects this from the sampler, but building an
         # objective directly leaves it None, and every pruning strategy

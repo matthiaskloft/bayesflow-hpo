@@ -305,6 +305,34 @@ class TestChunkedSampling:
         assert approx.sample.call_count == 1
 
 
+    def test_assembly_preserves_dtype_without_concatenating(self):
+        """Chunks are written into one preallocated array.
+
+        `np.concatenate` would hold every chunk and the finished result
+        live at once, peaking at twice the returned array -- a transient
+        the per-call cap does not bound.
+        """
+        approx = MagicMock()
+
+        def _sample(*, conditions, num_samples):
+            rows = int(np.asarray(conditions["x"]).shape[0])
+            return {"theta": np.zeros((rows, num_samples, 1), dtype=np.float32)}
+
+        approx.sample.side_effect = _sample
+        fn = make_bayesflow_infer_fn(
+            approximator=approx,
+            param_keys=["theta"],
+            data_keys=["x"],
+            max_samples_per_call=20,
+        )
+
+        draws = fn({"x": np.zeros((7, 1))}, n_posterior_samples=10)
+
+        assert draws.shape == (7, 10)
+        assert draws.dtype == np.float32
+        assert approx.sample.call_count == 4  # 2 rows per call, last is 1
+
+
 class TestPipelineForwardsTheCap:
     """The knob has to reach the closure, not merely be accepted."""
 

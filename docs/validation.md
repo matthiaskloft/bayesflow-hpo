@@ -224,8 +224,10 @@ result = run_validation_pipeline(
 2. **Inference** — `make_bayesflow_infer_fn` wraps the approximator to produce posterior draws,
    sampling the condition batch in slices of at most `max_samples_per_call` draws
    (default `20_000`). A condition holds `sims_per_condition x n_posterior_samples`
-   draws — 100,000 at the `optimize()` defaults — which the pre-training memory
-   budget does not cover, since neither factor is a hyperparameter. Pass
+   draws — 100,000 at the `optimize()` defaults. Neither factor is a
+   search-space hyperparameter, so the training estimate cannot see them;
+   `estimate_validation_memory_mb()` budgets this chunk separately before
+   training (see [optimization.md](optimization.md#memory-budget)). Pass
    `max_samples_per_call=None` to sample each condition in one call. Note that
    the cap also moves `inference_time`: several smaller `sample()` calls carry
    more fixed per-call cost than one large one, so cost values are not

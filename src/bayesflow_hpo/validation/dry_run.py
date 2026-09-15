@@ -49,6 +49,12 @@ def validate_once(
         Configured joint metrics as ``{name: fn}``, forwarded to the
         pipeline. Needed for any joint metric that cannot run at a registry
         default, such as ``tarp_error``.
+    max_samples_per_call
+        Cap on posterior draws per ``approximator.sample()`` call, forwarded
+        to :func:`~bayesflow_hpo.validation.pipeline.run_validation_pipeline`
+        (default
+        :data:`~bayesflow_hpo.validation.inference.DEFAULT_MAX_SAMPLES_PER_CALL`).
+        ``None`` samples the condition in a single call.
     """
     import numpy as np
 
