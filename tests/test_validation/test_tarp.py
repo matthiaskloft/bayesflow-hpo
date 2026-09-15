@@ -80,7 +80,7 @@ def _gaussian_case(
 # ---------------------------------------------------------------------------
 
 
-def test_an_exact_posterior_gives_the_diagonal():
+def test_an_exact_posterior_gives_the_diagonal() -> None:
     """For an exact posterior the ``f_i`` are uniform, so ECP(c) = c."""
     draws, truth = _gaussian_case(correct=True)
     out = compute_tarp_coverage(draws, truth, seed=REF_SEED)
@@ -93,7 +93,7 @@ def test_an_exact_posterior_gives_the_diagonal():
     )
 
 
-def test_a_data_ignoring_posterior_is_caught_by_a_data_dependent_reference():
+def test_a_data_ignoring_posterior_is_caught_by_a_data_dependent_reference() -> None:
     """The failure the whole two-key split exists for.
 
     Section 4.3: TARP with an x-INDEPENDENT reference point is blind to
@@ -123,7 +123,7 @@ def test_a_data_ignoring_posterior_is_caught_by_a_data_dependent_reference():
     assert random_ref["reference_mode"] == "random"
 
 
-def test_the_coverage_curve_is_the_ecdf_of_the_fractions():
+def test_the_coverage_curve_is_the_ecdf_of_the_fractions() -> None:
     """ECP(c) = mean_i 1[f_i < c] -- Algorithm 2's final line, directly."""
     draws, truth = _gaussian_case(n_sims=120, n_draws=50, correct=True)
     out = compute_tarp_coverage(draws, truth, seed=REF_SEED)
@@ -135,7 +135,7 @@ def test_the_coverage_curve_is_the_ecdf_of_the_fractions():
         assert ecp == pytest.approx(float(np.mean(f < level)))
 
 
-def test_the_fractions_count_draws_closer_than_the_truth():
+def test_the_fractions_count_draws_closer_than_the_truth() -> None:
     """f_i is the fraction of draws nearer the reference than the truth is.
 
     Computed here the slow, literal way from Algorithm 2, against a supplied
@@ -159,7 +159,7 @@ def test_the_fractions_count_draws_closer_than_the_truth():
     np.testing.assert_allclose(out["coverage_fractions"], expected)
 
 
-def test_reference_mode_never_claims_the_reference_is_data_dependent():
+def test_reference_mode_never_claims_the_reference_is_data_dependent() -> None:
     """It cannot know, and the distinction is load-bearing.
 
     An externally generated *random* reference, supplied only so a run
@@ -173,7 +173,7 @@ def test_reference_mode_never_claims_the_reference_is_data_dependent():
     assert out["reference_mode"] == "provided"
 
 
-def test_the_metric_choice_does_not_change_the_verdict():
+def test_the_metric_choice_does_not_change_the_verdict() -> None:
     """Section 4.2 reports robustness to the distance metric."""
     draws, truth = _gaussian_case(correct=True)
     euc = compute_tarp_coverage(draws, truth, metric="euclidean", seed=REF_SEED)
@@ -187,14 +187,14 @@ def test_the_metric_choice_does_not_change_the_verdict():
 # ---------------------------------------------------------------------------
 
 
-def test_two_dimensional_draws_raise():
+def test_two_dimensional_draws_raise() -> None:
     """The joint path normalizes to 3-D precisely because this raises."""
     rng = np.random.default_rng(SEED)
     with pytest.raises(ValueError, match="must be 3D"):
         compute_tarp_coverage(rng.normal(size=(10, 20)), rng.normal(size=(10,)))
 
 
-def test_non_finite_draws_raise_rather_than_biasing_the_fractions():
+def test_non_finite_draws_raise_rather_than_biasing_the_fractions() -> None:
     """`d_draws < d_truth` is False for NaN, so a NaN counts as 'not closer'."""
     draws, truth = _gaussian_case(n_sims=20, n_draws=10, correct=True)
     draws[0, 0, 0] = np.nan
@@ -202,7 +202,7 @@ def test_non_finite_draws_raise_rather_than_biasing_the_fractions():
         compute_tarp_coverage(draws, truth, seed=SEED)
 
 
-def test_a_constant_dimension_raises_rather_than_being_dropped():
+def test_a_constant_dimension_raises_rather_than_being_dropped() -> None:
     """Dropping it would report a genuinely miscalibrated posterior as clean."""
     draws, truth = _gaussian_case(n_sims=30, n_draws=10, correct=True)
     truth[:, 1] = 2.0
@@ -210,7 +210,7 @@ def test_a_constant_dimension_raises_rather_than_being_dropped():
         compute_tarp_coverage(draws, truth, seed=SEED)
 
 
-def test_a_constant_dimension_is_fine_without_standardization():
+def test_a_constant_dimension_is_fine_without_standardization() -> None:
     """Nothing is divided by the zero scale, so the dominance problem is moot."""
     draws, truth = _gaussian_case(n_sims=30, n_draws=10, correct=True)
     truth[:, 1] = 2.0
@@ -218,7 +218,7 @@ def test_a_constant_dimension_is_fine_without_standardization():
     assert np.isfinite(out["tarp_error"])
 
 
-def test_the_seed_makes_the_random_reference_reproducible():
+def test_the_seed_makes_the_random_reference_reproducible() -> None:
     draws, truth = _gaussian_case(n_sims=50, n_draws=20, correct=True)
     a = compute_tarp_coverage(draws, truth, seed=7)
     b = compute_tarp_coverage(draws, truth, seed=7)
@@ -286,7 +286,7 @@ def _load_reference_implementation():
     ],
     ids=["default", "manhattan", "resolution50", "raw"],
 )
-def test_the_port_reproduces_the_source_revision(correct, kwargs):
+def test_the_port_reproduces_the_source_revision(correct, kwargs) -> None:
     """Bit-for-bit on everything except the reference draw.
 
     Run against SUPPLIED reference points, so the comparison covers the
@@ -313,7 +313,7 @@ def test_the_port_reproduces_the_source_revision(correct, kwargs):
     )
 
 
-def test_the_reference_stream_deliberately_diverges_from_the_source():
+def test_the_reference_stream_deliberately_diverges_from_the_source() -> None:
     """The one intentional difference, and the reason for it.
 
     Drawing the references from ``default_rng(seed)`` consumes the same
@@ -346,7 +346,7 @@ def test_the_reference_stream_deliberately_diverges_from_the_source():
     assert ours["tarp_error"] < 0.15, ours["tarp_error"]
 
 
-def test_seeding_tarp_like_the_simulator_is_safe():
+def test_seeding_tarp_like_the_simulator_is_safe() -> None:
     """The property the spawn key buys, without needing the source repo."""
     seed = 3
     rng = np.random.default_rng(seed)
@@ -386,7 +386,7 @@ def _joint_inputs(n_sims=60, n_draws=40, n_params=2, cond_id=0, n_conditions=3):
     )
 
 
-def test_the_reference_mode_decides_the_key():
+def test_the_reference_mode_decides_the_key() -> None:
     """Two numbers that cannot be compared must not be comparable by name."""
     from bayesflow_hpo.validation.tarp import make_tarp_joint_metric
 
@@ -401,7 +401,7 @@ def test_the_reference_mode_decides_the_key():
     assert set(provided_out) == {"tarp_error"}
 
 
-def test_tarp_error_is_an_objective_and_the_random_key_is_a_diagnostic():
+def test_tarp_error_is_an_objective_and_the_random_key_is_a_diagnostic() -> None:
     """A diagnostic cannot be optimized, which is the guard's whole job."""
     from bayesflow_hpo.validation.registry import validate_objective_metric_kinds
 
@@ -410,7 +410,7 @@ def test_tarp_error_is_an_objective_and_the_random_key_is_a_diagnostic():
         validate_objective_metric_kinds(["tarp_error_random"])
 
 
-def test_a_single_array_reused_across_conditions_is_rejected():
+def test_a_single_array_reused_across_conditions_is_rejected() -> None:
     """The form a caller reaches for first, and it is a different metric
     on every condition."""
     from bayesflow_hpo.validation.tarp import make_tarp_joint_metric
@@ -423,7 +423,7 @@ def test_a_single_array_reused_across_conditions_is_rejected():
         fn(inputs)
 
 
-def test_a_sequence_of_arrays_is_indexed_by_condition():
+def test_a_sequence_of_arrays_is_indexed_by_condition() -> None:
     from bayesflow_hpo.validation.tarp import make_tarp_joint_metric
 
     per_condition = [
@@ -438,7 +438,7 @@ def test_a_sequence_of_arrays_is_indexed_by_condition():
     )
 
 
-def test_a_short_sequence_says_which_condition_is_missing():
+def test_a_short_sequence_says_which_condition_is_missing() -> None:
     from bayesflow_hpo.validation.tarp import make_tarp_joint_metric
 
     fn = make_tarp_joint_metric(reference_points=[np.zeros((60, 2))])
@@ -446,7 +446,7 @@ def test_a_short_sequence_says_which_condition_is_missing():
         fn(_joint_inputs(cond_id=2))
 
 
-def test_a_misshapen_reference_is_rejected():
+def test_a_misshapen_reference_is_rejected() -> None:
     from bayesflow_hpo.validation.tarp import make_tarp_joint_metric
 
     fn = make_tarp_joint_metric(
@@ -456,7 +456,7 @@ def test_a_misshapen_reference_is_rejected():
         fn(_joint_inputs())
 
 
-def test_the_provider_receives_the_data_it_needs():
+def test_the_provider_receives_the_data_it_needs() -> None:
     """A real reference is derived from sim_batch, so it must be there."""
     from bayesflow_hpo.validation.tarp import make_tarp_joint_metric
 
@@ -474,7 +474,7 @@ def test_the_provider_receives_the_data_it_needs():
     assert seen["cond"] == 1
 
 
-def test_conditions_do_not_share_a_reference_draw():
+def test_conditions_do_not_share_a_reference_draw() -> None:
     """Sharing one would correlate the per-condition noise."""
     from bayesflow_hpo.validation.tarp import make_tarp_joint_metric
 
@@ -484,7 +484,7 @@ def test_conditions_do_not_share_a_reference_draw():
     assert a != b
 
 
-def test_tarp_error_cannot_run_at_its_registered_default():
+def test_tarp_error_cannot_run_at_its_registered_default() -> None:
     """Registered so the routing surface knows it; refused before inference.
 
     It has to be in the registry, because `_metric_names_for_pipeline` drops
@@ -506,7 +506,7 @@ def test_tarp_error_cannot_run_at_its_registered_default():
         resolve_joint_metrics(["tarp_error"])
 
 
-def test_the_random_key_runs_at_its_registered_default():
+def test_the_random_key_runs_at_its_registered_default() -> None:
     from bayesflow_hpo.validation.registry import resolve_joint_metrics
 
     fn = resolve_joint_metrics(["tarp_error_random"])["tarp_error_random"]
@@ -515,7 +515,7 @@ def test_the_random_key_runs_at_its_registered_default():
     assert np.isfinite(out["tarp_error_random"])
 
 
-def test_both_keys_have_a_bounded_penalty():
+def test_both_keys_have_a_bounded_penalty() -> None:
     """A median of |ECP - level| is bounded by 1; no infinite penalty needed."""
     from bayesflow_hpo.objectives import worst_objective_value
 

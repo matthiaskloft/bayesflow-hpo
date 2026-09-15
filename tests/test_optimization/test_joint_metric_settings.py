@@ -34,19 +34,19 @@ def _study():
 # ---------------------------------------------------------------------------
 
 
-def test_a_fresh_study_is_stamped():
+def test_a_fresh_study_is_stamped() -> None:
     study = _study()
     check_or_stamp_joint_metric_settings(study, TARP, n_completed_trials=0)
     assert study.user_attrs[JOINT_METRIC_SETTINGS_ATTR] == TARP
 
 
-def test_identical_settings_pass():
+def test_identical_settings_pass() -> None:
     study = _study()
     check_or_stamp_joint_metric_settings(study, TARP, n_completed_trials=0)
     check_or_stamp_joint_metric_settings(study, TARP, n_completed_trials=3)
 
 
-def test_changed_settings_are_refused_and_named():
+def test_changed_settings_are_refused_and_named() -> None:
     """The message has to say WHAT changed, or it cannot be acted on."""
     study = _study()
     check_or_stamp_joint_metric_settings(study, TARP, n_completed_trials=0)
@@ -63,7 +63,7 @@ def test_changed_settings_are_refused_and_named():
         )
 
 
-def test_a_changed_reference_mode_is_refused():
+def test_a_changed_reference_mode_is_refused() -> None:
     """The pin's most load-bearing field: the two modes are different metrics."""
     study = _study()
     check_or_stamp_joint_metric_settings(
@@ -82,7 +82,7 @@ def test_a_changed_reference_mode_is_refused():
 # ---------------------------------------------------------------------------
 
 
-def test_a_study_populated_before_this_existed_is_refused_not_stamped():
+def test_a_study_populated_before_this_existed_is_refused_not_stamped() -> None:
     """Stamping would assert something about trials that is unknown.
 
     Those trials ran at settings nobody recorded. Marking the study as
@@ -95,7 +95,7 @@ def test_a_study_populated_before_this_existed_is_refused_not_stamped():
     assert JOINT_METRIC_SETTINGS_ATTR not in study.user_attrs
 
 
-def test_the_refusal_names_the_escape_hatch():
+def test_the_refusal_names_the_escape_hatch() -> None:
     """A study whose settings the user DOES know must be recoverable."""
     study = _study()
     with pytest.raises(ValueError, match=JOINT_METRIC_SETTINGS_ATTR):
@@ -105,14 +105,14 @@ def test_the_refusal_names_the_escape_hatch():
     check_or_stamp_joint_metric_settings(study, TARP, n_completed_trials=5)
 
 
-def test_a_study_using_no_joint_metrics_never_acquires_the_attribute():
+def test_a_study_using_no_joint_metrics_never_acquires_the_attribute() -> None:
     """The guard must not touch the overwhelmingly common case."""
     study = _study()
     check_or_stamp_joint_metric_settings(study, {}, n_completed_trials=9)
     assert JOINT_METRIC_SETTINGS_ATTR not in study.user_attrs
 
 
-def test_a_metric_added_mid_study_is_recorded_alongside():
+def test_a_metric_added_mid_study_is_recorded_alongside() -> None:
     """Its trials are comparable among themselves; earlier ones lack the key."""
     study = _study()
     check_or_stamp_joint_metric_settings(study, TARP, n_completed_trials=0)
@@ -125,7 +125,7 @@ def test_a_metric_added_mid_study_is_recorded_alongside():
     assert set(stored) == {"tarp_error", "lc2st"}
 
 
-def test_an_unrecognized_stored_value_is_treated_as_absent():
+def test_an_unrecognized_stored_value_is_treated_as_absent() -> None:
     """`user_attrs` is caller-writable and round-trips through JSON.
 
     Refusing on a value this code cannot interpret would block a study over
@@ -138,7 +138,7 @@ def test_an_unrecognized_stored_value_is_treated_as_absent():
     assert study.user_attrs[JOINT_METRIC_SETTINGS_ATTR] == TARP
 
 
-def test_the_attribute_survives_a_json_round_trip():
+def test_the_attribute_survives_a_json_round_trip() -> None:
     """It is stored by Optuna, so it has to be JSON-serializable."""
     import json
 
@@ -161,7 +161,7 @@ def test_the_attribute_survives_a_json_round_trip():
 # ---------------------------------------------------------------------------
 
 
-def test_the_settings_come_from_the_callable_that_ran():
+def test_the_settings_come_from_the_callable_that_ran() -> None:
     """Not from a parameter the caller repeats to optimize().
 
     A caller-supplied record can disagree with what was computed; a
@@ -184,12 +184,12 @@ def test_the_settings_come_from_the_callable_that_ran():
     }
 
 
-def test_a_metric_declaring_nothing_is_omitted_not_recorded_as_empty():
+def test_a_metric_declaring_nothing_is_omitted_not_recorded_as_empty() -> None:
     """Absent means "makes no claim", which is not "configured with nothing"."""
     assert joint_metric_settings({"plain": lambda inputs: {}}) == {}
 
 
-def test_the_reference_mode_is_declared_from_how_it_was_built():
+def test_the_reference_mode_is_declared_from_how_it_was_built() -> None:
     from bayesflow_hpo.validation.tarp import make_tarp_joint_metric
 
     provided = make_tarp_joint_metric(reference_points=lambda i: None)
@@ -198,7 +198,7 @@ def test_the_reference_mode_is_declared_from_how_it_was_built():
     assert random.joint_metric_settings["reference_mode"] == "random"
 
 
-def test_the_registered_lc2st_declares_the_factory_defaults():
+def test_the_registered_lc2st_declares_the_factory_defaults() -> None:
     """Otherwise the pin covers a configured L-C2ST but not the registry's.
 
     A study stamped by `make_lc2st_validate_fn(n_folds=10)` and then resumed
@@ -225,7 +225,7 @@ def test_the_registered_lc2st_declares_the_factory_defaults():
     )
 
 
-def test_every_runnable_registered_joint_metric_declares_settings():
+def test_every_runnable_registered_joint_metric_declares_settings() -> None:
     """A metric that declares nothing is silently exempt from the pin.
 
     "Runnable" excludes the placeholders that `resolve_joint_metrics`
@@ -255,7 +255,7 @@ def test_every_runnable_registered_joint_metric_declares_settings():
     )
 
 
-def test_a_labelled_reference_is_pinned():
+def test_a_labelled_reference_is_pinned() -> None:
     """What `reference_mode="provided"` alone cannot say: WHICH provider.
 
     A callable is not serializable, so two studies both reporting
@@ -296,7 +296,7 @@ def test_a_labelled_reference_is_pinned():
 # ---------------------------------------------------------------------------
 
 
-def test_budget_rejected_trials_do_not_block_the_first_stamp():
+def test_budget_rejected_trials_do_not_block_the_first_stamp() -> None:
     """A rejected proposal is COMPLETE but measured nothing.
 
     A trial rejected for `max_memory_mb` or `max_param_count` returns
@@ -321,7 +321,7 @@ def test_budget_rejected_trials_do_not_block_the_first_stamp():
     assert study.user_attrs[JOINT_METRIC_SETTINGS_ATTR] == TARP
 
 
-def test_failed_and_fallback_trials_do_not_count_either():
+def test_failed_and_fallback_trials_do_not_count_either() -> None:
     """They reach COMPLETE without producing measured joint values."""
     from bayesflow_hpo.optimization.objective import _n_measured_trials
 
@@ -333,7 +333,7 @@ def test_failed_and_fallback_trials_do_not_count_either():
     assert _n_measured_trials(study) == 0
 
 
-def test_a_measured_trial_does_count():
+def test_a_measured_trial_does_count() -> None:
     """The legacy-study guard has to keep working, or this is a hole."""
     from bayesflow_hpo.optimization.objective import _n_measured_trials
 

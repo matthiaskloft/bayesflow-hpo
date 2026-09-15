@@ -125,7 +125,7 @@ def _run(
 @pytest.mark.parametrize("param_keys", [["theta"], ["a", "b"]])
 def test_joint_metric_always_receives_three_dimensional_draws(
     joint_metric, param_keys
-):
+) -> None:
     """The contract promises 3-D unconditionally, including for one parameter.
 
     ``make_bayesflow_infer_fn`` squeezes the trailing axis for a
@@ -151,7 +151,7 @@ def test_joint_metric_always_receives_three_dimensional_draws(
     assert result.summary["joint_shape_probe"] == float(len(param_keys))
 
 
-def test_the_closure_really_does_squeeze_for_one_parameter():
+def test_the_closure_really_does_squeeze_for_one_parameter() -> None:
     """Anchors the test above to the behaviour it guards against.
 
     If ``make_bayesflow_infer_fn`` ever stops squeezing, the parametrized
@@ -170,7 +170,7 @@ def test_the_closure_really_does_squeeze_for_one_parameter():
     )
 
 
-def test_marginal_metrics_still_see_two_dimensional_draws():
+def test_marginal_metrics_still_see_two_dimensional_draws() -> None:
     """Normalizing for the joint path must not change the marginal one."""
     marginal_ndim: list[int] = []
 
@@ -193,7 +193,7 @@ def test_marginal_metrics_still_see_two_dimensional_draws():
 # ---------------------------------------------------------------------------
 
 
-def test_joint_key_survives_the_multi_parameter_summary(joint_metric):
+def test_joint_key_survives_the_multi_parameter_summary(joint_metric) -> None:
     """The overall summary is built FROM the per-parameter summaries.
 
     That loop takes its key set from the first parameter's summary, so a
@@ -217,14 +217,14 @@ def test_joint_key_survives_the_multi_parameter_summary(joint_metric):
     assert "joint_const" not in result.condition_metrics.columns
 
 
-def test_joint_key_reaches_the_single_parameter_summary(joint_metric):
+def test_joint_key_reaches_the_single_parameter_summary(joint_metric) -> None:
     joint_metric("joint_one", lambda inputs: {"joint_one": 2.0})
     result = _run(["theta"], ["nrmse", "joint_one"])
     assert result.summary["joint_one"] == pytest.approx(2.0)
     assert "nrmse" in result.summary
 
 
-def test_the_contract_carries_the_data_and_the_column_order(joint_metric):
+def test_the_contract_carries_the_data_and_the_column_order(joint_metric) -> None:
     """Every field is load-bearing; L-C2ST and TARP need all of them."""
     captured: list[JointMetricInputs] = []
 
@@ -262,7 +262,7 @@ def test_the_contract_carries_the_data_and_the_column_order(joint_metric):
 )
 def test_a_failure_on_any_condition_invalidates_the_whole_trial(
     joint_metric, failing
-):
+) -> None:
     """All three failure positions must produce the SAME outcome.
 
     Omitting only the failed condition would make the score depend on which
@@ -293,7 +293,7 @@ def test_a_failure_on_any_condition_invalidates_the_whole_trial(
     assert np.isfinite(result.summary["nrmse"])
 
 
-def test_one_failing_joint_metric_does_not_invalidate_another(joint_metric):
+def test_one_failing_joint_metric_does_not_invalidate_another(joint_metric) -> None:
     joint_metric("joint_ok", lambda inputs: {"joint_ok": 1.0})
 
     def boom(inputs: JointMetricInputs) -> dict[str, float]:
@@ -307,7 +307,7 @@ def test_one_failing_joint_metric_does_not_invalidate_another(joint_metric):
     assert set(result.failed_joint_metrics) == {"joint_bad"}
 
 
-def test_a_failed_joint_metric_is_not_recomputed(joint_metric):
+def test_a_failed_joint_metric_is_not_recomputed(joint_metric) -> None:
     """Once invalidated, paying for it again buys a value that is discarded."""
     calls: list[int] = []
 
@@ -322,7 +322,7 @@ def test_a_failed_joint_metric_is_not_recomputed(joint_metric):
 
 def test_a_multi_output_joint_metric_drops_all_its_keys_on_failure(
     joint_metric,
-):
+) -> None:
     """The guard records metric NAMES; the summary is keyed by OUTPUTS."""
 
     def two_keys(inputs: JointMetricInputs) -> dict[str, float]:
@@ -347,7 +347,7 @@ def test_a_multi_output_joint_metric_drops_all_its_keys_on_failure(
 # ---------------------------------------------------------------------------
 
 
-def test_joint_names_route_to_the_joint_resolver_only(joint_metric):
+def test_joint_names_route_to_the_joint_resolver_only(joint_metric) -> None:
     joint_metric("joint_routed", lambda inputs: {"joint_routed": 0.0})
 
     names = ["nrmse", "joint_routed"]
@@ -357,7 +357,7 @@ def test_joint_names_route_to_the_joint_resolver_only(joint_metric):
     assert not is_joint_metric("nrmse")
 
 
-def test_an_unknown_name_still_raises_in_both_resolvers():
+def test_an_unknown_name_still_raises_in_both_resolvers() -> None:
     """A typo must not be quietly reclassified as the other kind."""
     with pytest.raises(KeyError):
         resolve_metrics(["definitely_not_a_metric"])
@@ -365,7 +365,7 @@ def test_an_unknown_name_still_raises_in_both_resolvers():
         resolve_joint_metrics(["definitely_not_a_metric"])
 
 
-def test_a_joint_name_is_visible_to_the_shared_lookup_tables(joint_metric):
+def test_a_joint_name_is_visible_to_the_shared_lookup_tables(joint_metric) -> None:
     """The reason the marker lives on one registry rather than beside it.
 
     ``producer_for_key`` drives ``_metric_names_for_pipeline``, which DROPS
@@ -392,7 +392,7 @@ def test_a_joint_name_is_visible_to_the_shared_lookup_tables(joint_metric):
 
 def test_overwriting_a_joint_name_with_a_marginal_one_clears_the_marker(
     joint_metric,
-):
+) -> None:
     """A stale marker routes a 2-argument callable to the joint dispatch."""
     joint_metric("joint_then_marginal", lambda inputs: {})
     assert is_joint_metric("joint_then_marginal")
@@ -418,7 +418,7 @@ def test_overwriting_a_joint_name_with_a_marginal_one_clears_the_marker(
 # ---------------------------------------------------------------------------
 
 
-def test_lc2st_is_registered_as_a_joint_metric():
+def test_lc2st_is_registered_as_a_joint_metric() -> None:
     """So that ``objective_metrics=["lc2st"]`` resolves at all.
 
     The name has to be visible to ``producer_for_key``, which drives
@@ -432,7 +432,7 @@ def test_lc2st_is_registered_as_a_joint_metric():
     assert producer_for_key("lc2st") == "lc2st"
 
 
-def test_importing_the_package_does_not_require_sklearn():
+def test_importing_the_package_does_not_require_sklearn() -> None:
     """The registered default must build its classifier lazily.
 
     Calling `make_lc2st_joint_metric()` at module scope would raise
@@ -459,7 +459,7 @@ def test_importing_the_package_does_not_require_sklearn():
 # ---------------------------------------------------------------------------
 
 
-def test_the_contract_reports_the_grid_size(joint_metric):
+def test_the_contract_reports_the_grid_size(joint_metric) -> None:
     """Nothing else in JointMetricInputs implies it."""
     seen: list[tuple[int, int]] = []
 
@@ -474,7 +474,7 @@ def test_the_contract_reports_the_grid_size(joint_metric):
 
 def test_a_subsampled_metric_is_averaged_over_the_conditions_it_ran_on(
     joint_metric,
-):
+) -> None:
     """Skipping a condition returns no key, which contributes no row.
 
     A sentinel value would be averaged in and would drag the score toward
@@ -493,7 +493,7 @@ def test_a_subsampled_metric_is_averaged_over_the_conditions_it_ran_on(
     assert result.summary["joint_sparse"] == pytest.approx(2.0)
 
 
-def test_the_subsample_is_spread_over_the_grid_not_taken_from_its_front():
+def test_the_subsample_is_spread_over_the_grid_not_taken_from_its_front() -> None:
     """A validation grid is ordered, so a prefix is one corner of it."""
     from bayesflow_hpo.validation.c2st import _subsampled_conditions
 
@@ -506,7 +506,7 @@ def test_the_subsample_is_spread_over_the_grid_not_taken_from_its_front():
     assert _subsampled_conditions(20, 1) == {10}
 
 
-def test_the_subsample_is_identical_across_trials():
+def test_the_subsample_is_identical_across_trials() -> None:
     """A metric scored on different conditions per trial is not comparable."""
     from bayesflow_hpo.validation.c2st import _subsampled_conditions
 
@@ -518,7 +518,7 @@ def test_the_subsample_is_identical_across_trials():
 
 def test_a_metric_emitting_an_undeclared_key_still_drops_it_on_failure(
     joint_metric,
-):
+) -> None:
     """A metric's emitted keys need not match what it declared.
 
     Whole-trial invalidation drops `output_keys_for(name)`, which is the
@@ -545,7 +545,7 @@ def test_a_metric_emitting_an_undeclared_key_still_drops_it_on_failure(
     assert "nrmse" in result.summary
 
 
-def test_an_override_must_name_a_registered_joint_metric():
+def test_an_override_must_name_a_registered_joint_metric() -> None:
     """A key that names nothing runs a metric that appeared from nowhere.
 
     `canonical_metric_name` passes unknown names through by design, so an
@@ -568,7 +568,7 @@ def test_an_override_must_name_a_registered_joint_metric():
         )
 
 
-def test_an_override_must_not_name_a_marginal_metric():
+def test_an_override_must_not_name_a_marginal_metric() -> None:
     """Otherwise `nrmse` computes marginally AND dispatches jointly."""
     from bayesflow_hpo.validation.registry import (
         JointMetricConfigurationError,
@@ -584,7 +584,7 @@ def test_an_override_must_not_name_a_marginal_metric():
         )
 
 
-def test_an_aliased_override_suppresses_its_registry_entry():
+def test_an_aliased_override_suppresses_its_registry_entry() -> None:
     """Both sides of the skip check must be canonicalized, not just one.
 
     The list name was canonicalized and the override key was not, so an
@@ -629,7 +629,7 @@ def test_an_aliased_override_suppresses_its_registry_entry():
 @pytest.mark.parametrize("failing", [(0,), (2,)], ids=["first", "last"])
 def test_a_nan_invalidates_the_metric_like_an_exception(
     joint_metric, failing, dtype
-):
+) -> None:
     """`nanmean` would otherwise average it away.
 
     A metric returning 0.01 on one condition and NaN on another reported
@@ -662,7 +662,7 @@ def test_a_nan_invalidates_the_metric_like_an_exception(
     assert "nrmse" in result.summary
 
 
-def test_a_multi_output_metric_drops_every_key_on_a_nan(joint_metric):
+def test_a_multi_output_metric_drops_every_key_on_a_nan(joint_metric) -> None:
     """One NaN invalidates the producer, not just the key that carried it."""
 
     def partly_nan(inputs: JointMetricInputs) -> dict[str, float]:
@@ -682,7 +682,7 @@ def test_a_multi_output_metric_drops_every_key_on_a_nan(joint_metric):
     assert "nan_right" not in result.summary
 
 
-def test_an_infinity_is_left_alone(joint_metric):
+def test_an_infinity_is_left_alone(joint_metric) -> None:
     """`log_gamma` shows a metric can mean an infinity."""
     joint_metric(
         "joint_inf",
@@ -694,7 +694,7 @@ def test_an_infinity_is_left_alone(joint_metric):
     assert result.summary["joint_inf"] == float("inf")
 
 
-def test_an_empty_dict_is_still_a_valid_subsample(joint_metric):
+def test_an_empty_dict_is_still_a_valid_subsample(joint_metric) -> None:
     """The NaN check must not catch the intentional skip path."""
 
     def every_other(inputs: JointMetricInputs) -> dict[str, float]:
@@ -713,7 +713,7 @@ def test_an_empty_dict_is_still_a_valid_subsample(joint_metric):
 
 def test_the_run_counts_are_pinned_alongside_the_metric_settings(
     joint_metric,
-):
+) -> None:
     """D7 names both, and neither is derivable from a metric's declaration.
 
     TARP's coverage fractions are supported on {0, 1/n_draws, ..., 1}, so
@@ -736,13 +736,17 @@ def test_the_run_counts_are_pinned_alongside_the_metric_settings(
     assert run == {"n_posterior_samples": 16, "n_conditions": 3}
 
 
-def test_a_study_with_no_declaring_metric_pins_nothing():
-    """The common case must not acquire the attribute via the run counts."""
+def test_a_study_with_no_joint_metric_pins_nothing() -> None:
+    """The common case must not acquire the attribute via the run counts.
+
+    Gated on whether a joint metric RAN, not on whether one declared
+    settings -- a metric that declares nothing still depends on the counts.
+    """
     result = _run(["theta"], ["nrmse"], n_conditions=2)
     assert result.joint_metric_settings == {}
 
 
-def test_a_non_numeric_return_invalidates_the_metric(joint_metric):
+def test_a_non_numeric_return_invalidates_the_metric(joint_metric) -> None:
     """The conversion itself can fail, and must not abort the whole run."""
 
     def returns_text(inputs: JointMetricInputs) -> dict[str, float]:
@@ -754,4 +758,52 @@ def test_a_non_numeric_return_invalidates_the_metric(joint_metric):
     assert "joint_text" not in result.summary
     assert "non-numeric" in result.failed_joint_metrics["joint_text"]
     assert "nrmse" in result.summary
+
+
+def test_a_non_mapping_return_is_contained_by_the_guard(joint_metric) -> None:
+    """`result.items()` raises AttributeError, which the guard did not catch.
+
+    It escaped `_run_joint_metrics`, where no outer guard exists, and
+    aborted the whole validation -- so one metric returning the wrong shape
+    discarded every marginal result the trial had already computed. That is
+    exactly the blast radius D8's guard exists to contain.
+    """
+    joint_metric(
+        "joint_wrong_shape",
+        lambda inputs: 0.5,  # not a mapping
+        kind="diagnostic",
+    )
+    result = _run(["theta"], ["nrmse", "joint_wrong_shape"], n_conditions=2)
+
+    assert "expected a mapping" in result.failed_joint_metrics[
+        "joint_wrong_shape"
+    ]
+    assert "nrmse" in result.summary, (
+        "a malformed joint metric discarded the trial's marginal results"
+    )
+
+
+def test_run_counts_are_pinned_for_a_metric_that_declares_nothing(
+    joint_metric,
+) -> None:
+    """Every joint metric can depend on the draw and condition counts.
+
+    A custom one may declare no settings of its own and still read
+    `draws.shape[1]` or `n_conditions`, so gating the run counts on whether
+    something declared settings left those runs pinning nothing at all --
+    and a resume could change either count undetected.
+    """
+    from bayesflow_hpo.validation.pipeline import VALIDATION_RUN_SETTINGS
+
+    joint_metric(
+        "joint_silent", lambda inputs: {"joint_silent": 0.1}, kind="diagnostic"
+    )
+    result = _run(
+        ["theta"], ["joint_silent"], n_conditions=2, n_samples=16
+    )
+
+    assert result.joint_metric_settings[VALIDATION_RUN_SETTINGS] == {
+        "n_posterior_samples": 16,
+        "n_conditions": 2,
+    }
 

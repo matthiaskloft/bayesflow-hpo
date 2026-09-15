@@ -407,6 +407,17 @@ def check_pipeline(
     marginal_metrics = [
         name for name in objective_metrics if not is_joint_metric(name)
     ]
+    # The restriction applies to the BUILT-IN validator only. A custom
+    # `validate_fn` computes whatever it likes on whatever batch it is
+    # given, so nothing about the tiny pre-flight batch excuses it from
+    # producing the objective keys it was configured for -- and narrowing
+    # the requirement for it would be worse than not checking: with
+    # `objective_metrics=["tarp_error"]` alone, `marginal_metrics` is empty,
+    # so pre-flight would verify nothing at all and a hook silently omitting
+    # the key would take a penalty on every trial.
+    required_metrics = (
+        objective_metrics if validate_fn is not None else marginal_metrics
+    )
     try:
         if validate_fn is not None:
             # A custom hook keeps the documented 3-argument contract.
@@ -442,14 +453,14 @@ def check_pipeline(
     # three were fixed together and this one was missed.
     result = canonical_summary(result)
 
-    missing_keys = set(marginal_metrics) - set(result.keys())
+    missing_keys = set(required_metrics) - set(result.keys())
     if missing_keys:
         raise PipelineError(
             f"validate_fn output is missing required metric keys: "
             f"{sorted(missing_keys)}. Got keys: {sorted(result.keys())}"
         )
 
-    for key in marginal_metrics:
+    for key in required_metrics:
         val = result[key]
         if not isinstance(val, (int, float)) or math.isnan(val):
             raise PipelineError(

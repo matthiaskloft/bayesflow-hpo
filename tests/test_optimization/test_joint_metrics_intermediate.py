@@ -134,7 +134,7 @@ def _pipeline_callback(joint_name, **kwargs):
 # ---------------------------------------------------------------------------
 
 
-def test_a_mixed_study_still_prunes_and_still_stops_early(joint_metric):
+def test_a_mixed_study_still_prunes_and_still_stops_early(joint_metric) -> None:
     """Excluding the joint metric must not disable the marginal machinery.
 
     Without an explicit intermediate set, the absent joint key makes
@@ -164,7 +164,7 @@ def test_a_mixed_study_still_prunes_and_still_stops_early(joint_metric):
     assert np.isfinite(cb.best_validation_score)
 
 
-def test_the_joint_metric_is_not_computed_at_an_interval(joint_metric):
+def test_the_joint_metric_is_not_computed_at_an_interval(joint_metric) -> None:
     """The point of the exclusion: it must not be paid for per interval.
 
     Driven through the REAL pipeline with a working approximator. An
@@ -190,7 +190,7 @@ def test_the_joint_metric_is_not_computed_at_an_interval(joint_metric):
     assert calls == [], "the joint metric ran during intermediate validation"
 
 
-def test_the_pipeline_branch_still_prunes_and_stops_early(joint_metric):
+def test_the_pipeline_branch_still_prunes_and_stops_early(joint_metric) -> None:
     """The default branch: no `validate_fn`, so the pipeline runs directly.
 
     `_run_lightweight_validation` has TWO missing-key checks, one per
@@ -217,7 +217,7 @@ def test_the_pipeline_branch_still_prunes_and_stops_early(joint_metric):
     )
 
 
-def test_opting_in_computes_it(joint_metric):
+def test_opting_in_computes_it(joint_metric) -> None:
     joint_metric("joint_slow", lambda inputs: {"joint_slow": 0.1})
     cb = _callback(
         "joint_slow",
@@ -237,14 +237,14 @@ def test_opting_in_computes_it(joint_metric):
 # ---------------------------------------------------------------------------
 
 
-def test_a_joint_only_study_is_rejected_up_front(joint_metric):
+def test_a_joint_only_study_is_rejected_up_front(joint_metric) -> None:
     """Not degraded into a study that silently cannot stop early."""
     joint_metric("joint_slow", lambda inputs: {"joint_slow": 0.1})
     with pytest.raises(ValueError, match="could neither prune nor stop early"):
         _callback("joint_slow", objective_metrics=["joint_slow"])
 
 
-def test_a_joint_only_study_is_allowed_when_opted_into(joint_metric):
+def test_a_joint_only_study_is_allowed_when_opted_into(joint_metric) -> None:
     joint_metric("joint_slow", lambda inputs: {"joint_slow": 0.1})
     cb = _callback(
         "joint_slow",
@@ -254,7 +254,7 @@ def test_a_joint_only_study_is_allowed_when_opted_into(joint_metric):
     assert [str(m) for m in cb.intermediate_metrics] == ["joint_slow"]
 
 
-def test_monitoring_an_excluded_joint_metric_is_rejected(joint_metric):
+def test_monitoring_an_excluded_joint_metric_is_rejected(joint_metric) -> None:
     """Nothing would ever be monitored, so early stopping could never fire."""
     joint_metric("joint_slow", lambda inputs: {"joint_slow": 0.1})
     with pytest.raises(ValueError, match="nothing would ever be monitored"):
@@ -265,7 +265,7 @@ def test_monitoring_an_excluded_joint_metric_is_rejected(joint_metric):
         )
 
 
-def test_a_primary_metric_that_is_excluded_is_rejected(joint_metric):
+def test_a_primary_metric_that_is_excluded_is_rejected(joint_metric) -> None:
     """No pruning decision could ever be made on a metric never computed."""
     joint_metric("joint_slow", lambda inputs: {"joint_slow": 0.1})
     with pytest.raises(ValueError, match="no pruning decision"):
@@ -275,7 +275,7 @@ def test_a_primary_metric_that_is_excluded_is_rejected(joint_metric):
         )
 
 
-def test_objective_mean_says_that_its_members_changed(joint_metric, caplog):
+def test_objective_mean_says_that_its_members_changed(joint_metric, caplog) -> None:
     """Not an error, but it silently changes what is being monitored.
 
     The mid-training mean is taken over the remaining metrics only, so it is
@@ -292,7 +292,7 @@ def test_objective_mean_says_that_its_members_changed(joint_metric, caplog):
     assert "joint_slow" in caplog.text
 
 
-def test_objective_mean_averages_only_the_intermediate_metrics(joint_metric):
+def test_objective_mean_averages_only_the_intermediate_metrics(joint_metric) -> None:
     """The mean must not index a key the intermediate summary lacks."""
     joint_metric("joint_slow", lambda inputs: {"joint_slow": 0.1})
     cb = _callback(
@@ -305,7 +305,7 @@ def test_objective_mean_averages_only_the_intermediate_metrics(joint_metric):
     assert cb._early_stopping_values == [pytest.approx(0.5)]
 
 
-def test_a_marginal_only_study_is_unchanged():
+def test_a_marginal_only_study_is_unchanged() -> None:
     """The common case must behave exactly as before."""
     cb = _callback("nrmse", objective_metrics=["nrmse", "calibration_error"])
     assert [str(m) for m in cb.intermediate_metrics] == [
@@ -317,7 +317,7 @@ def test_a_marginal_only_study_is_unchanged():
 
 def test_a_bare_primary_strategy_defaulting_onto_an_excluded_metric_is_caught(
     joint_metric,
-):
+) -> None:
     """`pruning_strategy="primary"` leaves the metric to be defaulted.
 
     The tuple form names the metric up front; the bare string defaults it to
@@ -335,7 +335,7 @@ def test_a_bare_primary_strategy_defaulting_onto_an_excluded_metric_is_caught(
         )
 
 
-def test_the_tuple_primary_form_is_still_caught(joint_metric):
+def test_the_tuple_primary_form_is_still_caught(joint_metric) -> None:
     joint_metric("joint_slow", lambda inputs: {"joint_slow": 0.1})
     with pytest.raises(ValueError, match="no pruning decision"):
         _callback("joint_slow", pruning_strategy=("primary", "joint_slow"))
@@ -346,7 +346,7 @@ def test_the_tuple_primary_form_is_still_caught(joint_metric):
 # ---------------------------------------------------------------------------
 
 
-def test_an_overridden_joint_metric_is_excluded_too(joint_metric):
+def test_an_overridden_joint_metric_is_excluded_too(joint_metric) -> None:
     """`joint_metrics=` bypasses the `metrics=` filter entirely.
 
     `run_validation_pipeline` merges the override dict UNCONDITIONALLY,
@@ -376,7 +376,7 @@ def test_an_overridden_joint_metric_is_excluded_too(joint_metric):
     )
 
 
-def test_opting_in_runs_the_overridden_metric(joint_metric):
+def test_opting_in_runs_the_overridden_metric(joint_metric) -> None:
     """The escape hatch has to work through the override route as well."""
     calls: list[int] = []
 
@@ -396,7 +396,7 @@ def test_opting_in_runs_the_overridden_metric(joint_metric):
     assert cb._step == 1
 
 
-def test_include_joint_metrics_is_reachable_from_optimize():
+def test_include_joint_metrics_is_reachable_from_optimize() -> None:
     """Three of this callback's error messages tell the caller to set it."""
     import inspect
 

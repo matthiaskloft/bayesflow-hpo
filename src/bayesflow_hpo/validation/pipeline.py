@@ -158,6 +158,24 @@ def _run_joint_metrics(
         # reduction -- an ordinary result of reducing a float32 array --
         # passed the guard untouched and was then converted to a Python NaN
         # one line later, restoring the exact bug the guard was added for.
+        if not isinstance(result, Mapping):
+            # `result.items()` below would raise AttributeError, which the
+            # conversion handler does not catch -- so it escapes
+            # `_run_joint_metrics`, where no outer guard exists, and aborts
+            # the whole validation. One metric returning the wrong shape
+            # would then discard every marginal result the trial had
+            # already computed, which is exactly the blast radius D8's
+            # guard exists to contain.
+            failed_joint[name] = (
+                f"returned {type(result).__name__}, expected a mapping"
+            )
+            logger.warning(
+                "Joint metric %r returned %s instead of a mapping and is "
+                "invalidated for this trial.",
+                name,
+                type(result).__name__,
+            )
+            continue
         try:
             converted = {key: float(value) for key, value in result.items()}
         except (TypeError, ValueError) as exc:
@@ -229,7 +247,12 @@ def _declared_settings(
     using no joint metrics still never acquires the attribute.
     """
     declared = joint_metric_settings(joint_metric_fns)
-    if not declared:
+    # Keyed on whether any joint metric RAN, not on whether one declared
+    # settings. A custom joint metric may declare nothing and still depend
+    # on `draws.shape[1]` or the condition count -- every joint metric can
+    # -- so gating on `declared` left those runs pinning nothing at all, and
+    # a resume could change either count undetected.
+    if not joint_metric_fns:
         return {}
     return {
         **declared,

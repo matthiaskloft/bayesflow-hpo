@@ -37,7 +37,7 @@ def _reference_from_data(inputs):
     return np.repeat(per_sim, inputs.draws.shape[2], axis=1)
 
 
-def test_tarp_error_runs_as_an_objective_through_optimize(run_study):
+def test_tarp_error_runs_as_an_objective_through_optimize(run_study) -> None:
     """The headline metric, used the way the docs say to use it.
 
     `tarp_error` is registered, resolvable and `kind="objective"`, but cannot
@@ -71,7 +71,7 @@ def test_tarp_error_runs_as_an_objective_through_optimize(run_study):
         assert all(np.isfinite(v) for v in trial.values), trial.values
 
 
-def test_the_settings_pin_is_stamped_by_a_real_study(run_study):
+def test_the_settings_pin_is_stamped_by_a_real_study(run_study) -> None:
     """D7's attribute has to survive Optuna's own JSON round trip."""
     from bayesflow_hpo.objectives import JOINT_METRIC_SETTINGS_ATTR
 
@@ -89,7 +89,7 @@ def test_the_settings_pin_is_stamped_by_a_real_study(run_study):
     assert stored["tarp_error"]["reference_mode"] == "provided"
 
 
-def test_tarp_error_without_a_reference_stops_the_study(run_study):
+def test_tarp_error_without_a_reference_stops_the_study(run_study) -> None:
     """A configuration error must stop the study, not penalize every trial.
 
     It surfaces at the FIRST TRIAL rather than at pre-flight, and that is
@@ -111,7 +111,7 @@ def test_tarp_error_without_a_reference_stops_the_study(run_study):
         run_study(objective_metrics=["nrmse", "tarp_error"])
 
 
-def test_a_ten_fold_lc2st_override_survives_preflight(run_study):
+def test_a_ten_fold_lc2st_override_survives_preflight(run_study) -> None:
     """Pre-flight's tiny batch must not reject a valid production config.
 
     Five simulations per condition cannot fill ten folds, so forwarding the
@@ -137,7 +137,7 @@ def test_a_ten_fold_lc2st_override_survives_preflight(run_study):
         )
 
 
-def test_a_per_condition_reference_sequence_survives_preflight(run_study):
+def test_a_per_condition_reference_sequence_survives_preflight(run_study) -> None:
     """Arrays sized for the production batch must not be run against five rows.
 
     Truncating them would pair references with different, newly generated
@@ -167,7 +167,7 @@ def test_a_per_condition_reference_sequence_survives_preflight(run_study):
         )
 
 
-def test_the_random_reference_diagnostic_needs_no_configuration(run_study):
+def test_the_random_reference_diagnostic_needs_no_configuration(run_study) -> None:
     """`tarp_error_random` runs at its registered default, as a constraint."""
     study = run_study(
         objective_metrics=["nrmse"],
@@ -183,10 +183,32 @@ def test_the_random_reference_diagnostic_needs_no_configuration(run_study):
         )
 
 
-def test_an_override_naming_a_non_joint_metric_is_refused(run_study):
+def test_an_override_naming_a_non_joint_metric_is_refused(run_study) -> None:
     """Otherwise it runs a metric nobody asked for, under a borrowed name."""
     with pytest.raises(Exception, match="not registered joint metrics"):
         run_study(
             objective_metrics=["nrmse"],
             joint_metrics={"nrmse": lambda inputs: {"nrmse": 0.0}},
         )
+
+
+def test_a_custom_hook_must_still_produce_its_joint_objective_key(
+    run_study,
+) -> None:
+    """The production-batch restriction excuses the BUILT-IN validator only.
+
+    A custom `validate_fn` computes whatever it likes on whatever batch it
+    is given, so nothing about pre-flight's tiny batch excuses it from
+    producing the objective keys it was configured for. Narrowing the
+    requirement for it would be worse than not checking: with a joint
+    metric as the only objective, the required set would be empty and
+    pre-flight would verify nothing, while every trial took a penalty.
+    """
+    from bayesflow_hpo.pipeline import PipelineError
+
+    with pytest.raises(PipelineError, match="tarp_error"):
+        run_study(
+            objective_metrics=["nrmse", "tarp_error"],
+            validate_fn=lambda a, d, n: {"nrmse": 0.2},
+        )
+
