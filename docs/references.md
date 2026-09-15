@@ -3,12 +3,23 @@
 Checked against the OpenAlex API, with version exceptions documented below.
 APA 7 format.
 
-## Audit status (2026-09-11)
+## Audit status (2026-09-15)
 
-Two passes. The first was prompted by three inherited, unchecked citations
+Three passes. The first was prompted by three inherited, unchecked citations
 found during PR #86, two of which were wrong. The second was a systematic
-sweep of every implementation-backing claim in `src/`, this file, and
-`docs/references/`.
+sweep of every implementation-backing claim in `src/` and this file. The
+third (2026-09-15) closed the remainder: it read back the fourteen entries
+that had metadata but no substance check, resolved or annotated the five
+entries carrying no DOI, and deleted the `docs/references/` summaries rather
+than repair them.
+
+**Verification stamps.** Every locator added from this pass onwards names the
+edition it was checked against and the date, in the form
+`(Thm. 1 -- arXiv:1804.06788, verified 2026-09-11)`. This is a convention,
+not decoration: two of the thirteen errors corrected in PR #86 were a claim
+that went stale without anyone touching the sentence, and a locator read off
+a different edition than the one at hand. Neither is visible without the
+stamp. See [`contributing-references.md`](contributing-references.md).
 
 **Method.** A claim counts as verified only if it was read back against the
 full text of the work it cites, or -- for library behaviour -- executed
@@ -69,47 +80,116 @@ OpenAlex API. Claims are grouped below by what actually happened to them.
   rather than a degenerate one, and it is why `ObjectiveConfig` rejects the
   pair up front instead of letting `create_study` fail later.
 
+### Corrected (third pass, 2026-09-15)
+
+Issue #90 listed fourteen entries with metadata resolved and descriptive text
+never read back. One of them, Lemos et al. (2023), had already been verified
+against full text in the TARP commit (`a88ffd7`) before this pass began, so
+the list was stale by one; **the remaining thirteen were read here.** Two
+were wrong, both in the same way -- a result the paper *uses* was described
+as a result the paper *introduces*:
+
+| Claim | Was | Is |
+|---|---|---|
+| Bergstra et al. (2011) | "Proposes TPE **and sequential model-based optimization**" | SMBO is prior art the paper reviews (Sec. 2, citing [8, 9]). The paper's own proposals are the GP-based method (Sec. 3) and TPE, the adaptive-Parzen method (Sec. 4) |
+| Smith et al. (2018) | "**Shows** that the gradient-noise scale couples learning rate and batch size" | The noise scale `g = eps (N/B - 1)` and the resulting `B ∝ eps` rule are attributed in Sec. 1 to Smith & Le (2017), with Goyal et al. (2017) having observed the scaling empirically. This paper's own contribution is the *equivalence* of increasing `B` and decaying `eps`. The rule also carries a condition the entry omitted: `B ∝ eps` holds when `B << N` |
+
+Two more were correct but too thin to be checkable, and were given locators
+rather than corrected: Lopez-Paz & Oquab (2017) (the statistic is *held-out*
+accuracy on `D_te`, Sec. 3 step four, null `N(1/2, 1/(4 n_te))` in Sec. 3.1)
+and Gneiting (2011) (Thm. 3.1 and Thm. 3.3, see the entry).
+
+### Verified, and correct as written (third pass)
+
+Balandat et al. (2020) · Daulton et al. (2020) · Deb & Jain (2014) ·
+Bischl et al. (2023) · Goyal et al. (2017) · Shallue et al. (2019) ·
+Lueckmann et al. (2021) · Bland & Altman (1986) · Sobol' (1967). Each entry
+below carries the locator and edition it was checked against.
+
+Three of these are not in the local Zotero index and were verified against a
+named public edition instead, which the entries record: Goyal et al. (2017)
+and Gneiting (2011) against their arXiv versions, Bland & Altman (1986)
+against the authors' corrected reproduction.
+
 ### Bulk metadata check
 
 Every DOI in this file was resolved against the OpenAlex API. All resolve.
-Five entries carry a year differing from OpenAlex's (Balandat 2020/2019, Deb &
-Jain 2014/2013, Modrák 2025/2023, Smith 2018/2017): each is a published-version
-year cited against a preprint or online-first DOI, which is the intended
-convention, not an error. Five entries carry no DOI at all (Bergstra 2011, Li
-et al. 2018, Lopez-Paz & Oquab 2017, Lueckmann et al. 2021, Shallue et al.
-2019) -- a completeness gap, not a known error.
 
-### Known-unreliable: `docs/references/*.md`
+**Seven entries cite a published year against a preprint or online-first
+DOI**, so the year here differs from OpenAlex's `publication_year`. This is
+the intended convention, not an error, and the count is stated in full
+because an earlier version of this paragraph said "five" and then listed
+four:
 
-The per-paper summaries in `docs/references/` are **not** covered by this
-audit and several are demonstrably wrong. Spot checks found:
+| Entry | Cited | OpenAlex | DOI resolved |
+|---|---|---|---|
+| Balandat et al. | 2020 | 2019 | `10.48550/arXiv.1910.06403` |
+| Deb & Jain | 2014 | 2013 | `10.1109/TEVC.2013.2281535` (online-first) |
+| Modrák et al. | 2025 | 2023 | `10.1214/23-BA1404` (online-first) |
+| Smith et al. | 2018 | 2017 | `10.48550/arXiv.1711.00489` |
+| Li et al. | 2018 | 2016 | `10.48550/arXiv.1603.06560` |
+| Lopez-Paz & Oquab | 2017 | 2016 | `10.48550/arXiv.1610.06545` |
+| Shallue et al. | 2019 | 2018 | `10.48550/arXiv.1811.03600` |
 
-- `emmerich2018_moo.md` misidentifies Definitions 6, 7 and 9 (it has them as
-  Pareto optimality, hypervolume and unary hypervolume; they are the
-  search-space pre-order, the strict component order and the non-trivial
-  cone) and places Pareto dominance in Section 2.1 when it is in Section 3.
-- `li2018_hyperband.md` labels Algorithm 1 "Successive Halving" with
-  pseudocode that is not the paper's; Algorithm 1 is Hyperband. It also cites
-  an "ASHA (Li et al., 2016), JMLR 17(142)" that does not correspond to a
-  real work.
-- `sobol1967_qmc.md` gives section, page and theorem locators against pages
-  86--112, but the indexed copy is the Russian original (Zh. Vychisl. Mat.
-  Mat. Fiz. 7, pp. 784--802); the English translation carries the 86--112
-  pagination. The locators cannot have come from the source at hand.
+The last three are new as of 2026-09-15: resolving the missing DOIs (#91)
+necessarily created the mismatches, since the only DOI those works have
+belongs to the preprint. Updating the count in the same pass is the point of
+the convention -- the previous "five" was correct when written and silently
+false afterwards, which is failure mode (2) in
+[`contributing-references.md`](contributing-references.md).
 
-These files back no code path on their own -- every implementation claim
-cites this file or the source docstrings, both of which are now verified --
-but they should not be trusted as a secondary source, and are best treated as
-drafts pending their own pass.
+**The five entries that carried no DOI are now resolved (2026-09-15).** Four
+had an arXiv DOI available for the preprint of the cited version, and take it
+under the same published-year-against-preprint-DOI convention as above. One
+has no DOI at any version and now says so explicitly:
 
-**Still NOT verified.** Entries here whose description summarises a paper's
-general contribution without naming a locator have had metadata checked but
-not their substance: Bergstra et al. (2011), Balandat et al. (2020), Daulton
-et al. (2020), Deb & Jain (2014), Bischl et al. (2023), Goyal et al. (2017),
-Smith et al. (2018), Shallue et al. (2019), Lopez-Paz & Oquab (2017),
-Lueckmann et al. (2021), Lemos et al. (2023), Bland & Altman (1986), Gneiting
-(2011), Sobol' (1967). Also unverified: the two Optuna issue-tracker pointers
-in `study.py`, which needed repository access this audit did not have.
+| Entry | Outcome | OpenAlex |
+|---|---|---|
+| Bergstra et al. (2011) | **No DOI assigned.** Neither the NeurIPS 24 proceedings version nor any preprint carries one | `W2106411961` (no DOI) |
+| Li et al. (2018) | `10.48550/arXiv.1603.06560` (preprint) | JMLR record `W2963815651` carries no DOI; preprint `W2556522401` |
+| Lopez-Paz & Oquab (2017) | `10.48550/arXiv.1610.06545` (preprint) | `W2599043313`; ICLR carries no DOI |
+| Lueckmann et al. (2021) | `10.48550/arXiv.2101.04653` (preprint) | `W3118581558`; PMLR v130 carries no DOI |
+| Shallue et al. (2019) | `10.48550/arXiv.1811.03600` (preprint) | `W2900167092`; JMLR carries no DOI |
+
+OpenAlex indexes the Li et al. JMLR version as *18*(1), 6765--6816 (cumulative
+volume pagination) where this file cites *18*(185), 1--52 (JMLR's own article
+pagination). Same work, two pagination conventions; the article pagination is
+kept.
+
+### Deleted: `docs/references/*.md`
+
+The seventeen per-paper summaries in `docs/references/` were deleted on
+2026-09-15 rather than repaired. They backed no code path -- every
+implementation claim cites this file or its own docstring -- and every one of
+the three that was spot-checked was defective: misidentified definitions, an
+algorithm labelled with the wrong name over pseudocode that was not the
+paper's, locators taken against a different edition than the indexed copy, and
+a citation to a work that does not appear to exist. Rewriting meant re-reading
+seventeen papers to a standard the originals never met, to produce a secondary
+source nothing consumes. This file is now the single place a claim is stated.
+
+The two arXiv source tarballs that lived in that directory went with it; both
+papers (Lopez-Paz & Oquab 2017, Linhart et al. 2023) are in the local Zotero
+index and on arXiv.
+
+### Still not verified
+
+The two Optuna issue-tracker pointers in `study.py`, which need repository
+access this audit did not have.
+
+### Verified, but before the stamp convention existed
+
+Six entries were read against full texts in the first or second pass and so
+carry no verification stamp, because the convention postdates them:
+
+Daulton et al. (2021) · Deb et al. (2002) · Joe & Kuo (2008) ·
+Säilynoja et al. (2022) · Naeini et al. (2015) · Lemos et al. (2023)
+
+They are listed rather than left silent because
+[`contributing-references.md`](contributing-references.md) defines an absent
+stamp as meaning "nobody has read this back", which is not true of these.
+Stamp them when they are next touched; do not treat the gap as a finding
+against their content.
 
 ## Coverage Matrix
 
@@ -232,15 +312,40 @@ BoTorch: A framework for efficient Monte-Carlo Bayesian optimization. In
 https://doi.org/10.48550/arXiv.1910.06403
 
 PyTorch-based BO framework using MC acquisition functions and
-auto-differentiation.
+auto-differentiation. The abstract states the combination directly --
+"Monte-Carlo (MC) acquisition functions, a novel sample average approximation
+optimization approach, autodifferentiation, and variance reduction
+techniques" -- over "probabilistic models written in PyTorch". Backs the
+`"botorch"` / GP sampler preset.
+
+(Abstract, Sec. 1 -- arXiv:1910.06403, verified 2026-09-15.)
 
 ### Bergstra, J., Bardenet, R., Bengio, Y., & Kegl, B. (2011)
 
 Algorithms for hyper-parameter optimization. In *Advances in Neural
-Information Processing Systems 24* (pp. 2546--2554).
+Information Processing Systems 24* (pp. 2546--2554). No DOI assigned.
 
-Proposes TPE and sequential model-based optimization, handling conditional
-hyperparameters. Shows significant improvement over random search.
+**No DOI.** Neither the proceedings version nor any preprint carries one;
+OpenAlex holds the work as `W2106411961` with a null DOI. Recorded as a
+finding, not an omission.
+
+Introduces **TPE**, the adaptive-Parzen-window estimator of Section 4, and a
+Gaussian-process-based alternative in Section 3, both built on the expected
+improvement criterion. Backs the `"tpe"` sampler preset.
+
+The paper does **not** propose sequential model-based optimization: Section 2
+reviews SMBO as prior art ("SMBO algorithms have been used in many
+applications", citing [8, 9]). Conditional hyperparameters are handled: the
+abstract gives the contribution as "making response surface models `P(y|x)`
+in which many elements of hyper-parameter assignment (`x`) are known to be
+irrelevant given particular values of other elements" -- the tree-structured
+configuration spaces of Section 1. The improvement over random search is the
+paper's second stated contribution, "Automatic sequential optimization
+outperforms both manual and random search".
+
+(An earlier version of this entry read "Proposes TPE and sequential
+model-based optimization". Abstract, Secs. 1--4 -- NeurIPS 24 version,
+verified 2026-09-15.)
 
 ### Bischl, B., Binder, M., Lang, M., Pielok, T., Richter, J., Coors, S., Thomas, J., Ullmann, T., Becker, M., Boulesteix, A.-L., Deng, D., & Lindauer, M. (2023)
 
@@ -248,7 +353,14 @@ Hyperparameter optimization: Foundations, algorithms, best practices, and
 open challenges. *Wiley Interdisciplinary Reviews: Data Mining and Knowledge
 Discovery*, *13*(2), e1484. https://doi.org/10.1002/widm.1484
 
-Comprehensive survey of HPO foundations, algorithms, and open challenges.
+Comprehensive survey ("Advanced Review") of HPO foundations, algorithms, and
+open challenges. The abstract scopes it from "simple techniques such as grid
+or random search to more advanced methods like evolution strategies, Bayesian
+optimization, Hyperband, and racing", plus "practical recommendations
+regarding important choices to be made when conducting HPO". Cited as overall
+guidance, not for any single locator.
+
+(Abstract -- WIREs DMKD 13(2), verified 2026-09-15.)
 
 ### Daulton, S., Balandat, M., & Bakshy, E. (2020)
 
@@ -256,7 +368,13 @@ Differentiable expected hypervolume improvement for parallel multi-objective
 Bayesian optimization. In *Advances in Neural Information Processing Systems
 33* (pp. 9851--9864). https://doi.org/10.48550/arXiv.2006.05078
 
-Extends EHVI to parallel MOO with differentiable MC estimates (qEHVI).
+Extends EHVI to parallel MOO with differentiable MC estimates (qEHVI). The
+abstract defines qEHVI as "an acquisition function that extends EHVI to the
+parallel, constrained evaluation setting", exact up to MC integration error,
+whose gradients are computed "via auto-differentiation" rather than
+approximated. Backs the qEHVI acquisition preset.
+
+(Abstract -- arXiv:2006.05078, verified 2026-09-15.)
 
 ### Daulton, S., Balandat, M., & Bakshy, E. (2021)
 
@@ -274,8 +392,19 @@ reference-point-based nondominated sorting approach, Part I: Solving problems
 with box constraints. *IEEE Transactions on Evolutionary Computation*,
 *18*(4), 577--601. https://doi.org/10.1109/TEVC.2013.2281535
 
-Extends NSGA-II to many-objective optimization (4+ objectives) using
-reference-point-based selection.
+Extends NSGA-II to many-objective optimization using reference-point-based
+selection. The abstract defines many-objective as "having four or more
+objectives" and names the algorithm "a reference-point based many-objective
+NSGA-II (we call it NSGA-III)" that "emphasizes population members which are
+non-dominated yet close to a set of supplied reference points". Backs the
+`"nsga3"` sampler preset.
+
+Note the scope: this Part I covers box-constrained problems only
+("This paper presents results on unconstrained problems and the sequel paper
+considers constrained and other specialties"). Our preset is used on
+box-constrained search spaces, so Part I is the right citation.
+
+(Abstract, Sec. I -- IEEE TEVC 18(4), verified 2026-09-15.)
 
 ### Deb, K., Pratap, A., Agarwal, S., & Meyarivan, T. (2002)
 
@@ -299,11 +428,28 @@ one" -- which is the rule `_non_dominated_sort()` implements. Definition 8
 gives the efficient set and Pareto front. Both sit in Section 3, "Order and
 dominance".
 
-(An earlier version of this entry cited "non-dominated sorting (Eqs. 3--4)"
-and "complexity bounds (Props. 7, 9)". Neither survives the full text:
-Propositions 3--4 and 7--9 belong to the cone-order development, and the
-complexity bound we actually rely on is Deb et al.'s, not this tutorial's.
-Only the Definition 5 locator was correct.)
+**Proposition 9** (Sec. 4.1, "Linear weighting", p. 591) is the second
+locator this package relies on, in `pruning_strategies.py`: "In case of a
+convex Pareto front, for each solution in `Y_N` there is a solution of a
+linear scalarization problem for some weight vector `w`." The consequence
+the code cites is the unnumbered remark immediately after it -- "If the
+Pareto front is non-convex, then, in general, there can be points on the
+Pareto front which are the solutions of no LSP" -- illustrated in Fig. 2.
+Note what the proposition does *not* say: by Proposition 8 an LSP solution
+always lies on the Pareto front, convex or not. What fails on a non-convex
+front is *coverage*, not correctness, and Definition 15 is where "convex
+Pareto front" is defined.
+
+(An earlier version of this entry cited non-dominated sorting at
+~~Eqs. 3--4~~ and complexity bounds at ~~Props. 7, 9~~. The equations do not
+survive the full text, and the complexity bound we rely on is Deb et al.'s,
+not this tutorial's. The second-pass audit then over-corrected, recording that
+"Props. 3--4 and 7--9 are cone-order results" and that neither existed as
+cited; Proposition 9 does exist and is the scalarization result quoted
+above. Found by `scripts/check_citations.py`, which flagged the
+`pruning_strategies.py` locator as absent from this entry.
+Secs. 3--4.1, Defs. 5, 8, 15, Props. 8--9 -- Natural Computing 17(3),
+verified 2026-09-15.)
 
 ### Joe, S., & Kuo, F. Y. (2008)
 
@@ -322,6 +468,13 @@ properties if one uses a sample size that is not a power of 2".
 
 Hyperband: A novel bandit-based approach to hyperparameter optimization.
 *Journal of Machine Learning Research*, *18*(185), 1--52.
+https://doi.org/10.48550/arXiv.1603.06560
+
+**DOI note.** The JMLR version carries no DOI (OpenAlex `W2963815651`, null
+DOI); the preprint DOI above is cited against the published year, the same
+convention used for Balandat, Deb & Jain, Modrák and Smith. OpenAlex
+paginates the JMLR version as *18*(1), 6765--6816 (cumulative volume
+pagination); JMLR's own article pagination, 18(185), 1--52, is kept here.
 
 Combines random search with adaptive resource allocation via Successive
 Halving. **Algorithm 1 is Hyperband itself**, and takes the reduction factor
@@ -333,7 +486,9 @@ Section 6 does suggest quasi-random sampling as a promising extension:
 "Quasi-random methods like Sobol or latin hypercube [...] may improve the
 performance of Hyperband by giving better coverage of the search space."
 
-(An earlier version of this entry placed the eta=3 default in Section 3.6.)
+(An earlier version of this entry placed the eta=3 default in
+~~Section 3.6~~; it is in Algorithm 1's input line. Section 3.6 is still a
+valid locator for the "3 or 4" recommendation, stated above.)
 
 ### Linhart, J., Gramfort, A., & Rodrigues, P. L. C. (2023)
 
@@ -347,6 +502,25 @@ null by permutation; Algorithm 2 evaluates the test statistic and p-value for
 a given observation. Those two are what
 `bayesflow_hpo.validation.c2st.lc2st()` implements. Algorithms 3--4 are the
 normalizing-flow variant (l-C2ST-NF), which we do not implement.
+
+**Theorem 3** ("Local consistency and single class evaluation", Sec. 3) is
+the statistic's locator, cited in `objectives.py` for its bound: it states
+that for a Bayes-optimal `f` and `N_v -> infinity`, `t_MSE0(f, x_o) = 0` is
+necessary and sufficient for local consistency of `q` at `x_o`. `MSE_0` is
+the mean squared distance between the predicted class probability and one
+half, evaluated on samples from the posterior-approximation class only
+(`C = 0`) -- which is what makes the test reference-free. Since a
+probability lies in `[0, 1]`, the squared deviation from `0.5` is bounded by
+`0.25`, and so is its mean; that bound is what `METRIC_DIRECTIONS` records
+as the metric's worst raw value.
+
+The paper numbers its theorems flat (1, 2, 3), not by section. Theorem 1 is
+the accuracy-based oracle C2ST and Theorem 2 the regression C2ST of Kim et
+al.
+
+(An earlier version of the `objectives.py` comment cited ~~Theorem 3.1~~,
+which does not exist. Found by `scripts/check_citations.py`. Secs. 2--3,
+Thms. 1--3 -- arXiv:2306.03580, verified 2026-09-15.)
 
 ### Säilynoja, T., Bürkner, P.-C., & Vehtari, A. (2022)
 
@@ -432,23 +606,91 @@ OpenAlex work `W2254249950`.
 
 Revisiting classifier two-sample tests. In *Proceedings of the 5th
 International Conference on Learning Representations (ICLR 2017)*.
-https://arxiv.org/abs/1610.06545
+https://doi.org/10.48550/arXiv.1610.06545
 
-Binary classifier as two-sample test: label P positive, Q negative, test
-whether accuracy exceeds chance. Implementation:
-`bayesflow_hpo.validation.c2st.global_c2st()`.
+**DOI note.** ICLR carries no DOI; the preprint DOI above (OpenAlex
+`W2599043313`) is cited against the published year, per the convention
+above. The indexed PDF's footer reads "Published as a conference paper at
+ICLR 2017", confirming the cited year against a Zotero record labelled 2018.
+
+Binary classifier as two-sample test: label the `P` sample positive and the
+`Q` sample negative, then test whether accuracy exceeds chance. Two details
+of Section 3 are load-bearing for `global_c2st()` and were missing from an
+earlier version of this entry:
+
+- The statistic is accuracy on a **held-out** split. Section 3's five steps
+  split `D` into disjoint `D_tr` and `D_te`, train `f` on `D_tr`, and return
+  the accuracy on `D_te` (Eq. 2) as "our C2ST statistic". Accuracy on the
+  training split is not the statistic.
+- Section 3.1 gives the null: under `H_0: P = Q` classification is
+  impossible, `n_te * t` is `Binomial(n_te, 1/2)`, and for large `n_te` the
+  null distribution of the statistic is approximately `N(1/2, 1/(4 n_te))`.
+  This is what "exceeds chance" is measured against.
+
+Theorem 1 (Sec. 3.2) gives the test's power in terms of the effect size
+`eps`, where accuracy is `1/2 + eps` under `H_1`.
+
+Implementation: `bayesflow_hpo.validation.c2st.global_c2st()`.
+
+(Secs. 3--3.2, Eq. 2, Thm. 1 -- arXiv:1610.06545, verified 2026-09-15.)
 
 ### Bland, J. M., & Altman, D. G. (1986)
 
 Statistical methods for assessing agreement between two methods of clinical measurement. *The Lancet*, *327*(8476), 307–310. https://doi.org/10.1016/S0140-6736(86)90837-8
 
-Shows that Pearson correlation measures linear association rather than agreement and is insensitive to changes in scale. A corrected full-text reproduction is available at https://www-users.york.ac.uk/~mb55/meas/ba.htm. OpenAlex work `W2015795623`.
+Shows that Pearson correlation measures linear association rather than
+agreement and is insensitive to changes in scale. Both halves are the two
+numbered points under the heading "Inappropriate use of correlation
+coefficient":
+
+1. "`r` measures the strength of a relation between two variables, not the
+   agreement between them. We have perfect agreement only if the points
+   [...] lie along the line of equality, but we will have perfect
+   correlation if the points lie along any straight line."
+2. "A change in scale of measurement does not affect the correlation, but it
+   certainly affects the agreement."
+
+This is why `validation/registry.py` does not report a correlation as an
+agreement metric.
+
+Not in the local Zotero index. Verified against the authors' reproduction at
+https://www-users.york.ac.uk/~mb55/meas/ba.htm, which is the 1986 *Lancet*
+text as reprinted with a small numerical correction in *Biochimica Clinica*
+(1987) -- a different edition from the *Lancet* original cited above, and
+recorded as such. OpenAlex work `W2015795623`.
+
+(Sec. "Inappropriate use of correlation coefficient", points 1--2 -- York
+reproduction of the 1987 corrected reprint, verified 2026-09-15.)
 
 ### Gneiting, T. (2011)
 
 Making and evaluating point forecasts. *Journal of the American Statistical Association*, *106*(494), 746–762. https://doi.org/10.1198/jasa.2011.r10138
 
-Establishes that point summaries must be evaluated with a consistent loss: the mean is optimal for squared error, while the median is optimal for absolute error. OpenAlex work `W2075965721`.
+Establishes that point summaries must be evaluated with a *consistent*
+scoring function -- one whose "expected score is minimized when following the
+directive" -- and characterizes which losses are consistent for which
+functional. The two pairs this package relies on:
+
+- **Mean / squared error.** Theorem 3.1 (Savage): a scoring function is
+  consistent for the mean functional if and only if it is a Bregman
+  function, `S(x, y) = phi(y) - phi(x) - phi'(x)(y - x)` for convex `phi`.
+  Squared error is the `phi(y) = y^2` case.
+- **Median / absolute error.** Theorem 3.3 (Thomson, Saerens): a scoring
+  function is consistent for the `alpha`-quantile if and only if it is
+  generalized piecewise linear of order `alpha`. The median is
+  `alpha = 1/2`, for which absolute error is the canonical member.
+
+The paper's framing is why this matters here rather than being a matter of
+taste: it demonstrates that averaging an arbitrary error measure "can lead to
+grossly misguided inferences, unless the scoring function and the forecasting
+task are carefully matched". A metric that reports a median must not be
+scored as though it reported a mean.
+
+Not in the local Zotero index. Verified against the arXiv preprint of the
+JASA article. OpenAlex work `W2075965721`.
+
+(Abstract, Secs. 1.1, 3.1, 3.3, Thms. 3.1 and 3.3 -- arXiv:0912.0902,
+verified 2026-09-15.)
 
 ### Lemos, P., Coogan, A., Hezaveh, Y., & Perreault-Levasseur, L. (2023)
 
@@ -516,10 +758,21 @@ between repositories without a full-text check. It is correct.
 
 Benchmarking simulation-based inference. In *Proceedings of the 24th
 International Conference on Artificial Intelligence and Statistics*, PMLR
-130, pp. 343--351. https://proceedings.mlr.press/v130/lueckmann21a.html
+130, pp. 343--351. https://doi.org/10.48550/arXiv.2101.04653
 
-Public benchmark for SBI algorithms. Key finding: choice of performance
-metric is critical; no uniformly best algorithm exists.
+**DOI note.** PMLR carries no DOI; the preprint DOI above (OpenAlex
+`W3118581558`) is cited against the published year, per the convention
+above. The PMLR landing page remains
+https://proceedings.mlr.press/v130/lueckmann21a.html
+
+Public benchmark for SBI algorithms. Both halves of the key finding are the
+abstract's own words: "the choice of performance metric is critical" and
+"Neural network-based approaches generally exhibit better performance, but
+there is no uniformly best algorithm". Cited as overall guidance for SBI
+benchmarking, not for a locator.
+
+(Abstract -- arXiv:2101.04653 / AISTATS 2021, PMLR 130, verified
+2026-09-15.)
 
 ### Schmucker, R., Donini, M., Zafar, M. B., Salinas, D., & Archambeau, C. (2021)
 
@@ -534,6 +787,16 @@ Algorithm 2 calls the Algorithm 1 selector as
 `mo_selector(rung k, |rung k| / eta)`. Key finding: dominance-based approaches
 consistently outperform scalarization-based ones.
 
+**Section 6, "Experiments"** (p. 7, discussing Fig. 1 on NAS-201 /
+ImageNet16-120) is the locator for the scale-sensitivity claim in
+`pruning_strategies.py`, and both quoted phrases are verbatim: scalarization
+techniques "tend to penalize one objective heavier than the other, focusing
+on models with very low prediction time, and avoiding the area of the search
+space with slower more accurate models", whereas "globally informed
+techniques are more robust towards objectives of different magnitude". This
+is an empirical finding on two objectives of very different scale, which is
+why the strategy normalizes each metric before comparing.
+
 (An earlier version of this entry had the two algorithms the other way round.
 Corrected against the full text.)
 
@@ -542,10 +805,25 @@ Corrected against the full text.)
 *Accurate, large minibatch SGD: Training ImageNet in 1 hour* [Preprint].
 arXiv. https://doi.org/10.48550/arXiv.1706.02677
 
-Introduces gradual learning-rate warmup to avoid early optimization problems
-when training with aggressive learning rates. OpenAlex work
-`W2622263826`. Together with the Keras `CosineDecay` documentation, this backs
-the optional fixed-budget warmup.
+Introduces **gradual** learning-rate warmup to avoid early optimization
+problems when training with aggressive learning rates. Section 2.2
+("Warmup") is the locator. The paper is careful about what is new: warmup as
+such is attributed to He et al. (2016) -- "this issue can be alleviated by a
+properly designed warmup [He2016], namely, a strategy of using less
+aggressive learning rates at the start of training" -- and the *constant*
+warmup of that work is found insufficient at large `k`, where "a transition
+out of the low learning rate warmup phase can cause the training error to
+spike". Gradual warmup is this paper's proposal: starting from learning rate
+`eta` and incrementing it "by a constant amount at each iteration such that
+it reaches `eta_hat = k * eta` after 5 epochs", after which the original
+schedule resumes. That linear ramp is the shape our warmup implements.
+
+OpenAlex work `W2622263826`. Together with the Keras `CosineDecay`
+documentation, this backs the optional fixed-budget warmup.
+
+Not in the local Zotero index; verified against the arXiv full text.
+
+(Sec. 2.2, "Gradual warmup" -- arXiv:1706.02677, verified 2026-09-15.)
 
 ### Smith, S. L., Kindermans, P.-J., Ying, C., & Le, Q. V. (2018)
 
@@ -553,21 +831,79 @@ Don't decay the learning rate, increase the batch size. In *Proceedings of the
 6th International Conference on Learning Representations (ICLR 2018)*.
 https://doi.org/10.48550/arXiv.1711.00489
 
-Shows that the gradient-noise scale couples learning rate and batch size and
-supports reparameterizing known resource relationships instead of tuning
-redundant coordinates independently.
+Backs the learning-rate/batch-size coupling in `search_spaces/training.py`.
+Section 1 states the noise scale as `g = eps (N/B - 1)`, with `eps` the
+learning rate, `N` the training-set size and `B` the batch size, and reports
+that there is "an optimum fluctuation scale `g` which maximizes the test set
+accuracy (at constant learning rate)", giving "an optimal batch size
+proportional to the learning rate". That is the `B` proportional to `eps`
+rule the search space reparameterizes on.
+
+Two qualifications an earlier version of this entry dropped:
+
+- **The noise-scale result is not this paper's.** Section 1 attributes it to
+  Smith & Le (2017) -- "Smith & Le (2017) argued one should interpret SGD as
+  integrating a stochastic differential equation" -- and notes that "Goyal
+  et al. (2017) already observed this scaling rule empirically". This
+  paper's own contribution is the *equivalence*: decaying the learning rate
+  by a factor and multiplying the batch size by that factor give
+  near-identical learning curves, which it states no prior paper had shown
+  empirically.
+- **The rule is conditional.** The proportionality is stated for
+  `B` much smaller than `N`. It is not a claim about the whole batch-size
+  range, which matters wherever the derived dimension is evaluated near the
+  dataset size.
+
+(An earlier version read "Shows that the gradient-noise scale couples
+learning rate and batch size", attributing an inherited result to this
+paper. Abstract, Sec. 1 -- arXiv:1711.00489 / ICLR 2018, verified
+2026-09-15.)
 
 ### Shallue, C. J., Lee, J., Antognini, J. M., Sohl-Dickstein, J., Frostig, R., & Dahl, G. E. (2019)
 
 Measuring the effects of data parallelism on neural network training. *Journal
-of Machine Learning Research, 20*(112), 1–49.
+of Machine Learning Research, 20*(112), 1–49. https://doi.org/10.48550/arXiv.1811.03600
+
+**DOI note.** The JMLR version carries no DOI; the preprint DOI above
+(OpenAlex `W2900167092`) is cited against the published year, per the
+convention above. The JMLR landing page remains
 https://www.jmlr.org/papers/v20/18-789.html
 
-Shows that batch-size effects and suitable metaparameter settings vary greatly
-between workloads, supporting joint batch-size and learning-rate exploration
-instead of a fixed package-wide batch size. OpenAlex work `W2900167092` maps
-the preprint record to the cited 2019 JMLR version; full text was verified via
-the JMLR article PDF.
+Shows that batch-size effects and suitable metaparameter settings vary
+greatly between workloads, supporting joint batch-size and learning-rate
+exploration instead of a fixed package-wide batch size. The abstract states
+both halves: the relationship between batch size and steps-to-target "varies
+with the training algorithm, model, and data set, and [we] find extremely
+large variation between workloads", and "disagreements in the literature on
+how batch size affects model quality can largely be explained by differences
+in metaparameter tuning and compute budgets at different batch sizes". The
+paper also reports "no evidence that larger batch sizes degrade out-of-sample
+performance", which is why the search space does not cap batch size on
+quality grounds.
+
+**Sections 4 and 5** are the locators for the warmup decision in
+`search_spaces/training.py`. Section 4's preamble records the tuning cost:
+the metaparameters were tuned "independently [...] at each batch size,
+including the initial learning rate and, when learning rate decay was used,
+the decay schedule", by quasi-random search at roughly 100 non-divergent
+trials per batch size, and even so the authors report that "despite sampling
+100 metaparameter configurations per batch size and training for up to 25
+hours per configuration, it is still not certain whether we truly saturated
+performance". Section 5 ("Discussion") states the conclusion as a
+recommendation: "practitioners tune all optimization parameters anew when
+they change the batch size or they risk masking the true behavior of the
+training procedure".
+
+Note what this does *not* say. An earlier version of the `training.py`
+docstring cited ~~Sec. 5.1~~ for the claim that a third correlated schedule
+axis "made their own tuning unreliable". Section 5 has no subsections, and
+the paper reports the opposite: the decay schedule was tuned successfully
+alongside the learning rate. What the paper supports is the *cost* of
+retuning everything whenever batch size moves; treating that cost as a reason
+to fix the warmup length is this package's inference, not theirs.
+
+(Abstract, Secs. 1, 4--5 -- JMLR 20 (2019) 1--49 / arXiv:1811.03600, verified
+2026-09-15.)
 
 ### Sobol', I. M. (1967)
 
@@ -575,9 +911,25 @@ On the distribution of points in a cube and the approximate evaluation of
 integrals. *USSR Computational Mathematics and Mathematical Physics*,
 *7*(4), 86--112. https://doi.org/10.1016/0041-5553(67)90144-9
 
-Seminal paper introducing Sobol low-discrepancy sequences for numerical
-integration and optimization. Backs the QMC warm-up feature
-(`qmc_startup_trials`).
+Seminal paper introducing Sobol' low-discrepancy sequences for numerical
+integration. Section 1.1 states the aim as classes of nets and sequences
+"possessing a new property of uniformity"; Section 3 gives the effective
+construction, which needs neither multiplication nor addition but only shifts
+and bitwise addition modulo 2; Sections 6 and 7 bound the discrepancy and the
+irregularity and conclude that these nets are among the best in uniformity of
+distribution. Backs the QMC warm-up feature (`qmc_startup_trials`).
+
+**Edition.** The citation above is the English translation (*USSR Comput.
+Math. Math. Phys.* 7(4), 86--112, DOI `10.1016/0041-5553(67)90144-9`). The
+copy in the local index is the Russian original, *Zh. Vychisl. Mat. Mat.
+Fiz.* 7(4), 784--802, which is what these section numbers were read from --
+the section numbering is shared, the pagination is not. Page locators against
+this work must say which edition they mean; the deleted
+`docs/references/sobol1967_qmc.md` gave translation page numbers for a
+reading of the original, and that is how it was caught.
+
+(Secs. 1.1, 3, 6--7 -- Russian original, Zh. Vychisl. Mat. Mat. Fiz. 7(4),
+verified 2026-09-15.)
 
 ### Talts, S., Betancourt, M., Simpson, D., Vehtari, A., & Gelman, A. (2018)
 
@@ -596,8 +948,8 @@ uniformity, not the converse, and the paper is explicit that SBC "offers no
 guarantee that the posterior will cover the ground truth for any single
 observation". Uniform ranks are therefore necessary, not sufficient.
 
-(An earlier version of this entry, and three code comments, cited "Theorem 2"
-and stated the equivalence as "iff".)
+(An earlier version of this entry, and three code comments, cited
+~~Theorem 2~~ and stated the equivalence as "iff".)
 
 ### Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones, L., Gomez, A. N., Kaiser, L., & Polosukhin, I. (2017)
 

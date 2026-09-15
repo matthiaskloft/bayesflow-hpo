@@ -68,6 +68,8 @@ hpo.plot_pareto_front(study)
 | [Results & Export](results.md) | Pareto extraction, lexicographic-Pareto selection, visualization, model export |
 | [API Reference](api_reference.md) | Complete public API with signatures and descriptions |
 | [Changelog](quality_report.md) | Changes implemented in the v0.2.0 workover and post-v0.2.0 enhancements |
+| [References](references.md) | Verified APA 7 bibliography, coverage matrix, and audit status |
+| [Citing sources](contributing-references.md) | How to cite a source here: the verification-stamp convention and the consistency check |
 
 ## Installation
 

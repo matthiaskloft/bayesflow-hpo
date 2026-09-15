@@ -266,6 +266,10 @@ Added `scikit-learn>=1.3` as optional dependency (`pip install bayesflow-hpo[skl
 ### Source-Backed Reference Details (Package I)
 
 Completed documentation-backed implementation:
-- All 16 reference summaries in `docs/references/` with extensive method details
+- Docstring and matrix citations consolidated in `docs/references.md`.
+  (This line previously credited 16 reference summaries in
+  `docs/references/`; that directory was deleted on 2026-09-15 because the
+  summaries carried wrong locators and backed no code path. See the
+  "Audit status" section of `docs/references.md`.)
 - Docstring References sections in `validation/sbc_tests.py`, `validation/registry.py`, `optimization/pruning_strategies.py`, `optimization/study.py`, `results/extraction.py`, `validation/c2st.py`
 - Inline literature comments at key implementation points (SBC ranks, coverage intervals, non-dominated sort, MO-SHA pruning, QMC power-of-2, L-C2ST, global C2ST)

@@ -75,8 +75,11 @@ def should_prune_dominance(
     This is a simplified adaptation of MO-ASHA's dominance-based
     promotion rule (Schmucker et al., 2021, Algorithm 1).  Range
     normalization addresses the scale sensitivity of scalarization
-    approaches: Emmerich & Deutz (2018, Proposition 9) show that linear
-    scalarization can only find solutions on convex Pareto fronts;
+    approaches: Emmerich & Deutz (2018, Proposition 9 and the remark
+    following it, Sec. 4.1) show that a linear scalarization reaches every
+    Pareto-optimal point only when the front is convex, and that on a
+    non-convex front "there can be points on the Pareto front which are the
+    solutions of no LSP";
     Schmucker et al. (2021, Section 6) confirm empirically that
     scalarization "tends to penalize one objective heavier than the
     other" while "globally informed techniques are more robust towards

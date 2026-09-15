@@ -165,5 +165,3 @@ examples/checkpoints/
 examples/quickstart_model.json
 .workflow-state.json
 
-# Reference fulltexts (copied from sibling repo, not tracked)
-docs/references/fulltexts/

@@ -53,7 +53,9 @@ available for settings where reference posterior samples exist.
 - R6: Global C2ST is purely post-hoc (not usable as HPO objective —
   requires reference posterior per trial).
 - R7: All implementations must match the algorithms described in the
-  original papers (verified from LaTeX source in `docs/references/`).
+  original papers. (Originally verified from LaTeX sources kept in
+  `docs/references/`; that directory was deleted on 2026-09-15 and the
+  verified locators now live in [`../references.md`](../references.md).)
 
 ### Design Decisions
 
@@ -288,9 +290,9 @@ _None — papers read in full, reference implementations reviewed._
 
 - Linhart, J., Gramfort, A., & Rodrigues, P. L. C. (2023). L-C2ST:
   Local diagnostics for posterior approximations in simulation-based
-  inference. *NeurIPS 2023*. LaTeX source: `docs/references/arXiv-2306.03580v2.tar.gz`
+  inference. *NeurIPS 2023*. arXiv:2306.03580
 - López-Paz, D., & Oquab, M. (2017). Revisiting classifier two-sample
-  tests. *ICLR 2017*. LaTeX source: `docs/references/arXiv-1610.06545v4.tar.gz`
+  tests. *ICLR 2017*. arXiv:1610.06545
 - Reference implementation: https://github.com/JuliaLinhart/lc2st
   (reviewed `lc2st.py` and `c2st.py`)
 - sbi package implementation: `sbi.diagnostics.lc2st` (reviewed for
