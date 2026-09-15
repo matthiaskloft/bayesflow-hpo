@@ -560,7 +560,18 @@ def resolve_joint_metrics(
         whose resolve-time precondition fails.
     """
     resolved: dict[str, JointMetricFn] = {}
-    overridden = set(overridden)
+    # BOTH sides canonicalized. The list name was, the override key was not,
+    # so an aliased override never suppressed its registry entry: the
+    # registered callable resolved under the canonical name and the
+    # override dispatched under the alias, and the metric ran twice. Only
+    # `ObjectiveConfig.__post_init__` canonicalizes keys before this, so the
+    # `optimize()` path was covered and `check_pipeline`, `validate_once`
+    # and a direct pipeline call were not. Unreachable while no joint metric
+    # has an alias, which is exactly why it is worth closing now rather than
+    # by whoever registers the first one.
+    overridden = {canonical_metric_name(o) for o in overridden} | set(
+        overridden
+    )
     for n in names:
         if n in overridden or canonical_metric_name(n) in overridden:
             continue

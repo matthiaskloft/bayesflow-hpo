@@ -221,7 +221,13 @@ def run_validation_pipeline(
         routed to the joint dispatch instead of the per-parameter one.
     joint_metrics
         Additional joint metrics as ``{name: fn}``, merged over the ones
-        resolved from *metrics*. For a metric whose *configuration* belongs
+        resolved from *metrics* -- and merged **unconditionally**, so a
+        metric given here runs whether or not its name appears in
+        *metrics*. That is deliberate and load-bearing:
+        `make_lc2st_validate_fn` adds L-C2ST this way while passing a
+        *metrics* list that omits it. The cost is that an override for a
+        metric nothing optimizes is still paid for on every condition, so
+        pass only what you want computed. For a metric whose *configuration* belongs
         to one study rather than to the process -- L-C2ST's fold count,
         classifier and seed, say -- passing it here keeps that configuration
         out of the global registry, where it would silently apply to every

@@ -695,11 +695,19 @@ def _default_lc2st_metric(inputs: JointMetricInputs) -> dict[str, float]:
 
 
 # The registered name must declare the SAME settings the default factory
-# produces, or the study pin covers a configured L-C2ST and not the
-# registry's own. It would then be stamped when a caller used
-# `make_lc2st_validate_fn(...)` and silently unstamped -- hence unchecked --
-# when the same study resumed with plain `objective_metrics=["lc2st"]` at
-# different defaults.
+# produces, or the pin would cover a configured L-C2ST and not the
+# registry's own -- so a study resumed with plain
+# `objective_metrics=["lc2st"]` would compare against settings that were
+# never this metric's.
+#
+# Note what this does NOT buy: a study driven by `make_lc2st_validate_fn`
+# is on the `validate_fn` branch, which never reaches the pin at all
+# (`optimization/objective.py` calls
+# `check_or_stamp_joint_metric_settings` only in the `else` of
+# `if config.validate_fn is not None`). A hook returns a flat dict, not a
+# `ValidationResult`, so there is nothing to read the declaration off.
+# `objectives.check_or_stamp_joint_metric_settings` records that as the
+# fourth thing the pin cannot do.
 def _check_lc2st_dependency() -> None:
     """Resolve-time guard for the registered ``lc2st``.
 

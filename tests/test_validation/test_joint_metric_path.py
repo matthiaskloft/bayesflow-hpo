@@ -561,3 +561,37 @@ def test_an_override_must_not_name_a_marginal_metric():
             joint_metrics={"nrmse": lambda inputs: {"nrmse": 0.0}},
         )
 
+
+def test_an_aliased_override_suppresses_its_registry_entry():
+    """Both sides of the skip check must be canonicalized, not just one.
+
+    The list name was canonicalized and the override key was not, so an
+    aliased override left the registry entry resolved under the canonical
+    name AND dispatched the override under the alias -- the metric ran
+    twice. Only `ObjectiveConfig.__post_init__` canonicalizes keys before
+    this, so `optimize()` was covered while `check_pipeline`,
+    `validate_once` and a direct pipeline call were not.
+    """
+    from bayesflow_hpo.validation.registry import (
+        _ALIASES,
+        register_joint_metric,
+        resolve_joint_metrics,
+    )
+
+    register_joint_metric(
+        "aliased_joint",
+        lambda inputs: {"aliased_joint": 0.0},
+        aliases=["aj"],
+        kind="diagnostic",
+        overwrite=True,
+    )
+    try:
+        assert resolve_joint_metrics(["aliased_joint"], overridden={"aj"}) == {}
+        assert resolve_joint_metrics(["aj"], overridden={"aliased_joint"}) == {}
+        # Without an override it still resolves, under either spelling.
+        assert set(resolve_joint_metrics(["aj"])) == {"aj"}
+    finally:
+        _REGISTRY.pop("aliased_joint", None)
+        _JOINT.discard("aliased_joint")
+        _ALIASES.pop("aj", None)
+

@@ -695,6 +695,14 @@ def check_or_stamp_joint_metric_settings(
       such a study would assert that its existing trials ran at these
       settings, which is exactly what is unknown. Refusing is the honest
       option, with the escape hatch of setting the attribute by hand.
+    - **It does not see a custom ``validate_fn`` at all.** The pin is
+      written from ``ValidationResult.joint_metric_settings``, and a
+      ``validate_fn`` hook returns a flat ``{name: value}`` dict, so there
+      is no declaration to read. A study driven by
+      ``make_lc2st_validate_fn`` therefore records nothing and compares
+      nothing -- including across a change of ``n_folds`` or ``seed``. The
+      hook owns its own validation step, and making it report settings
+      would mean changing a public contract for a guard it did not ask for.
     - **It does not close the concurrent-stamp window.** Two workers racing
       on a fresh shared-storage study can both see zero completed trials and
       stamp different settings, last write winning. This pre-exists for the
