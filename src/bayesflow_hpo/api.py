@@ -168,6 +168,8 @@ def optimize(
     # rebind a caller's trailing positional arguments.
     *,
     sampler_n_startup_trials: int | None = None,
+    joint_metrics: dict[str, Any] | None = None,
+    include_joint_metrics: bool = False,
 ) -> optuna.Study:
     """Run HPO with a high-level convenience API.
 
@@ -269,6 +271,40 @@ def optimize(
 
         Use :func:`~bayesflow_hpo.list_metrics` for just the names,
         or :func:`~bayesflow_hpo.register_metric` to add custom ones.
+    joint_metrics
+        Configured joint metrics as ``{name: fn}``, forwarded to the
+        validation pipeline. This is how a joint metric whose configuration
+        belongs to one study reaches a trial: ``tarp_error`` needs reference
+        points derived from the data, which no registry default can supply,
+        so without this it is registered, resolvable, and unusable. Build
+        one with
+        :func:`~bayesflow_hpo.validation.tarp.make_tarp_joint_metric`. A
+        name given here overrides its registered entry rather than being
+        resolved alongside it, so a placeholder never raises in its place.
+        The key must name a registered joint metric: an unchecked key would
+        run a metric nothing requested, reported in the summary under a name
+        no configuration mentions. Register a wholly new one with
+        :func:`~bayesflow_hpo.validation.registry.register_joint_metric`
+        first; this parameter is for supplying a CONFIGURATION, which is
+        what does not belong in a process-wide registry.
+
+        Ignored when a custom ``validate_fn`` is supplied: that hook owns
+        the whole validation step and is called on its documented
+        three-argument contract, so it decides for itself which metrics to
+        compute.
+    include_joint_metrics
+        Whether joint metrics also run at every *intermediate* validation,
+        under
+        :class:`~bayesflow_hpo.optimization.validation_callback.PeriodicValidationCallback`.
+        ``False`` by default: L-C2ST measured ~56 s per condition, so a
+        20-condition grid would spend ~18 minutes per interval deciding
+        whether to prune, and a pruning decision that costs more than the
+        training it might save is not a pruning decision. TARP is ~79 ms per
+        condition, three to four orders of magnitude cheaper, so opting in
+        is reasonable for some joint metrics and not others. Setting this
+        also changes what ``early_stopping_monitor="objective_mean"`` means
+        mid-training, since the mean is then over a different set of
+        metrics; the callback logs when that happens.
     objective_mode
         ``"pareto"`` (default) — each metric is its own objective;
         study has ``len(objective_metrics) + 1`` directions (one per
@@ -567,6 +603,8 @@ def optimize(
         adapter=adapter,
         search_space=search_space,
         validation_data=validation_data,
+        joint_metrics=joint_metrics,
+        include_joint_metrics=include_joint_metrics,
         training_mode=training_mode,
         epochs=epochs,
         num_batches=num_batches,
@@ -696,6 +734,8 @@ def _build_objective(
     adapter: bf.adapters.Adapter,
     search_space: CompositeSearchSpace,
     validation_data: ValidationDataset,
+    joint_metrics: dict[str, Any] | None = None,
+    include_joint_metrics: bool = False,
     training_mode: Literal["fixed_budget", "open_ended"],
     epochs: int,
     num_batches: int,
@@ -741,6 +781,8 @@ def _build_objective(
             metric_constraints_hard=metric_constraints_hard,
             metric_constraints_soft=metric_constraints_soft,
             n_posterior_samples=n_posterior_samples,
+            joint_metrics=joint_metrics,
+            include_joint_metrics=include_joint_metrics,
             objective_metrics=objective_metrics,
             objective_mode=objective_mode,
             cost_metric=cost_metric,

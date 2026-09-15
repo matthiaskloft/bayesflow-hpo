@@ -45,6 +45,7 @@ from bayesflow_hpo.objectives import (
     MAX_PARAM_COUNT,
     _direction_for,
     canonical_summary,
+    check_or_stamp_joint_metric_settings,
     compute_inference_time_per_dataset,
     extract_multi_objective_values,
     get_param_count,
@@ -68,7 +69,9 @@ from bayesflow_hpo.types import BuildApproximatorFn, TrainFn, ValidateFn
 from bayesflow_hpo.validation.data import ValidationDataset
 from bayesflow_hpo.validation.registry import (
     CanonicalMetricName,
+    JointMetricConfigurationError,
     canonical_metric_name,
+    output_keys_for,
     validate_objective_metric_kinds,
 )
 
@@ -113,6 +116,7 @@ def default_validate_fn(
     validation_data: ValidationDataset,
     n_posterior_samples: int,
     objective_metrics: list[str] | None = None,
+    joint_metrics: dict[str, Any] | None = None,
 ) -> dict[str, float]:
     """Run the built-in validation pipeline and return metric dict.
 
@@ -148,8 +152,96 @@ def default_validate_fn(
         validation_data=validation_data,
         n_posterior_samples=n_posterior_samples,
         metrics=_pipeline_metrics(objective_metrics or []),
+        joint_metrics=joint_metrics,
     )
     return dict(result.summary)
+
+
+def _planned_joint_settings(config: ObjectiveConfig) -> dict[str, Any]:
+    """Settings the final validation WILL declare, resolved before training.
+
+    Everything here is knowable without running anything: which joint
+    metrics the run resolves to, what each declares, and the validation
+    run's own counts. Computing it early is what lets the study refuse an
+    incompatible resume before paying for a training run.
+
+    Returns an empty mapping when the run resolves NO joint metric, so a
+    study that uses none is untouched.
+
+    Raises
+    ------
+    JointMetricConfigurationError
+        If a joint metric cannot be resolved -- an unconfigured placeholder,
+        or a failed resolve-time precondition. Raising here rather than at
+        final validation means the refusal costs nothing.
+    """
+    from bayesflow_hpo.validation.pipeline import _declared_settings
+    from bayesflow_hpo.validation.registry import resolve_joint_metrics
+
+    if config.validate_fn is not None:
+        # The hook owns its validation step and reports no settings, so
+        # there is nothing to plan for. Documented on the pin itself.
+        return {}
+
+    overrides = config.joint_metrics or {}
+    names = _pipeline_metrics(
+        config.objective_metrics, _constraint_metric_names(config)
+    )
+    resolved = {
+        **resolve_joint_metrics(list(names), overridden=overrides.keys()),
+        **overrides,
+    }
+    # The pipeline's own helper, CALLED rather than reimplemented. These two
+    # must agree exactly -- the early check is only useful if it predicts
+    # what final validation will declare -- and a parallel implementation
+    # already drifted once: when `_declared_settings` was changed to pin the
+    # run counts whenever any joint metric RUNS, this copy kept gating on
+    # whether one DECLARED settings. An ordinary custom metric that declares
+    # nothing then planned `{}` while validation stored
+    # `__validation_run__`, so a resume at a different condition count could
+    # be pruned against the old scores before the guard ever saw it.
+    return _declared_settings(
+        resolved,
+        n_posterior_samples=int(config.n_posterior_samples),
+        n_conditions=len(config.validation_data.simulations),
+    )
+
+
+def _n_measured_trials(study: optuna.Study) -> int:
+    """Count COMPLETE trials that actually measured their metrics.
+
+    The joint-settings guard reads this as "trials whose values I cannot
+    vouch for", and refuses to stamp a study that has any. Counting every
+    COMPLETE trial makes that wrong in a way that bricks ordinary studies:
+    a proposal rejected for `max_memory_mb` or `max_param_count` returns
+    `_penalty()` and is recorded COMPLETE, so a fresh study whose FIRST
+    proposal is oversized -- routine early in a search -- reaches the next,
+    feasible trial with a positive count and no stored settings, and the
+    guard aborts the whole study over trials that never ran a metric at
+    all. Build failures, training failures and validation fallbacks are the
+    same case.
+
+    Those trials are all marked, so they can be excluded precisely rather
+    than guessed at. A trial with none of these markers completed its
+    validation step, which is exactly when its joint metric values are
+    real.
+
+    Parameters
+    ----------
+    study
+        The study being written to.
+
+    Returns
+    -------
+    int
+        Number of COMPLETE trials that produced measured metric values.
+    """
+    unmeasured = ("rejected_reason", "training_error", "validation_error")
+    return sum(
+        t.state == optuna.trial.TrialState.COMPLETE
+        and not any(marker in t.user_attrs for marker in unmeasured)
+        for t in study.get_trials(deepcopy=False)
+    )
 
 
 def _validate_metric_keys(
@@ -447,6 +539,20 @@ class ObjectiveConfig:
     #: fires. Recorded so the pipeline metric list can include them.
     metric_constraints_soft: list[MetricConstraintSpec] | None = None
     n_posterior_samples: int = 500
+    #: Whether joint metrics are computed at every intermediate validation
+    #: as well as at final validation. False by default because they are
+    #: expensive enough to change what pruning is for -- L-C2ST measured
+    #: ~56 s per condition -- and three of
+    #: `PeriodicValidationCallback`'s own error messages tell the caller to
+    #: set this, so it has to be reachable from `optimize()` or that advice
+    #: cannot be taken.
+    include_joint_metrics: bool = False
+    #: Configured joint metrics, `{name: fn}`. The route by which a joint
+    #: metric that cannot run at a registry default -- `tarp_error`, which
+    #: needs data-derived reference points -- reaches the validation
+    #: pipeline. Without it that metric is registered, resolvable, and
+    #: unusable.
+    joint_metrics: dict[str, Any] | None = None
     n_intermediate_posterior_samples: int = 250
     intermediate_validation_interval: int = 10
     intermediate_validation_warmup: int = 10
@@ -484,6 +590,18 @@ class ObjectiveConfig:
             self.early_stopping_monitor = canonical_metric_name(
                 self.early_stopping_monitor
             )
+        # `joint_metrics` is keyed BY METRIC NAME, so it is one of those
+        # fields too. An alias key would not match the canonical name in the
+        # pipeline's `metrics=` list, so the override would not suppress the
+        # registry entry -- and for a placeholder like `tarp_error` that
+        # means the configured metric is ignored and its unconfigured
+        # namesake raises instead, which reads as the feature being broken
+        # rather than the key being spelled differently.
+        if self.joint_metrics:
+            self.joint_metrics = {
+                canonical_metric_name(k): v
+                for k, v in self.joint_metrics.items()
+            }
         # Every OTHER field naming a metric has to be canonicalized in the same
         # place, or it reads a key nothing writes. These are not hypothetical:
         # `("primary", "cal_error")` made PeriodicValidationCallback index a
@@ -1033,9 +1151,24 @@ class GenericObjective:
         if constraints is None:
             return None
 
+        failed_keys = set(trial.user_attrs.get("failed_metric_keys", ()))
         for metric, threshold, direction in constraints:
             value = metrics_summary.get(metric)
             if value is None:
+                if metric in failed_keys:
+                    # Missing because its producer FAILED, not because it
+                    # was never requested. Skipping would admit the trial on
+                    # a measurement that did not happen, which is the one
+                    # thing a hard constraint exists to prevent.
+                    logger.warning(
+                        "Trial #%d: hard metric constraint %r could not be "
+                        "measured (%s); rejecting the trial.",
+                        trial.number,
+                        metric,
+                        trial.user_attrs.get("failed_joint_metrics", {}),
+                    )
+                    trial.set_user_attr("rejected_reason", "metric_constraint")
+                    return self._penalty()
                 logger.warning(
                     "Trial #%d: hard metric constraint skipped; missing metric %r",
                     trial.number,
@@ -1313,11 +1446,31 @@ class GenericObjective:
                     validate_fn=config.validate_fn,
                     pruning_strategy=config.pruning_strategy,
                     objective_metrics=config.objective_metrics,
+                    joint_metrics=config.joint_metrics,
+                    include_joint_metrics=config.include_joint_metrics,
                     early_stopping_patience=config.early_stopping_patience,
                     early_stopping_window=config.early_stopping_window,
                     early_stopping_monitor=config.early_stopping_monitor,
                 )
             )
+
+        # --- Settings compatibility, BEFORE training ---
+        # The post-validation check below is too late on a resumed study
+        # with `include_joint_metrics=True`: `PeriodicValidationCallback`
+        # computes the new-scale statistic, reports it, and compares it
+        # against old trials during training -- and if it prunes, the trial
+        # exits before the check runs at all. A run whose new-scale scores
+        # keep losing could then spend its whole budget pruning without ever
+        # issuing the incompatibility error it was promised.
+        #
+        # Everything needed is knowable without running anything, so the
+        # refusal costs nothing. The post-validation check stays, because it
+        # compares what ACTUALLY ran rather than what was planned.
+        check_or_stamp_joint_metric_settings(
+            trial.study,
+            _planned_joint_settings(config),
+            n_completed_trials=_n_measured_trials(trial.study),
+        )
 
         # --- Step 7: TRAIN ---
         t_train_start = time.perf_counter()
@@ -1326,6 +1479,15 @@ class GenericObjective:
                 config.train_fn(approximator, config.simulator, params, callbacks)
             else:
                 default_train_fn(approximator, config.simulator, params, callbacks)
+        except JointMetricConfigurationError:
+            # Reaches here from `PeriodicValidationCallback`, which runs
+            # DURING training. The catch-all below would record it as a
+            # `training_error` and return `_penalty()`, so the study would
+            # spend its whole cap on a misconfiguration -- the same defect
+            # already fixed for final validation, one layer out, and now
+            # reachable because joint metrics no longer run in pre-flight.
+            cleanup_trial()
+            raise
         except optuna.TrialPruned:
             cleanup_trial()
             raise
@@ -1385,8 +1547,46 @@ class GenericObjective:
                         config.objective_metrics,
                         _constraint_metric_names(config),
                     ),
+                    joint_metrics=config.joint_metrics,
                 )
                 inference_time = result.timing.get("inference", 0.0)
+                # Checked HERE rather than at study creation, because this
+                # is the first moment the settings are known: they are
+                # declared by the metric callables that actually ran, not
+                # passed to `optimize()`, so that the record cannot disagree
+                # with what was computed. Before the objective values are
+                # reported, so a trial scored under changed settings never
+                # enters the study.
+                check_or_stamp_joint_metric_settings(
+                    trial.study,
+                    result.joint_metric_settings,
+                    n_completed_trials=_n_measured_trials(trial.study),
+                )
+                if result.failed_joint_metrics:
+                    # The reason a joint metric produced no value, kept where
+                    # a later reader can find it. Without this the only
+                    # evidence is a penalty, which is indistinguishable from
+                    # a genuinely bad model.
+                    trial.set_user_attr(
+                        "failed_joint_metrics",
+                        dict(result.failed_joint_metrics),
+                    )
+                    # The KEYS those metrics would have written, for the
+                    # constraint paths. A constraint names an output key
+                    # rather than its producer, and both paths read a
+                    # missing key as "not violated": the hard check skips it
+                    # with a warning, the soft callback returns zero
+                    # violation. So a trial whose constrained joint metric
+                    # FAILED was classified feasible on the strength of a
+                    # measurement that never happened.
+                    trial.set_user_attr(
+                        "failed_metric_keys",
+                        sorted(
+                            key
+                            for name in result.failed_joint_metrics
+                            for key in output_keys_for(name)
+                        ),
+                    )
                 metrics_summary = _validate_metric_keys(
                     dict(result.summary), config.canonical_objective_metrics,
                     penalty_values=self._metric_penalty_map(),
@@ -1411,6 +1611,19 @@ class GenericObjective:
             # Wrap for extract_multi_objective_values compatibility.
             metrics = {"summary": metrics_summary}
 
+        except JointMetricConfigurationError:
+            # NOT a trial failure, so it must not reach the catch-all below,
+            # which converts anything it catches into a training-loss
+            # fallback. This condition is a property of the STUDY -- changed
+            # settings, a metric that cannot run as configured, a missing
+            # optional dependency -- so every subsequent trial would hit it
+            # too and the run would spend its whole budget recording
+            # fabricated values behind a warning line. That is worse than
+            # not guarding at all: incomparable real numbers are at least
+            # real. Raising stops on the first trial, the only useful moment
+            # to tell the caller.
+            cleanup_trial()
+            raise
         except optuna.TrialPruned:
             cleanup_trial()
             raise

@@ -48,7 +48,13 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: pip install torch --index-url https://download.pytorch.org/whl/cpu
-      - run: pip install -e ".[dev]" pytest-cov -c .github/ci-constraints.txt
+      # [sklearn] as well as [dev]: the whole C2ST suite is behind a
+      # `pytest.importorskip("sklearn")`, so without it those tests were
+      # silently skipped in CI rather than run. That was tolerable while
+      # L-C2ST was reachable only through an explicit factory; it is not
+      # now that `lc2st` is a registered objective metric with a direction
+      # entry, because the path a study takes to it would have no coverage.
+      - run: pip install -e ".[dev,sklearn]" pytest-cov -c .github/ci-constraints.txt
       - run: pytest tests/ -v --cov=bayesflow_hpo --cov-report=xml --cov-report=term
       - name: Upload coverage to Codecov
         if: matrix.python-version == '3.13'

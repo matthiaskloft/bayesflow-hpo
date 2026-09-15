@@ -97,26 +97,63 @@ Design settled in
 [`docs/plans/plan-joint-metric-path.md`](plans/plan-joint-metric-path.md),
 covering [issue #82](https://github.com/matthiaskloft/bayesflow-hpo/issues/82)
 (TARP) and [issue #75](https://github.com/matthiaskloft/bayesflow-hpo/issues/75)
-(`coverage_error`) as one capability. Nothing is implemented yet.
+(`coverage_error`) as one capability.
 
-The plan has been through an independent review and revised; its §7 records
-the three integration decisions the first version got wrong.
+**Shipped: the path itself and TARP (#82), plan steps 1-5.**
 
-Two items in it stand on their own and are worth landing first:
+- `lc2st` has its direction (`worst_raw=0.25`). It had none, so a missing
+  value took the `+inf` fallback meant for metrics of unknown scale -- and in
+  `objective_mode="mean"` one absent `lc2st` drove the whole mean to `+inf`,
+  collapsing every failing trial to the same value.
+- `JointMetricInputs` + `register_joint_metric`, dispatched inside
+  `run_validation_pipeline`'s existing condition loop. One registry with a
+  `_JOINT` marker, not a parallel one, so the name survives all four lookups
+  that fail silently.
+- `make_lc2st_validate_fn` is a thin wrapper over the pipeline; its
+  duplicated condition loop is deleted. Verified as a refactor rather than a
+  rewrite by `plans/check_lc2st_refactor_equivalence.py`, which runs the
+  pre-refactor implementation from git against the current one: bit-identical
+  for one parameter, 6.9e-18 for three (float association order, since the
+  pooled mean became a two-stage mean).
+- Joint metrics are off `PeriodicValidationCallback` by default, via an
+  EXPLICIT intermediate metric set. Excluding them naively would have
+  disabled marginal pruning and validation early stopping too, because the
+  callback requires every objective key and no-ops when one is missing.
+- TARP as `tarp_error` (supplied reference, objective) and
+  `tarp_error_random` (random reference, diagnostic), ported from
+  `bayesflow-irt` and checked against that revision numerically.
+- `bayesflow_hpo_joint_metric_settings` pins the configuration a study's
+  joint metrics ran at, declared by the callables that ran rather than
+  repeated to `optimize()`.
 
-1. Register `lc2st`'s direction (`worst_raw=0.25`). It has no
-   `METRIC_DIRECTIONS` entry today, so a missing `lc2st` scores `+inf` on a
-   statistic bounded above by 0.25. No dependency on anything else.
-2. Lift the joint metric dispatch into `run_validation_pipeline` and refactor
-   `make_lc2st_validate_fn` onto it, deleting its duplicated condition loop.
+**Found while implementing, worth knowing:**
 
-Both paper claims the plan rests on are now **verified against full text** and
+- The TARP reference draw had a seed collision. Drawing references from
+  `default_rng(seed)` consumes the same uniform stream a caller's simulator
+  does, so seeding both alike -- the obvious thing for a reproducible study
+  -- made every reference point an affine image of its own truth
+  (correlation exactly 1.0) and scored a perfectly calibrated posterior at
+  `tarp_error = 0.5`, the worst attainable value, silently. Fixed here with a
+  spawn key. **The same defect is live in `bayesflow-irt` at `ffc68d5`.**
+- CI never installed scikit-learn, so the entire C2ST suite was skipped
+  rather than run. Now `[dev,sklearn]`.
+
+**Not shipped: `coverage_error` (#75), plan step 6.** The contract carries
+`approximator`, which is all #75 needed from #82. The rest is #75's own: the
+plan's §4 leaves its floor treatment and its `mode` default explicitly
+undecided, and §3 records that `requires=` gates nothing today (zero call
+sites; read only by `describe_metrics`), so it needs an explicit import guard
+like `_require_sklearn` rather than a declaration.
+
+Both paper claims the plan rests on are **verified against full text** and
 recorded in [`references.md`](references.md) -- Lemos et al. (2023) Sec. 3.1 on
 HPD coverage, and Modrak et al. (2025) Sec. 4.3, which turns out to be sharper
 than the plan claimed: marginal ranks under a data-ignoring posterior are
-*exactly* uniform, not merely hard to distinguish from uniform.
+*exactly* uniform, not merely hard to distinguish from uniform. Algorithm 2
+was transcribed from the PDF rather than the converted text, whose math
+extraction is lossy exactly where the algorithm body is.
 
-The per-trial cost #82 asked for is also measured (plan §D9). TARP is cheap
+The per-trial cost #82 asked for is measured (plan §D9). TARP is cheap
 (79 ms/condition at 500 sims x 1000 draws x 15 params) and `resolution` is
 free; the package's existing `lc2st` is ~700x more expensive at matched shapes
 (56 s/condition), which is what forces joint metrics off

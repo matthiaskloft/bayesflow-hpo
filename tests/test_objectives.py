@@ -452,6 +452,33 @@ class TestMissingMetricDefaults:
         assert worst_objective_value("correlation") == 2.0
         assert worst_objective_value("contraction") == 1.0
 
+    def test_lc2st_takes_its_own_bound_not_the_unknown_scale_fallback(self):
+        """A bounded statistic must not inherit the +inf unknown-scale default.
+
+        `lc2st` is the mean of ``(p - 0.5) ** 2`` over probabilities, so it
+        cannot exceed 0.25 -- yet it had no direction entry and fell through
+        to `worst_raw_value`'s +inf. The consequence is not merely a loose
+        bound: see the mean-mode test below.
+        """
+        assert worst_objective_value("lc2st") == 0.25
+
+    def test_an_absent_lc2st_does_not_make_the_whole_mean_objective_infinite(
+        self,
+    ):
+        """+inf on one metric swallows every other objective in "mean" mode.
+
+        `_penalty` averages the per-metric worst cases, so an unbounded
+        substitute for one metric drives the mean to +inf no matter how the
+        others scored. Every failing trial then reports the identical value
+        and the sampler cannot distinguish a near-miss from a total failure.
+        """
+        worst = [
+            worst_objective_value(m) for m in ("nrmse", "lc2st")
+        ]
+        mean_worst = math.fsum(worst) / len(worst)
+        assert math.isfinite(mean_worst)
+        assert mean_worst == pytest.approx((1.0 + 0.25) / 2)
+
 
 class TestEncodingChangeSetIsDerived:
     """`ENCODING_CHANGED_AT_V2` must be computed, not remembered.

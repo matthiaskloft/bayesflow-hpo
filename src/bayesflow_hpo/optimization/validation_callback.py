@@ -48,7 +48,9 @@ from bayesflow_hpo.types import ValidateFn
 from bayesflow_hpo.validation.data import ValidationDataset
 from bayesflow_hpo.validation.registry import (
     CanonicalMetricName,
+    JointMetricConfigurationError,
     canonical_metric_name,
+    is_joint_metric,
 )
 
 logger = logging.getLogger(__name__)
@@ -121,6 +123,29 @@ class PeriodicValidationCallback(Callback):
         Validation objective used for stopping. ``"objective_mean"`` (default) averages
         all objective metrics after converting them to minimize-is-better
         values. A metric name selects that metric alone.
+    joint_metrics
+        Configured joint metrics forwarded to the validation pipeline, for
+        names that cannot run at a registry default. Only consulted when
+        the metric is in the intermediate set at all.
+    include_joint_metrics
+        Whether joint metrics in *objective_metrics* are computed at each
+        intermediate validation. ``False`` (default) excludes them.
+
+        Joint metrics are expensive enough to change what this callback is
+        for: L-C2ST measured ~54 s per condition at 500 simulations with 15
+        parameters, so a 20-condition grid spends ~18 minutes per interval
+        deciding whether to prune a trial. A pruning decision that costs
+        more than the training it might save is not a pruning decision.
+        TARP, by contrast, is ~79 ms per condition -- three to four orders
+        of magnitude cheaper -- so opting in is reasonable for some joint
+        metrics and not others. See ``docs/plans/plan-joint-metric-path.md``
+        D9 for the measurements.
+
+        Excluding them changes what the intermediate signal MEANS, which is
+        why the exclusion is explicit rather than implied: with
+        ``early_stopping_monitor="objective_mean"`` the mid-training average
+        is taken over the remaining metrics only, and is therefore not on
+        the same scale as the final objective mean.
     """
 
     def __init__(
@@ -138,6 +163,8 @@ class PeriodicValidationCallback(Callback):
         early_stopping_patience: int | None = None,
         early_stopping_window: int = 1,
         early_stopping_monitor: str = "objective_mean",
+        include_joint_metrics: bool = False,
+        joint_metrics: dict[str, Any] | None = None,
     ):
         super().__init__()
         self.trial = trial
@@ -238,9 +265,90 @@ class PeriodicValidationCallback(Callback):
                 f"{self.early_stopping_monitor!r}."
             )
 
-        # Default primary metric to first objective metric.
+        # The metrics this callback actually computes per interval, as an
+        # EXPLICIT set rather than one implied by `objective_metrics`.
+        #
+        # Simply omitting a joint metric from the pipeline call would not
+        # work: `_run_lightweight_validation` requires every entry of
+        # `objective_metrics` to be present and returns None when any is
+        # missing, and `on_epoch_end` then bails before both pruning AND
+        # `_update_early_stopping`. For objective_metrics=["nrmse",
+        # "lc2st"], excluding `lc2st` to save time would silently disable
+        # marginal pruning and validation early stopping as well -- a cost
+        # optimization that turns off stopping is a regression, not a
+        # saving. Naming the set is what makes an absent joint key expected
+        # rather than a fault.
+        # Default primary metric to first objective metric. MUST precede
+        # the excluded-metric guards below: `pruning_strategy="primary"`
+        # (the bare string) leaves `_primary_metric` None until here, so a
+        # guard running first would see None, wave it through, and let the
+        # default land on an excluded joint metric -- surfacing later as an
+        # uncaught KeyError from `_evaluate_pruning` mid-training rather
+        # than the clear refusal the guard exists to give.
         if self._strategy_name == "primary" and self._primary_metric is None:
             self._primary_metric = self.objective_metrics[0]
+
+        self.joint_metrics = joint_metrics
+        self.include_joint_metrics = include_joint_metrics
+        self.intermediate_metrics: list[CanonicalMetricName] = [
+            m
+            for m in self.objective_metrics
+            if include_joint_metrics or not is_joint_metric(m)
+        ]
+        excluded = [
+            m for m in self.objective_metrics
+            if m not in self.intermediate_metrics
+        ]
+
+        if not self.intermediate_metrics:
+            # A joint-only study. Every interval would compute nothing, so
+            # there is no intermediate signal to prune or stop on at all.
+            # Rejected up front rather than degraded into a study that
+            # silently cannot stop early: the caller either opts in and pays
+            # the cost knowingly, or drops the callback.
+            raise ValueError(
+                "Every objective metric is a joint metric "
+                f"({[str(m) for m in self.objective_metrics]}), so "
+                "intermediate validation would compute nothing and this "
+                "callback could neither prune nor stop early. Pass "
+                "include_joint_metrics=True to pay their cost at every "
+                "interval, add a cheap marginal objective, or do not use "
+                "PeriodicValidationCallback for this study."
+            )
+
+        if excluded:
+            if self.early_stopping_monitor in excluded:
+                raise ValueError(
+                    f"early_stopping_monitor={self.early_stopping_monitor!r} "
+                    "is a joint metric excluded from intermediate "
+                    "validation, so nothing would ever be monitored. Pass "
+                    "include_joint_metrics=True, or monitor a metric that "
+                    "is computed at each interval: "
+                    f"{[str(m) for m in self.intermediate_metrics]}."
+                )
+            if self._primary_metric in excluded:
+                raise ValueError(
+                    f"pruning_strategy=('primary', {self._primary_metric!r}) "
+                    "names a joint metric excluded from intermediate "
+                    "validation, so no pruning decision could ever be made. "
+                    "Pass include_joint_metrics=True, or choose a primary "
+                    "metric that is computed at each interval: "
+                    f"{[str(m) for m in self.intermediate_metrics]}."
+                )
+            if self.early_stopping_monitor == "objective_mean":
+                # Not an error, but it silently changes what is monitored:
+                # the members of the mean differ between mid-training and
+                # the final objective, so the two are not comparable.
+                logger.info(
+                    "Joint metric(s) %s are excluded from intermediate "
+                    "validation, so 'objective_mean' averages %s here while "
+                    "the final objective averages all of %s. Pass "
+                    "include_joint_metrics=True to include them.",
+                    [str(m) for m in excluded],
+                    [str(m) for m in self.intermediate_metrics],
+                    [str(m) for m in self.objective_metrics],
+                )
+
 
     def on_epoch_end(self, epoch: int, logs: Any = None) -> None:
         """Run validation and check for pruning at scheduled intervals.
@@ -274,7 +382,7 @@ class PeriodicValidationCallback(Callback):
             metric: _metric_to_minimize(
                 metric, RawScore(float(raw_scores[metric]))
             )
-            for metric in self.objective_metrics
+            for metric in self.intermediate_metrics
         }
 
         if self._is_multi_objective:
@@ -331,7 +439,7 @@ class PeriodicValidationCallback(Callback):
                         _metric_to_minimize(
                             metric, RawScore(float(raw_scores[metric]))
                         )
-                        for metric in self.objective_metrics
+                        for metric in self.intermediate_metrics
                     ]
                 )
             )
@@ -396,6 +504,23 @@ class PeriodicValidationCallback(Callback):
             )
         return False  # pragma: no cover
 
+    def _intermediate_joint_metrics(self) -> dict[str, Any] | None:
+        """Overrides for the joint metrics that run at an interval.
+
+        The intermediate metric set is the authority on what runs here; an
+        override supplies a metric's CONFIGURATION, not permission to run
+        it. Returning ``None`` rather than an empty dict keeps the pipeline
+        on its ordinary path when nothing is overridden.
+        """
+        if not self.joint_metrics:
+            return None
+        kept = {
+            name: fn
+            for name, fn in self.joint_metrics.items()
+            if canonical_metric_name(name) in self.intermediate_metrics
+        }
+        return kept or None
+
     def _run_lightweight_validation(self) -> dict[str, float] | None:
         """Compute objective_metrics via validation pipeline."""
         try:
@@ -419,7 +544,7 @@ class PeriodicValidationCallback(Callback):
                 result_dict = canonical_summary(raw_result)
                 # Validate that all objective_metrics are present.
                 missing = [
-                    k for k in self.objective_metrics
+                    k for k in self.intermediate_metrics
                     if k not in result_dict
                 ]
                 if missing:
@@ -431,7 +556,7 @@ class PeriodicValidationCallback(Callback):
                     return None
                 out: dict[str, float] = {
                     k: float(result_dict[k])
-                    for k in self.objective_metrics
+                    for k in self.intermediate_metrics
                 }
                 return out
             else:
@@ -443,15 +568,36 @@ class PeriodicValidationCallback(Callback):
                     approximator=self.approximator,
                     validation_data=self.validation_data,
                     n_posterior_samples=self.n_posterior_samples,
-                    metrics=self.objective_metrics,
+                    metrics=self.intermediate_metrics,
+                    # Filtered, not forwarded whole. `run_validation_pipeline`
+                    # merges the override dict UNCONDITIONALLY -- independent
+                    # of `metrics` -- because that is how
+                    # `make_lc2st_validate_fn` adds a metric its `metrics=`
+                    # list omits. So filtering `metrics` alone excludes
+                    # nothing that arrives this way, which is every metric
+                    # needing an override at all: `tarp_error`, or a
+                    # configured L-C2ST. The callback would then log that a
+                    # metric is excluded, compute it anyway at ~56 s per
+                    # condition, and discard the value, since the extraction
+                    # below keys on `intermediate_metrics`.
+                    joint_metrics=self._intermediate_joint_metrics(),
                 )
                 extracted: dict[str, float] = {
                     k: float(result.summary[k])
-                    for k in self.objective_metrics
+                    for k in self.intermediate_metrics
                     if k in result.summary
                 }
+                # `intermediate_metrics`, NOT `objective_metrics`. This
+                # is the branch taken when no `validate_fn` is supplied --
+                # the default -- and requiring every objective key here
+                # defeats the whole exclusion: the joint key is absent by
+                # design, so this returned None on every interval and
+                # `on_epoch_end` bailed before pruning AND
+                # `_update_early_stopping`. Exactly the regression the
+                # explicit set exists to prevent, reintroduced one branch
+                # over from where it was fixed.
                 missing = [
-                    k for k in self.objective_metrics
+                    k for k in self.intermediate_metrics
                     if k not in extracted
                 ]
                 if missing:
@@ -462,6 +608,11 @@ class PeriodicValidationCallback(Callback):
                     )
                     return None
                 return extracted
+        except JointMetricConfigurationError:
+            # Not a validation failure. Swallowing it here would stop
+            # pruning silently and leave the same error to surface from
+            # final validation one wasted training run later.
+            raise
         except optuna.TrialPruned:
             raise
         except Exception:

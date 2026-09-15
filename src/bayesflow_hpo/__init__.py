@@ -120,6 +120,7 @@ from bayesflow_hpo.utils import loguniform_float, loguniform_int
 from bayesflow_hpo.validation import (
     DEFAULT_METRICS,
     GlobalC2STResult,
+    JointMetricInputs,
     LC2STResult,
     ValidationDataset,
     ValidationResult,
@@ -133,6 +134,7 @@ from bayesflow_hpo.validation import (
     make_coverage_metric,
     make_lc2st_validate_fn,
     make_validation_dataset,
+    register_joint_metric,
     register_metric,
     run_validation_pipeline,
     save_validation_dataset,
@@ -234,6 +236,7 @@ __all__ = [
     "loguniform_int",
     # Validation
     "DEFAULT_METRICS",
+    "JointMetricInputs",
     "GlobalC2STResult",
     "LC2STResult",
     "ValidationDataset",
@@ -248,6 +251,7 @@ __all__ = [
     "make_coverage_metric",
     "make_lc2st_validate_fn",
     "make_validation_dataset",
+    "register_joint_metric",
     "register_metric",
     "run_validation_pipeline",
     "save_validation_dataset",

@@ -305,6 +305,68 @@ class TestMakeLC2STValidateFn:
         assert "nrmse" in result
         assert np.isfinite(result["lc2st"])
 
+    def test_lc2st_failure_no_longer_costs_the_trial_its_other_metrics(
+        self,
+    ) -> None:
+        """The property the duplicated loop could not have.
+
+        The old implementation ran L-C2ST inline in its own loop with no
+        guard, so a classifier that raised on one condition propagated out
+        of the whole ``validate_fn`` -- the trial lost its calibration and
+        NRMSE too and dropped to the training-loss fallback, recording a
+        model-quality penalty for what was a numerical or dependency
+        problem. Running on the shared pipeline puts it behind that guard.
+        """
+        from unittest.mock import MagicMock, patch
+
+        from bayesflow_hpo.validation.data import ValidationDataset
+
+        rng = np.random.default_rng(SEED)
+        n_sims, n_samples = 30, 20
+        true_p = rng.standard_normal(n_sims)
+
+        mock_approx = MagicMock()
+        mock_approx.sample.return_value = {
+            "theta": true_p[:, None]
+            + 0.1 * rng.standard_normal((n_sims, n_samples)),
+        }
+        val_data = ValidationDataset(
+            simulations=[
+                {"theta": true_p, "x": rng.standard_normal((n_sims, 2))}
+            ],
+            condition_labels=[{}],
+            param_keys=["theta"],
+            data_keys=["x"],
+            seed=SEED,
+        )
+
+        fn = make_lc2st_validate_fn(base_metrics=["nrmse"], n_folds=3)
+        with patch(
+            "bayesflow_hpo.validation.c2st.lc2st",
+            side_effect=RuntimeError("classifier blew up"),
+        ):
+            result = fn(mock_approx, val_data, n_samples)
+
+        assert "lc2st" not in result
+        assert "nrmse" in result and np.isfinite(result["nrmse"])
+
+    def test_the_configured_metric_stays_out_of_the_global_registry(
+        self,
+    ) -> None:
+        """A study's fold count must not leak into every other study.
+
+        ``n_folds``/``seed``/``clf_kwargs`` belong to the factory call, so
+        the configured callable is passed through ``joint_metrics=`` rather
+        than registered. The registered ``"lc2st"`` name keeps its
+        defaults.
+        """
+        from bayesflow_hpo.validation.registry import _REGISTRY
+
+        before = _REGISTRY["lc2st"]
+        make_lc2st_validate_fn(n_folds=17, seed=999)
+        assert _REGISTRY["lc2st"] is before
+
+
 
 # ---------------------------------------------------------------------------
 # Import guard test

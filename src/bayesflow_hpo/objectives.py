@@ -348,6 +348,26 @@ METRIC_DIRECTIONS: dict[str, MetricDirection] = {
         # Unlike KS, the raw chi-squared statistic is unbounded above.
         worst_raw=math.inf,
     ),
+    "lc2st": MetricDirection(
+        higher_is_better=False,
+        to_minimize=lambda v: v,
+        # The L-C2ST statistic is the mean of ``(p - 0.5) ** 2`` over the
+        # classifier's out-of-fold probabilities (validation.c2st, the
+        # single-class MSE_0 of Linhart et al. 2023, Theorem 3.1). A
+        # probability lies in [0, 1], so the squared deviation from 0.5 is
+        # bounded by 0.25 and so is its mean.
+        #
+        # `lc2st` was registrable as an objective but had no entry here, so
+        # it fell through to `worst_raw_value`'s +inf for metrics of unknown
+        # scale. That default is right for a custom metric and wrong here:
+        # the scale IS known and finite. The cost was concrete in
+        # `objective_mode="mean"`, where the penalty is
+        # `fsum(worst) / len(worst)` (optimization/objective.py:996) -- one
+        # absent `lc2st` makes the mean +inf regardless of the other
+        # objectives, so every failing trial collapses to the same value and
+        # the sampler cannot tell a near-miss from a total failure.
+        worst_raw=0.25,
+    ),
 }
 
 #: Version of the objective-value encoding written into a study.
@@ -385,10 +405,32 @@ OBJECTIVE_ENCODING_VERSION = 2
 #: ``mae`` is here for the penalty reason too: it is objective-eligible with
 #: no direction entry, so it takes the unregistered fallback, which moved from
 #: a finite 1.0 to +inf once an unknown scale stopped being assumed bounded.
+#: ``lc2st`` joins for the same penalty reason as ``mae``, one step further
+#: along: released 0.1.0 substituted a flat 1.0 for it, encoding 2 moved that
+#: to the unregistered +inf fallback, and its direction entry now pins it at
+#: its real bound of 0.25. Two of those three numbers are not the current one,
+#: so a column carrying them is not comparable with a column produced today.
+#: Membership here buys exactly one thing, and it is worth being precise
+#: about which: it refuses a study stamped with the LEGACY encoding, whose
+#: flat 1.0 differs from today's 0.25. It does nothing for the +inf move,
+#: because ``_check_study_compatibility`` returns early once
+#: ``encoding == OBJECTIVE_ENCODING_VERSION`` (``api.py``), so this set is
+#: never consulted for an encoding-2 study -- the only population the second
+#: move affects.
+#:
+#: That move deliberately does not bump the version. It changes only the
+#: value substituted for trials that FAILED to report the metric, and its
+#: direction is the harmless one: an old +inf loses to every valid value,
+#: including under ``objective_mode="mean"`` where it makes the whole mean
+#: +inf. So mixing the two reorders failures among themselves and never lets
+#: a failure outrank a success. Bumping would invalidate every resumable
+#: study to fix the ranking among failed trials. That is the same residual
+#: ``mean_calibration_error`` documents below, and the opposite of the
+#: ``correlation`` case this set exists for.
 #: `tests/test_objectives.py` derives this set by computing old and new values
 #: for every registered metric, so it cannot drift from the code again.
 ENCODING_CHANGED_AT_V2: frozenset[str] = frozenset(
-    {"log_gamma", "correlation", "sbc_chi2", "mae", "contraction"}
+    {"log_gamma", "correlation", "sbc_chi2", "mae", "contraction", "lc2st"}
 )
 
 #: Built-in metrics audited against the pre-change rule and found to store the
@@ -431,6 +473,15 @@ ENCODING_UNCHANGED_AT_V2: frozenset[str] = frozenset(
         "mean_calibration_error",
         "rmse",
         "nrmse",
+        # Both TARP keys postdate encoding 2, so no pre-v2 study can hold a
+        # column for either. Their penalty is unchanged in any case: the old
+        # unregistered fallback was a flat 1.0 and their `worst_raw` is 1.0,
+        # the provable bound on a median of |ECP - level|. Listed rather
+        # than omitted because omission means "encoding-sensitive", which
+        # would refuse to resume studies over metrics with no encoding
+        # history to differ from -- see `mean_calibration_error` above.
+        "tarp_error",
+        "tarp_error_random",
         "z_score",
         "sbc_ks",
         "coverage",
@@ -580,6 +631,151 @@ def worst_objective_value(key: CanonicalMetricName) -> MinimizeScore:
     :func:`_metric_to_minimize` again.
     """
     return _metric_to_minimize(key, worst_raw_value(key))
+
+
+#: User attribute recording the configuration a study's joint metrics ran at.
+#:
+#: Deliberately NOT part of ``bayesflow_hpo_objective_schema``. That attribute
+#: is a POSITIONAL LIST of objective column names -- ``api.py`` discards a
+#: stored value that is not a list or tuple, and ``schema_matches`` compares
+#: lengths first -- so appending settings to it would change its length,
+#: break resumption for every study already stamped, and misrepresent how
+#: many objective columns the study has. A metric registered as a
+#: *diagnostic*, which ``tarp_error_random`` is, has no column there at all,
+#: so its configuration could not be pinned by that mechanism even in
+#: principle.
+JOINT_METRIC_SETTINGS_ATTR = "bayesflow_hpo_joint_metric_settings"
+
+
+def check_or_stamp_joint_metric_settings(
+    study: Any,
+    settings: Mapping[str, Mapping[str, Any]],
+    *,
+    n_completed_trials: int,
+) -> None:
+    """Record the joint metric configuration, or refuse a changed one.
+
+    A joint metric's score moves with its settings: TARP's with
+    ``resolution``, ``metric``, ``standardize`` and the reference draw. Two
+    trials scored under different settings are not comparable, and a resumed
+    study that changes one is optimizing across a scale change with nothing
+    to say so -- the same defect class as the objective schema guard, which
+    is why this is checked alongside it.
+
+    Parameters
+    ----------
+    study
+        The Optuna study being written to.
+    settings
+        ``{metric_name: settings}`` as declared by the metrics that actually
+        ran, from ``ValidationResult.joint_metric_settings``. Empty does
+        nothing: a study using no joint metrics never acquires the attribute.
+    n_completed_trials
+        Number of COMPLETE trials excluding the one being scored. Decides
+        whether an absent attribute means "fresh study" or "trials this
+        version cannot vouch for".
+
+    Raises
+    ------
+    ValueError
+        If the study records different settings, or holds completed trials
+        with no record at all.
+
+    Notes
+    -----
+    Three things this pin cannot do, stated rather than implied:
+
+    - **It cannot say which reference provider was used.** A callable is not
+      serializable, so ``reference_mode`` records only that one was
+      *supplied*. The ``tarp_error`` / ``tarp_error_random`` split mitigates
+      this -- the key itself carries the mode -- and does not close it. Two
+      studies both reporting ``tarp_error`` may have used different
+      providers.
+    - **It cannot protect a study populated before it existed.** Stamping
+      such a study would assert that its existing trials ran at these
+      settings, which is exactly what is unknown. Refusing is the honest
+      option, with the escape hatch of setting the attribute by hand.
+    - **It does not see a custom ``validate_fn`` at all.** The pin is
+      written from ``ValidationResult.joint_metric_settings``, and a
+      ``validate_fn`` hook returns a flat ``{name: value}`` dict, so there
+      is no declaration to read. A study driven by
+      ``make_lc2st_validate_fn`` therefore records nothing and compares
+      nothing -- including across a change of ``n_folds`` or ``seed``. The
+      hook owns its own validation step, and making it report settings
+      would mean changing a public contract for a guard it did not ask for.
+    - **It does not close the concurrent-stamp window.** Two workers racing
+      on a fresh shared-storage study can both see zero completed trials and
+      stamp different settings, last write winning. This pre-exists for the
+      objective schema, whose guard is likewise stamp-when-empty; joint
+      settings widen the window because they are written after the first
+      validation rather than at study creation. Serializing it would need a
+      storage-level compare-and-set Optuna's user attributes do not offer.
+    """
+    # Imported here, not at module scope: this module keeps its
+    # `validation.registry` imports function-local (the type-only import is
+    # under TYPE_CHECKING) because `validation.tarp` imports back from here
+    # to register its directions.
+    from bayesflow_hpo.validation.registry import (
+        JointMetricConfigurationError,
+    )
+
+    if not settings:
+        return
+
+    recorded = {name: dict(value) for name, value in settings.items()}
+    stored = study.user_attrs.get(JOINT_METRIC_SETTINGS_ATTR)
+
+    if not isinstance(stored, Mapping):
+        # Anything unrecognized is treated as absent, matching the schema
+        # guard: `user_attrs` is caller-writable and round-trips through
+        # JSON, so refusing on a value this code cannot interpret would
+        # block a study over something it cannot even describe.
+        stored = None
+
+    if stored is None:
+        if n_completed_trials:
+            raise JointMetricConfigurationError(
+                f"Study {study.study_name!r} holds {n_completed_trials} "
+                "completed trial(s) but records no joint metric settings, so "
+                "the configuration behind their joint metric values cannot "
+                "be verified. A joint metric's score moves with its "
+                f"settings, and this run uses {recorded!r}. If those "
+                "trials ran with no joint metric at all -- adding one to an "
+                "older study -- the attribute can simply be set to this "
+                "run's settings; that case is not distinguishable from "
+                "trials run at settings nobody recorded, which is why it is "
+                "not assumed. Start a new study, or set the study's "
+                f"{JOINT_METRIC_SETTINGS_ATTR!r} user attribute to the "
+                "settings it was actually run with."
+            )
+        study.set_user_attr(JOINT_METRIC_SETTINGS_ATTR, recorded)
+        return
+
+    changed = {
+        name: (dict(stored[name]), value)
+        for name, value in recorded.items()
+        if name in stored and dict(stored[name]) != value
+    }
+    if changed:
+        detail = "; ".join(
+            f"{name}: stored {was!r}, this run {now!r}"
+            for name, (was, now) in sorted(changed.items())
+        )
+        raise JointMetricConfigurationError(
+            f"Study {study.study_name!r} was run with different joint metric "
+            f"settings ({detail}). The score moves with these, so old and "
+            "new trials would sit on different scales in one Pareto front. "
+            "Restore the original settings, or start a new study."
+        )
+
+    new_names = {k: v for k, v in recorded.items() if k not in stored}
+    if new_names:
+        # A metric added mid-study. Its own trials are comparable among
+        # themselves, and earlier trials simply have no value for it, which
+        # the objective already handles as a missing key.
+        study.set_user_attr(
+            JOINT_METRIC_SETTINGS_ATTR, {**dict(stored), **new_names}
+        )
 
 
 def canonical_summary(summary: Mapping[str, _V]) -> dict[str, _V]:

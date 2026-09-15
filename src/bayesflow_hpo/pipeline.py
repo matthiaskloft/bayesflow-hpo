@@ -25,6 +25,7 @@ from bayesflow_hpo.types import BuildApproximatorFn, TrainFn, ValidateFn
 from bayesflow_hpo.validation.data import generate_validation_dataset
 from bayesflow_hpo.validation.registry import (
     canonical_metric_name,
+    is_joint_metric,
     validate_objective_metric_kinds,
 )
 
@@ -382,6 +383,41 @@ def check_pipeline(
         raise PipelineError(f"Training step failed: {exc}") from exc
 
     # --- Step 6: Validate ---
+    # JOINT metrics are excluded from pre-flight, and this is a deliberate
+    # limit rather than an oversight.
+    #
+    # Pre-flight generates its own tiny batch -- five simulations per
+    # condition by default -- to check interfaces cheaply. A joint metric's
+    # configuration is sized for the PRODUCTION batch, so running the
+    # caller's real callable against that batch fails for reasons that say
+    # nothing about the configuration: `make_lc2st_joint_metric(n_folds=10)`
+    # is rejected because five simulations cannot fill ten folds, and a
+    # per-condition reference array shaped for 500 rows does not match five
+    # -- and truncating it would pair references with different, newly
+    # generated observations, which is a silently wrong check rather than a
+    # failed one. A pre-flight that always rejects a valid configuration is
+    # worse than one that does not examine it.
+    #
+    # The cost is that a joint metric's own interface errors surface at the
+    # first trial instead of before the study. The metric is still resolved
+    # there, `resolve_joint_metrics` still refuses an unconfigured
+    # placeholder, and `JointMetricConfigurationError` is re-raised rather
+    # than penalized -- so the study still stops on the first trial with the
+    # real message, one trial later than it might have.
+    marginal_metrics = [
+        name for name in objective_metrics if not is_joint_metric(name)
+    ]
+    # The restriction applies to the BUILT-IN validator only. A custom
+    # `validate_fn` computes whatever it likes on whatever batch it is
+    # given, so nothing about the tiny pre-flight batch excuses it from
+    # producing the objective keys it was configured for -- and narrowing
+    # the requirement for it would be worse than not checking: with
+    # `objective_metrics=["tarp_error"]` alone, `marginal_metrics` is empty,
+    # so pre-flight would verify nothing at all and a hook silently omitting
+    # the key would take a penalty on every trial.
+    required_metrics = (
+        objective_metrics if validate_fn is not None else marginal_metrics
+    )
     try:
         if validate_fn is not None:
             # A custom hook keeps the documented 3-argument contract.
@@ -396,7 +432,7 @@ def check_pipeline(
                 approximator,
                 validation_data,
                 n_posterior_samples,
-                objective_metrics=objective_metrics,
+                objective_metrics=marginal_metrics,
             )
     except Exception as exc:
         raise PipelineError(f"Validation step failed: {exc}") from exc
@@ -417,14 +453,14 @@ def check_pipeline(
     # three were fixed together and this one was missed.
     result = canonical_summary(result)
 
-    missing_keys = set(objective_metrics) - set(result.keys())
+    missing_keys = set(required_metrics) - set(result.keys())
     if missing_keys:
         raise PipelineError(
             f"validate_fn output is missing required metric keys: "
             f"{sorted(missing_keys)}. Got keys: {sorted(result.keys())}"
         )
 
-    for key in objective_metrics:
+    for key in required_metrics:
         val = result[key]
         if not isinstance(val, (int, float)) or math.isnan(val):
             raise PipelineError(

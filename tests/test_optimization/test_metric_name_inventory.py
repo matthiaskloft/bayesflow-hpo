@@ -68,6 +68,11 @@ _METRIC_NAME_FIELDS = {
     "pruning_strategy",
     "metric_constraints_hard",
     "metric_constraints_soft",
+    # Keyed by metric name, so its KEYS need canonicalizing even though its
+    # values are callables. An aliased key would not match the canonical
+    # name in the pipeline's metric list, so the override would fail to
+    # suppress the registry entry it exists to replace.
+    "joint_metrics",
 }
 
 # Every other field of ObjectiveConfig. Listing these is what makes the
@@ -80,6 +85,9 @@ _NON_METRIC_FIELDS = {
     "build_approximator_fn",
     "checkpoint_pool",
     "cost_metric",
+    # A bool, not a name: it says WHETHER the joint metrics already named in
+    # `objective_metrics` also run at each intermediate validation.
+    "include_joint_metrics",
     "early_stopping_patience",
     "early_stopping_window",
     "epochs",
@@ -169,6 +177,14 @@ def test_field_canonicalizes_aliases(field_name):
     elif field_name in ("metric_constraints_hard", "metric_constraints_soft"):
         cfg = _config(**{field_name: [(_ALIAS, 0.1, "below")]})
         assert getattr(cfg, field_name) == [(_CANONICAL, 0.1, "below")]
+
+    elif field_name == "joint_metrics":
+        # Keyed by metric name; the values are callables and are untouched.
+        def _fn(inputs):  # pragma: no cover - never called here
+            return {}
+
+        cfg = _config(joint_metrics={_ALIAS: _fn})
+        assert cfg.joint_metrics == {_CANONICAL: _fn}
 
     else:  # pragma: no cover - guarded by the inventory test above
         pytest.fail(f"No canonicalization check written for {field_name!r}")
