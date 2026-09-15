@@ -189,15 +189,18 @@ class CheckpointPool:
         if self.pruned_pool_size <= 0:
             return False
 
-        self._pruned_seen += 1
+        n_offered = self._pruned_seen + 1
 
         evict_slot: int | None = None
         if len(self._pruned_entries) >= self.pruned_pool_size:
             # Keep the n-th offer with probability k/n, replacing a
             # uniformly chosen incumbent. This is what keeps every pruned
             # trial of the study equally likely to be in the final pool,
-            # without knowing the population size up front.
-            if self._rng.random() >= self.pruned_pool_size / self._pruned_seen:
+            # without knowing the population size up front. Verified
+            # empirically by
+            # ``test_retention_is_uniform_over_the_population``.
+            if self._rng.random() >= self.pruned_pool_size / n_offered:
+                self._pruned_seen = n_offered
                 return False
             evict_slot = self._rng.randrange(self.pruned_pool_size)
 
@@ -215,17 +218,26 @@ class CheckpointPool:
             },
             trial_number,
         ):
+            # A write that never landed must not consume a draw: counting it
+            # would make the retained set a non-uniform sample of the trials
+            # that were actually retainable.
             return False
+
+        self._pruned_seen = n_offered
 
         if evict_slot is None:
             self._pruned_entries.append((trial_number, dest))
         else:
             evicted_num, evicted_path = self._pruned_entries[evict_slot]
-            _safe_rmtree(evicted_path)
-            logger.debug(
-                "Evicted pruned trial %d from pruned checkpoint pool",
-                evicted_num,
-            )
+            # A re-offer of a trial already in the pool can draw its own
+            # slot, and removing `evicted_path` would then delete the
+            # checkpoint just written to `dest`.
+            if evicted_path != dest:
+                _safe_rmtree(evicted_path)
+                logger.debug(
+                    "Evicted pruned trial %d from pruned checkpoint pool",
+                    evicted_num,
+                )
             self._pruned_entries[evict_slot] = (trial_number, dest)
 
         return True

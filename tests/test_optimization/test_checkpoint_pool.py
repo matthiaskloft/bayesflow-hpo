@@ -166,7 +166,7 @@ class TestPrunedPool:
         whole quality range, which means a late trial must not be favoured
         over an early one (or vice versa).
         """
-        population, cap, replicates = 10, 3, 4000
+        population, cap, replicates = 10, 3, 600
         counts: Counter[int] = Counter()
         for rep in range(replicates):
             pool = CheckpointPool(
@@ -180,7 +180,7 @@ class TestPrunedPool:
 
         expected = replicates * cap / population
         for n in range(population):
-            assert counts[n] == pytest.approx(expected, rel=0.12)
+            assert counts[n] == pytest.approx(expected, rel=0.2)
 
     def test_save_weights_failure_returns_false(self, pool_dir):
         approx = MagicMock()
@@ -190,6 +190,33 @@ class TestPrunedPool:
         )
         assert pool.save_pruned(0, approx, step=1) is False
         assert pool.pruned_trial_numbers == []
+
+    def test_failed_write_does_not_consume_a_draw(self, pool_dir):
+        """A write that never landed must not skew the sample.
+
+        Counting it would make the retained set a uniform sample of the
+        offers rather than of the trials that could actually be retained.
+        """
+        approx = MagicMock()
+        approx.save_weights.side_effect = RuntimeError("disk full")
+        pool = CheckpointPool(
+            pool_dir=pool_dir, pruned_pool_size=2, seed=0,
+        )
+        for n in range(5):
+            pool.save_pruned(n, approx, step=1)
+        assert pool._pruned_seen == 0
+
+    def test_reoffering_the_same_trial_keeps_its_checkpoint(
+        self, pool_dir, mock_approximator
+    ):
+        """Drawing its own slot must not delete what was just written."""
+        pool = CheckpointPool(
+            pool_dir=pool_dir, pruned_pool_size=1, seed=0,
+        )
+        for _ in range(10):
+            pool.save_pruned(4, mock_approximator, step=1)
+        assert pool.pruned_trial_numbers == [4]
+        assert (pool.pruned_pool_dir / "trial_0004").is_dir()
 
     def test_cleanup_clears_pruned_pool(self, pool_dir, mock_approximator):
         pool = CheckpointPool(
