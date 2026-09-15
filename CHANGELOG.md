@@ -37,11 +37,88 @@
 - `PeriodicValidationCallback.validation_step` and `.last_scores` report the
   rung the approximator's current weights were measured at, accounting for
   early stopping having restored weights from an earlier rung.
+- **Joint, data-dependent metrics.** `register_joint_metric` and
+  `JointMetricInputs` expose the per-condition context that
+  `run_validation_pipeline` already held and then discarded, so a metric
+  needing the posterior draws *and* their simulations no longer has to
+  rebuild the condition loop. `make_lc2st_validate_fn` is refactored onto it
+  and its duplicate loop deleted; the refactor was checked against the
+  pre-refactor implementation and is bit-identical for one parameter
+  (6.9e-18 for three, from float association order).
+- **TARP** (Lemos et al., 2023), with the reference contract and the
+  `bayesflow_hpo_joint_metric_settings` study record that keeps trials scored
+  under different settings from being compared. `tarp_error` is an
+  **objective** and requires supplied reference points. `tarp_error_random`
+  is registered as a **diagnostic** and is rejected by
+  `validate_objective_metric_kinds()` if passed in `objective_metrics`: with
+  random references the statistic is blind to a posterior that ignores its
+  data, so it cannot be optimized against.
+- `lc2st` is a registered objective metric with a `METRIC_DIRECTIONS` entry.
+  It needs the `sklearn` extra.
+- Joint metrics are **off** `PeriodicValidationCallback` by default
+  (`include_joint_metrics=False`) and support `max_conditions` sub-sampling.
+  L-C2ST measured ~54 s per condition, so a 20-condition grid would spend
+  ~18 minutes per interval deciding whether to prune; TARP is ~79 ms, so the
+  choice is per-metric rather than global.
+- `max_samples_per_call` (default 20,000 draws) chunks validation inference,
+  threaded through `run_validation_pipeline`, `ObjectiveConfig`,
+  `PeriodicValidationCallback`, `validate_once`, `default_validate_fn`,
+  `make_lc2st_validate_fn` and `optimize()`, which rejects an invalid value
+  up front. A batch that already fits takes the original single-call path.
+  Chunking preserves the assembled array's shape, row order and draws per
+  simulation, including the single-parameter trailing-axis squeeze; it does
+  **not** reproduce the same draws, because each chunk is its own
+  `approximator.sample()` call and BayesFlow sampling is stochastic. A
+  chunked run and an unchunked one at the same seed can therefore give
+  different metric values.
+- `estimate_validation_memory_mb` budgets one `sample()` call, and the
+  objective now checks it alongside the training estimate. Over-budget trials
+  are rejected pre-training with `rejected_reason="validation_memory_budget"`,
+  so they cost no trained model.
 
 ### Fixed
 
+- **A TARP seed collision that scored a perfect posterior as maximally
+  broken.** Drawing reference points from `default_rng(seed)` consumes the
+  same uniform stream a caller's simulator does. Seeding a simulator and TARP
+  alike -- the obvious thing for a reproducible study -- made every reference
+  point an affine image of its own simulation's truth at matching shapes
+  (measured correlation exactly 1.0), collapsing every `f_i` to ~0 so that a
+  perfectly calibrated posterior scored `tarp_error = 0.5`, the worst value
+  the statistic can take. Nothing raised. Fixed with a spawn key.
+- Validation inference sampled an entire condition batch in one
+  `approximator.sample()` call -- 100,000 posterior draws at once at the
+  `optimize()` defaults. Neither factor is a search-space hyperparameter, so
+  the pre-training budget check could not reject such a trial: it died in
+  validation *after* the training run had been paid for, and recorded a
+  model-quality penalty for what is a resource problem.
+- Validation inference silently truncated condition values that disagreed on
+  their leading dimension; that now raises. A 0-d value, or one with a
+  leading dimension of 1, is correctly treated as a broadcast rather than a
+  one-row batch, which would otherwise have switched chunking off for any
+  condition carrying a covariate.
+- CI never ran a single L-C2ST test: the C2ST module is behind
+  `importorskip("sklearn")` and CI installed only `[dev]`. It now installs
+  `[dev,sklearn]`.
 - Documentation listed a `decay_rate` dimension on `TrainingSpace` that has
   not existed since 0.2.0.
+
+### Documentation
+
+- `docs/references/` is deleted. Seventeen per-paper summaries (~3,700 lines)
+  backed no code path, and every one of the three ever spot-checked was
+  defective. `docs/references.md` is now the single record.
+- The fourteen entries that had metadata but no substance check were read
+  back against full texts. Two were wrong in the same way -- a result the
+  paper *uses* described as one it *introduces*: Bergstra et al. (2011) does
+  not propose SMBO (§2 reviews it as prior art; TPE is its own), and Smith et
+  al. (2018) does not show the gradient-noise coupling (§1 attributes it to
+  Smith & Le, 2017), and carries a `B << N` condition the entry had dropped.
+- Bergstra et al. (2011) has no DOI at any version, now recorded explicitly
+  as a finding rather than left looking like an omission.
+- `scripts/check_citations.py` (and a CI job) assert that every citation and
+  locator in `src/` is stated in `docs/references.md`. It checks consistency,
+  not truth.
 
 ## 0.3.0
 
