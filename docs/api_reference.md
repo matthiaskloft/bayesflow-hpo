@@ -50,7 +50,7 @@ def optimize(
 | `validation_conditions` | Condition grid (e.g. `{"N": [50, 100, 200]}`). |
 | `sims_per_condition` | Simulations per condition grid point (default 200). |
 | `n_posterior_samples` | Posterior draws for validation (default 500). |
-| `max_samples_per_call` | Keyword-only. Cap on posterior draws per `approximator.sample()` call during validation (default `20_000`). `None` samples each condition in a single call. Not read by a custom `validate_fn`, which sets its own cap — `make_lc2st_validate_fn()` takes one. |
+| `max_samples_per_call` | Keyword-only, `int` or `None` (a float is rejected). Cap on posterior draws per `approximator.sample()` call during validation (default `20_000`). `None` samples each condition in a single call. Not read by a custom `validate_fn`, which sets its own cap — `make_lc2st_validate_fn()` takes one. |
 | `objective_metrics` | Metric keys to optimize. Default `["calibration_error", "nrmse"]`. |
 | `objective_mode` | `"pareto"` (default) — each metric is its own objective. `"mean"` — arithmetic mean of metrics. |
 | `cost_metric` | Cost objective: `"inference_time"` (default), `"param_count"`, or `None` to optimize the quality metrics alone. With `None` the study has one direction per quality metric; `param_count` and `inference_time_s` are still stored as trial user attrs for post-hoc ranking, and `max_param_count` still applies. |

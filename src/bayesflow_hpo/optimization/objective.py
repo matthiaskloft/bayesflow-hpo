@@ -71,6 +71,7 @@ from bayesflow_hpo.validation.data import ValidationDataset
 from bayesflow_hpo.validation.inference import (
     DEFAULT_MAX_SAMPLES_PER_CALL,
     condition_batch_size,
+    validate_max_samples_per_call,
 )
 from bayesflow_hpo.validation.registry import (
     CanonicalMetricName,
@@ -689,14 +690,9 @@ class ObjectiveConfig:
         # config directly skips that check, and the memory estimator clamps
         # a sub-1 cap to 1 -- so an invalid value would reach training and
         # then raise inside validation, after the trial has been paid for.
-        if (
-            self.max_samples_per_call is not None
-            and self.max_samples_per_call < 1
-        ):
-            raise ValueError(
-                "max_samples_per_call must be >= 1 or None (no chunking), "
-                f"got {self.max_samples_per_call}."
-            )
+        self.max_samples_per_call = validate_max_samples_per_call(
+            self.max_samples_per_call
+        )
         # Canonicalize aliases HERE, once, so every downstream consumer agrees
         # on the key. They did not: `list_metrics()` returns canonical names,
         # so `cal_error` was excluded from the pipeline's metric list; the

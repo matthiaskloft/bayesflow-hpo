@@ -237,18 +237,40 @@ def _subnet_depth(params: dict[str, Any]) -> int:
     )
 
 
-#: Live state buffers an adaptive ODE sampler holds at once.
+#: Batch-sized tensors each sampler family keeps live at once, by
+#: search-space prefix. Read from the installed BayesFlow (2.0.12), not
+#: assumed: the sampling loop of each network is what sets the multiplier on
+#: one batch-sized activation.
 #:
-#: BayesFlow's default flow-matching integrator is ``tsit5``
-#: (``bayesflow/networks/defaults.py``: ``FLOW_MATCHING_INTEGRATE_DEFAULTS =
-#: {"method": "tsit5", "steps": "adaptive"}``), and ``tsit5_step``
-#: (``bayesflow/utils/integrate.py``) evaluates seven stages ``k1..k7`` that
-#: are all alive simultaneously, on top of ``state``, ``new_state`` and the
-#: error estimate. Seven is therefore a floor on the multiplier applied to
-#: one state-sized tensor, not a guess -- and it is what made the 500x1000
-#: case of issue #101 fail inside ``integrate_adaptive -> tsit5_step`` on a
-#: ``(500000, 256)`` activation with ~20 GiB free.
-_ODE_SAMPLER_STAGES = 7
+#: - ``fm_`` -- flow matching defaults to ``tsit5``
+#:   (``networks/defaults.py``: ``FLOW_MATCHING_INTEGRATE_DEFAULTS``), and
+#:   ``tsit5_step`` (``utils/integrate.py``) evaluates seven stages
+#:   ``k1..k7`` that are all alive simultaneously, on top of ``state``,
+#:   ``new_state`` and the error estimate. This is the case measured in
+#:   issue #101: the 500x1000 run failed inside ``integrate_adaptive ->
+#:   tsit5_step`` on a ``(500000, 256)`` activation.
+#: - ``dm_`` -- diffusion defaults to ``two_step_adaptive``
+#:   (``DIFFUSION_INTEGRATE_DEFAULTS``), a predictor-corrector whose step
+#:   holds ``state``, ``state_euler``, ``drift_mid``, ``diffusion_mid``,
+#:   ``state_euler_mid``, ``state_heun`` and ``noise`` at once -- the same
+#:   order as tsit5, so it shares the figure.
+#: - ``cm_`` / ``scm_`` -- consistency models do NOT integrate an ODE.
+#:   ``ConsistencyModel._inverse`` and ``StableConsistencyModel._inverse``
+#:   apply the consistency function once per discretization step, keeping
+#:   only ``x``, ``x_n`` and ``noise`` batch-sized (``t`` is ``(..., 1)``).
+#:   Giving them the seven-stage figure inflated their activation term by
+#:   more than seven times and enforced that as a hard rejection, which
+#:   biases a network-selection study against them for a cost they do not
+#:   pay.
+#:
+#: A coupling flow is absent deliberately: it inverts layer by layer,
+#: keeping one intermediate live at a time, and takes the default of 1.
+_SAMPLER_LIVE_STATES: dict[str, int] = {
+    "fm_": 7,
+    "dm_": 7,
+    "cm_": 3,
+    "scm_": 3,
+}
 
 #: Multiplier reconciling the per-row activation proxy with measurement.
 #:
@@ -269,10 +291,21 @@ _ODE_SAMPLER_STAGES = 7
 #: viable config costs one trial where an OOM costs a whole training run.
 _SAMPLING_OVERHEAD_FACTOR = 13
 
-#: Search-space prefixes whose inference network is sampled by integrating
-#: an ODE, and so pays :data:`_ODE_SAMPLER_STAGES`. A coupling flow inverts
-#: layer by layer instead, keeping one intermediate live at a time.
-_ODE_SAMPLED_PREFIXES = ("fm_", "dm_", "cm_", "scm_")
+
+def _sampler_live_states(params: dict[str, Any]) -> int:
+    """Live batch-sized tensors for the inference network in *params*.
+
+    Looks up :data:`_SAMPLER_LIVE_STATES` by search-space prefix, taking the
+    largest match so a params dict carrying more than one network's keys --
+    which `NetworkSelectionSpace` can produce -- is budgeted for the
+    costlier of them rather than for whichever key is encountered first.
+    """
+    matches = [
+        factor
+        for prefix, factor in _SAMPLER_LIVE_STATES.items()
+        if any(key.startswith(prefix) for key in params)
+    ]
+    return max(matches, default=1)
 
 
 def estimate_validation_memory_mb(
@@ -288,7 +321,7 @@ def estimate_validation_memory_mb(
     covers training: sampling holds no gradients and no optimizer state,
     but its batch is ``n_sims x n_posterior_samples`` rows rather than
     ``batch_size``, and an adaptive ODE sampler keeps
-    :data:`_ODE_SAMPLER_STAGES` copies of that batch live at once. At the
+    :data:`_SAMPLER_LIVE_STATES` copies of that batch live at once. At the
     ``optimize()`` defaults the sampling batch is 100,000 rows against a
     training batch of a few hundred, which is why a trial could pass the
     training budget and still die in validation (issue #101).
@@ -341,11 +374,7 @@ def estimate_validation_memory_mb(
 
     width = _subnet_width(params)
     depth = max(1, _subnet_depth(params) * max(1, _safe_int(params.get("cf_depth"), 1)))
-    stages = (
-        _ODE_SAMPLER_STAGES
-        if any(key.startswith(_ODE_SAMPLED_PREFIXES) for key in params)
-        else 1
-    )
+    stages = _sampler_live_states(params)
 
     activation_elements = max(1, rows * max(1, summary_dim + width) * depth)
     # Weights only -- no gradients, no optimizer state at sampling time.

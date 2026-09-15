@@ -181,6 +181,22 @@ class TestChunkedSampling:
 
         assert approx.calls == [4]
 
+    @pytest.mark.parametrize("cap", [20_000.0, 2e4, 1.5])
+    def test_float_cap_is_rejected(self, cap):
+        """A float cap fails only on the CHUNKED path, after training.
+
+        `20_000.0 // 500` is `40.0`, which `range()` refuses -- but a
+        pre-flight batch small enough to take the single-call path never
+        reaches that line, so the TypeError arrives at final validation.
+        """
+        with pytest.raises(TypeError, match="max_samples_per_call must be an int"):
+            make_bayesflow_infer_fn(
+                approximator=_make_approximator(["theta"]),
+                param_keys=["theta"],
+                data_keys=["x"],
+                max_samples_per_call=cap,
+            )
+
     def test_non_positive_cap_is_rejected(self):
         with pytest.raises(ValueError, match="max_samples_per_call"):
             make_bayesflow_infer_fn(

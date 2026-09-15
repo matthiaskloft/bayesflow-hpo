@@ -34,7 +34,10 @@ from bayesflow_hpo.validation.data import (
     ValidationDataset,
     generate_validation_dataset,
 )
-from bayesflow_hpo.validation.inference import DEFAULT_MAX_SAMPLES_PER_CALL
+from bayesflow_hpo.validation.inference import (
+    DEFAULT_MAX_SAMPLES_PER_CALL,
+    validate_max_samples_per_call,
+)
 from bayesflow_hpo.validation.registry import (
     canonical_metric_name,
     validate_objective_metric_kinds,
@@ -560,11 +563,7 @@ def optimize(
     # closure inside `run_validation_pipeline` -- i.e. AFTER a trial has
     # trained. A value that is knowable at call time must not cost a full
     # training run to be rejected.
-    if max_samples_per_call is not None and max_samples_per_call < 1:
-        raise ValueError(
-            "max_samples_per_call must be >= 1 or None (no chunking), got "
-            f"{max_samples_per_call}."
-        )
+    max_samples_per_call = validate_max_samples_per_call(max_samples_per_call)
     if qmc_startup_trials < 0:
         raise ValueError(
             f"qmc_startup_trials must be >= 0, got {qmc_startup_trials}"

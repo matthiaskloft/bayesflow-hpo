@@ -27,6 +27,7 @@ the CHUNK this module samples rather than over the whole condition. See issue
 
 from __future__ import annotations
 
+import operator
 from collections.abc import Callable
 from typing import Any
 
@@ -41,6 +42,53 @@ import numpy as np
 #: with the same per-call overhead, while the cost of a high one is a dead
 #: trial after full training.
 DEFAULT_MAX_SAMPLES_PER_CALL = 20_000
+
+
+def validate_max_samples_per_call(value: Any) -> int | None:
+    """Return *value* as a positive int, or ``None``; raise otherwise.
+
+    Integral type is checked, not just positivity. A float that looks
+    harmless -- ``2e4``, or ``20_000.0`` from a config file -- passes a
+    ``< 1`` test and then makes ``max_samples_per_call // n_samples`` a
+    float, which ``range()`` refuses. That ``TypeError`` surfaces only on
+    the CHUNKED path, so a small pre-flight batch takes the single-call
+    path and reports nothing, and the failure arrives after training.
+    ``operator.index`` accepts exactly the integral types and rejects every
+    float, integral-valued or not.
+
+    Parameters
+    ----------
+    value
+        The cap to validate: ``None`` (no chunking) or a positive integer.
+
+    Returns
+    -------
+    int | None
+        The validated cap.
+
+    Raises
+    ------
+    TypeError
+        If *value* is neither ``None`` nor an integer.
+    ValueError
+        If *value* is an integer below 1.
+    """
+    if value is None:
+        return None
+    try:
+        cap = operator.index(value)
+    except TypeError:
+        raise TypeError(
+            "max_samples_per_call must be an int or None (no chunking), got "
+            f"{type(value).__name__} ({value!r}). A float is rejected even "
+            "when integral: it makes the chunk size a float, which range() "
+            "refuses, and only on the chunked path."
+        ) from None
+    if cap < 1:
+        raise ValueError(
+            f"max_samples_per_call must be >= 1 or None (no chunking), got {cap}."
+        )
+    return cap
 
 
 def condition_batch_size(conditions: dict[str, Any]) -> int | None:
@@ -146,14 +194,12 @@ def make_bayesflow_infer_fn(
 
     Raises
     ------
+    TypeError
+        If *max_samples_per_call* is neither ``None`` nor an integer.
     ValueError
-        If *max_samples_per_call* is not positive.
+        If *max_samples_per_call* is an integer below 1.
     """
-    if max_samples_per_call is not None and max_samples_per_call < 1:
-        raise ValueError(
-            "max_samples_per_call must be >= 1 or None (no chunking), got "
-            f"{max_samples_per_call}."
-        )
+    max_samples_per_call = validate_max_samples_per_call(max_samples_per_call)
 
     if available_keys is not None:
         missing = set(data_keys) - available_keys

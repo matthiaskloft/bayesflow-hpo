@@ -263,3 +263,49 @@ class TestValidationMemoryEstimate:
             assert estimate_validation_memory_mb(
                 self.BENCH_PARAMS, max_samples_per_call=20_000, **kwargs
             ) > 0
+
+    @pytest.mark.parametrize("prefix", ["cm_", "scm_"])
+    def test_consistency_samplers_do_not_pay_the_tsit5_multiplier(self, prefix):
+        """They apply a consistency function per step, not an ODE solver.
+
+        `ConsistencyModel._inverse` and `StableConsistencyModel._inverse`
+        keep `x`, `x_n` and `noise` batch-sized; nothing holds seven
+        stages. Charging them the flow-matching figure inflated their
+        activation term sevenfold and enforced it as a hard rejection,
+        biasing a network-selection study against them.
+        """
+        shared = {"ds_summary_dim": 32, "ds_depth": 2, "n_params": 15}
+        kwargs = dict(
+            n_sims=100, n_posterior_samples=100, max_samples_per_call=None
+        )
+
+        consistency = estimate_validation_memory_mb(
+            {**shared, f"{prefix}subnet_width": 128, f"{prefix}subnet_depth": 2},
+            **kwargs,
+        )
+        flow_matching = estimate_validation_memory_mb(
+            {**shared, "fm_subnet_width": 128, "fm_subnet_depth": 2}, **kwargs
+        )
+        coupling = estimate_validation_memory_mb(
+            {**shared, "cf_subnet_width": 128, "cf_subnet_depth": 2,
+             "cf_depth": 1},
+            **kwargs,
+        )
+
+        assert coupling < consistency < flow_matching
+
+    def test_mixed_network_keys_take_the_costlier_sampler(self):
+        """A selection space can carry more than one network's keys."""
+        shared = {"ds_summary_dim": 32, "ds_depth": 2, "n_params": 15}
+        kwargs = dict(
+            n_sims=100, n_posterior_samples=100, max_samples_per_call=None
+        )
+
+        mixed = estimate_validation_memory_mb(
+            {**shared, "cm_subnet_width": 128, "fm_subnet_width": 128}, **kwargs
+        )
+        flow_matching = estimate_validation_memory_mb(
+            {**shared, "fm_subnet_width": 128}, **kwargs
+        )
+
+        assert mixed == flow_matching

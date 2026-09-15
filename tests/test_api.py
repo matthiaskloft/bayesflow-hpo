@@ -264,6 +264,25 @@ def test_optimize_rejects_invalid_max_samples_per_call():
         )
 
 
+def test_optimize_rejects_a_float_max_samples_per_call():
+    """Rejected before the study is touched, not after training.
+
+    A float passes a positivity check and then makes the chunk size a
+    float, which `range()` refuses -- on the chunked path only, so
+    pre-flight does not expose it.
+    """
+    from conftest import canonical_adapter
+
+    with pytest.raises(TypeError, match="max_samples_per_call must be an int"):
+        optimize(
+            simulator=MagicMock(),
+            adapter=canonical_adapter(),
+            search_space=_make_fake_search_space(),
+            storage=None,
+            max_samples_per_call=20_000.0,
+        )
+
+
 def test_optimize_uses_validation_simulator_for_dataset():
     """validation_simulator is passed to generate_validation_dataset."""
     val_sim = MagicMock(name="val_simulator")

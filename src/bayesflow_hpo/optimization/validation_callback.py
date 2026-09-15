@@ -46,7 +46,10 @@ from bayesflow_hpo.optimization.pruning_strategies import (
 )
 from bayesflow_hpo.types import ValidateFn
 from bayesflow_hpo.validation.data import ValidationDataset
-from bayesflow_hpo.validation.inference import DEFAULT_MAX_SAMPLES_PER_CALL
+from bayesflow_hpo.validation.inference import (
+    DEFAULT_MAX_SAMPLES_PER_CALL,
+    validate_max_samples_per_call,
+)
 from bayesflow_hpo.validation.registry import (
     CanonicalMetricName,
     JointMetricConfigurationError,
@@ -183,12 +186,9 @@ class PeriodicValidationCallback(Callback):
         # `make_bayesflow_infer_fn` would raise mid-training and the guard
         # around intermediate validation would record it as a validation
         # failure -- an argument error reported as a bad model.
-        if max_samples_per_call is not None and max_samples_per_call < 1:
-            raise ValueError(
-                "max_samples_per_call must be >= 1 or None (no chunking), "
-                f"got {max_samples_per_call}."
-            )
-        self.max_samples_per_call = max_samples_per_call
+        self.max_samples_per_call = validate_max_samples_per_call(
+            max_samples_per_call
+        )
         # `optimize()` auto-detects this from the sampler, but building an
         # objective directly leaves it None, and every pruning strategy
         # compares it against an int.

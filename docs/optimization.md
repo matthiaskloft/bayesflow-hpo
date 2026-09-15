@@ -195,9 +195,13 @@ validation ≈ (param_count × dtype_bytes)                      # weights only
               × stages × dtype_bytes × 13)
 ```
 
-`rows_per_call` is the chunk `max_samples_per_call` permits, `stages` is 7 for
-ODE-sampled inference networks (`fm_`, `dm_`, `cm_`, `scm_`) and 1 for a
-coupling flow, and the factor of 13 is calibrated against the measurement in
+`rows_per_call` is the chunk `max_samples_per_call` permits, and `stages` is the
+number of batch-sized tensors that network's sampling loop keeps live, read from
+BayesFlow: 7 for `fm_` (`tsit5` holds `k1..k7`) and `dm_` (`two_step_adaptive`, a
+predictor–corrector of the same order), 3 for the consistency models `cm_` and
+`scm_` (one consistency-function call per step, keeping `x`, `x_n` and `noise`),
+and 1 for a coupling flow, which inverts layer by layer. The factor of 13 is
+calibrated against the measurement in
 [#101](https://github.com/matthiaskloft/bayesflow-hpo/issues/101) (40,000 draws
 completed under a 6.29 GiB cap, 60,000 did not). A trial over budget here is
 rejected pre-training with `rejected_reason="validation_memory_budget"` and
