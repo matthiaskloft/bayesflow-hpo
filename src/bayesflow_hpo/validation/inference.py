@@ -40,6 +40,58 @@ import numpy as np
 DEFAULT_MAX_SAMPLES_PER_CALL = 20_000
 
 
+def condition_batch_size(conditions: dict[str, Any]) -> int | None:
+    """Rows every batched conditioning value shares, or ``None``.
+
+    ``None`` means "do not chunk this batch": either nothing in it has a
+    batch axis, or a shape could not be read at all. Both cases used to
+    reach ``sample()`` untouched, and must keep doing so -- shape
+    probing is new here and must not turn an input that previously
+    worked into an exception.
+
+    A value whose leading dimension is 1 while others are longer is
+    treated as BROADCAST and excluded from the count, mirroring what
+    the approximator does with it. Counting it would make the batch
+    look one row long and silently switch chunking off, which is the
+    failure mode the cap exists to prevent.
+
+    Raises
+    ------
+    ValueError
+        If two batched values disagree on their leading dimension.
+        Slicing to the shorter of the two would drop the tail of the
+        longer one, and the assembled draws would then have fewer rows
+        than the condition has simulations -- a mismatch the metrics
+        see as misaligned rows, not as an error.
+    """
+    sizes: dict[str, int] = {}
+    for key, value in conditions.items():
+        shape = getattr(value, "shape", None)
+        if shape is None:
+            try:
+                shape = np.shape(value)
+            except Exception:  # noqa: BLE001 - probe only, never fatal
+                return None
+        if not tuple(shape):
+            # 0-d: no batch axis to slice along.
+            continue
+        sizes[key] = int(tuple(shape)[0])
+
+    batched = {k: n for k, n in sizes.items() if n != 1}
+    if not batched:
+        return None
+    distinct = set(batched.values())
+    if len(distinct) > 1:
+        raise ValueError(
+            "Conditioning values disagree on their batch size: "
+            + ", ".join(f"{k}={n}" for k, n in sorted(batched.items()))
+            + ". Every conditioning array must have one row per "
+            "simulation in the condition (values with a leading "
+            "dimension of 1 are treated as broadcast)."
+        )
+    return distinct.pop()
+
+
 def _slice(value: Any, start: int, count: int) -> Any:
     """Take *count* rows of *value* from *start*, leaving broadcasts whole.
 
@@ -122,62 +174,11 @@ def make_bayesflow_infer_fn(
         ]
         return np.concatenate(normalized_parts, axis=-1)
 
-    def _batch_size(conditions: dict[str, Any]) -> int | None:
-        """Rows every batched conditioning value shares, or ``None``.
-
-        ``None`` means "do not chunk this batch": either nothing in it has a
-        batch axis, or a shape could not be read at all. Both cases used to
-        reach ``sample()`` untouched, and must keep doing so -- shape
-        probing is new here and must not turn an input that previously
-        worked into an exception.
-
-        A value whose leading dimension is 1 while others are longer is
-        treated as BROADCAST and excluded from the count, mirroring what
-        the approximator does with it. Counting it would make the batch
-        look one row long and silently switch chunking off, which is the
-        failure mode the cap exists to prevent.
-
-        Raises
-        ------
-        ValueError
-            If two batched values disagree on their leading dimension.
-            Slicing to the shorter of the two would drop the tail of the
-            longer one, and the assembled draws would then have fewer rows
-            than the condition has simulations -- a mismatch the metrics
-            see as misaligned rows, not as an error.
-        """
-        sizes: dict[str, int] = {}
-        for key, value in conditions.items():
-            shape = getattr(value, "shape", None)
-            if shape is None:
-                try:
-                    shape = np.shape(value)
-                except Exception:  # noqa: BLE001 - probe only, never fatal
-                    return None
-            if not tuple(shape):
-                # 0-d: no batch axis to slice along.
-                continue
-            sizes[key] = int(tuple(shape)[0])
-
-        batched = {k: n for k, n in sizes.items() if n != 1}
-        if not batched:
-            return None
-        distinct = set(batched.values())
-        if len(distinct) > 1:
-            raise ValueError(
-                "Conditioning values disagree on their batch size: "
-                + ", ".join(f"{k}={n}" for k, n in sorted(batched.items()))
-                + ". Every conditioning array must have one row per "
-                "simulation in the condition (values with a leading "
-                "dimension of 1 are treated as broadcast)."
-            )
-        return distinct.pop()
-
     def infer_fn(sim_data: dict[str, Any], n_posterior_samples: int) -> np.ndarray:
         conditions = {k: sim_data[k] for k in data_keys}
         n_samples = int(n_posterior_samples)
 
-        n_rows = _batch_size(conditions)
+        n_rows = condition_batch_size(conditions)
         if max_samples_per_call is None or n_rows is None:
             rows_per_call = n_rows = 0 if n_rows is None else n_rows
         else:
