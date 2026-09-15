@@ -65,7 +65,7 @@ def optimize(
 | `lr_warmup_fraction` | Fixed-budget fraction; `None` selects 5%, maximum 10%. A sequence enables categorical HPO. |
 | `pruning_strategy` | Multi-objective pruning: `"dominance"` (default), `"mo-sha"`, `("primary", "metric")`, or `"none"`. |
 | `max_param_count` | Reject trials exceeding this param count pre-training (default 1 000 000). |
-| `max_memory_mb` | Optional peak-memory budget in MB, or `"auto"` for CUDA free-memory auto-detection. |
+| `max_memory_mb` | Optional peak-memory budget in MB, or `"auto"` for CUDA free-memory auto-detection. Checked against both the training estimate and the validation-sampling estimate. |
 | `metric_constraints_hard` | Optional hard metric constraints `[(metric, threshold, "above" \| "below"), ...]` (reject after validation). |
 | `metric_constraints_soft` | Optional soft metric constraints `[(metric, threshold, "above" \| "below"), ...]` (feasibility-guided sampling for sampler presets). |
 | `memory_safety_margin` | Safety margin for `max_memory_mb="auto"` (default `0.2`). |
@@ -271,6 +271,8 @@ PeriodicValidationCallback(trial, approximator, validation_data, ...)
 ```python
 estimate_param_count(params) -> int
 estimate_peak_memory_mb(params, batch_size=None, dtype_bytes=4) -> float
+estimate_validation_memory_mb(params, n_sims, n_posterior_samples,
+                              max_samples_per_call=None, dtype_bytes=4) -> float
 exceeds_memory_budget(params, max_memory_mb, batch_size=None) -> bool
 ```
 

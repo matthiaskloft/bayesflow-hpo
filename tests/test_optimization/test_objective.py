@@ -2037,3 +2037,134 @@ def test_objective_mean_monitor_is_not_canonicalized() -> None:
         early_stopping_monitor="objective_mean",
     )
     assert config.early_stopping_monitor == "objective_mean"
+
+
+def test_objective_rejects_trial_exceeding_validation_memory_budget(monkeypatch):
+    """Validation sampling is budgeted BEFORE training (#101).
+
+    The training estimate is forced under budget, so the only thing that
+    can reject this trial is the sampling estimate. Before it existed,
+    such a trial trained in full and then OOMed in validation, recording a
+    model-quality penalty for a resource problem.
+    """
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.estimate_peak_memory_mb",
+        lambda params: 1.0,
+    )
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.estimate_validation_memory_mb",
+        lambda params, **kwargs: 5_000.0,
+    )
+
+    def _must_not_build(params, adapter, search_space):
+        raise AssertionError("rejection must happen before the build")
+
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.build_continuous_approximator",
+        _must_not_build,
+    )
+
+    class _FakeSimulator:
+        def sample(self, shape):
+            return {}
+
+    class _FakeAdapter:
+        def __call__(self, data):
+            return data
+
+    objective = GenericObjective(
+        ObjectiveConfig(
+            simulator=_FakeSimulator(),
+            adapter=_FakeAdapter(),
+            search_space=_FakeSearchSpace(),
+            epochs=1,
+            num_batches=1,
+            validation_data=_DUMMY_VALIDATION_DATA_1COND,
+            max_memory_mb=1_000.0,
+        )
+    )
+
+    trial = _FakeTrial()
+    values = objective(trial)
+
+    assert values[-1] == FAILED_TRIAL_COST
+    assert trial.user_attrs["rejected_reason"] == "validation_memory_budget"
+    assert trial.user_attrs["estimated_validation_memory_mb"] == 5_000.0
+
+
+def test_objective_records_validation_memory_estimate_when_within_budget(
+    monkeypatch,
+):
+    """The estimate is recorded even when it does not reject."""
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.estimate_peak_memory_mb",
+        lambda params: 1.0,
+    )
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.estimate_validation_memory_mb",
+        lambda params, **kwargs: 10.0,
+    )
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.build_continuous_approximator",
+        lambda params, adapter, search_space: _FakeApproximator(
+            param_count=50_000
+        ),
+    )
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.cleanup_trial",
+        lambda: None,
+    )
+
+    class _FakeSimulator:
+        def sample(self, shape):
+            return {}
+
+    class _FakeAdapter:
+        def __call__(self, data):
+            return data
+
+    objective = GenericObjective(
+        ObjectiveConfig(
+            simulator=_FakeSimulator(),
+            adapter=_FakeAdapter(),
+            search_space=_FakeSearchSpace(),
+            epochs=1,
+            num_batches=1,
+            validation_data=_DUMMY_VALIDATION_DATA_1COND,
+            max_memory_mb=1_000.0,
+        )
+    )
+
+    trial = _FakeTrial()
+    objective(trial)
+
+    assert trial.user_attrs["estimated_validation_memory_mb"] == 10.0
+    assert trial.user_attrs.get("rejected_reason") != "validation_memory_budget"
+
+
+def test_largest_validation_condition_uses_the_biggest_batch():
+    """An unbalanced grid is budgeted by its largest condition."""
+    from bayesflow_hpo.optimization.objective import (
+        _largest_validation_condition,
+    )
+
+    data = ValidationDataset(
+        simulations=[
+            {"x": np.zeros((5, 3)), "p": np.zeros((5,))},
+            {"x": np.zeros((40, 3)), "p": np.zeros((40,))},
+        ],
+        condition_labels=[{}, {}],
+        param_keys=["p"],
+        data_keys=["x"],
+        seed=0,
+    )
+
+    assert _largest_validation_condition(data) == 40
+
+
+def test_largest_validation_condition_handles_an_empty_dataset():
+    from bayesflow_hpo.optimization.objective import (
+        _largest_validation_condition,
+    )
+
+    assert _largest_validation_condition(_DUMMY_VALIDATION_DATA) == 1

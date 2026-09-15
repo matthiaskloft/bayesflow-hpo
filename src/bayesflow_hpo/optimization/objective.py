@@ -63,6 +63,7 @@ from bayesflow_hpo.optimization.cleanup import cleanup_trial
 from bayesflow_hpo.optimization.constraints import (
     MetricConstraintSpec,
     estimate_peak_memory_mb,
+    estimate_validation_memory_mb,
 )
 from bayesflow_hpo.search_spaces.composite import CompositeSearchSpace
 from bayesflow_hpo.types import BuildApproximatorFn, TrainFn, ValidateFn
@@ -110,6 +111,24 @@ def default_train_fn(
         num_batches=int(hparams["num_batches"]),
         callbacks=callbacks,
     )
+
+
+def _largest_validation_condition(validation_data: ValidationDataset) -> int:
+    """Rows in the biggest condition of *validation_data*.
+
+    The budget has to hold for every condition, and a grid need not be
+    balanced -- `generate_validation_dataset` gives each grid point
+    `sims_per_condition` rows, but a hand-built dataset can vary them --
+    so the peak is set by the largest, not by the first or the mean.
+    """
+    sizes = []
+    for sim in validation_data.simulations:
+        for value in sim.values():
+            shape = getattr(value, "shape", None)
+            if shape is not None and tuple(shape):
+                sizes.append(int(tuple(shape)[0]))
+                break
+    return max(sizes, default=1)
 
 
 def default_validate_fn(
@@ -1342,6 +1361,45 @@ class GenericObjective:
             logger.info(
                 "Trial #%d rejected: estimated %.0f MB > budget %.0f MB",
                 trial.number, estimated_memory, config.max_memory_mb,
+            )
+            return self._penalty()
+
+        # Validation sampling is a SEPARATE allocation from training, and
+        # the larger one at the defaults: its batch is
+        # `n_sims x n_posterior_samples` rather than `batch_size`. Checked
+        # here, before training, because the alternative is discovering it
+        # after -- the most expensive moment -- and recording a
+        # model-quality penalty for a resource problem (issue #101).
+        estimated_validation_memory = estimate_validation_memory_mb(
+            params,
+            n_sims=_largest_validation_condition(config.validation_data),
+            n_posterior_samples=max(
+                int(config.n_posterior_samples),
+                int(config.n_intermediate_posterior_samples),
+            ),
+            max_samples_per_call=config.max_samples_per_call,
+        )
+        trial.set_user_attr(
+            "estimated_validation_memory_mb", float(estimated_validation_memory)
+        )
+        if (
+            config.max_memory_mb is not None
+            and estimated_validation_memory > config.max_memory_mb
+        ):
+            trial.set_user_attr("rejected_reason", "validation_memory_budget")
+            # The levers are named because none of them is a search-space
+            # hyperparameter: no amount of re-sampling the space makes this
+            # trial fit, so a reader who is not told what to change reads a
+            # rejection they cannot act on.
+            logger.info(
+                "Trial #%d rejected: validation sampling needs an estimated "
+                "%.0f MB > budget %.0f MB. Lower sims_per_condition, "
+                "n_posterior_samples, or max_samples_per_call (currently "
+                "%s).",
+                trial.number,
+                estimated_validation_memory,
+                config.max_memory_mb,
+                config.max_samples_per_call,
             )
             return self._penalty()
 
