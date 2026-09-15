@@ -45,10 +45,14 @@
   and its duplicate loop deleted; the refactor was checked against the
   pre-refactor implementation and is bit-identical for one parameter
   (6.9e-18 for three, from float association order).
-- **TARP** (Lemos et al., 2023) as the objectives `tarp_error` and
-  `tarp_error_random`, with the reference contract and the
+- **TARP** (Lemos et al., 2023), with the reference contract and the
   `bayesflow_hpo_joint_metric_settings` study record that keeps trials scored
-  under different settings from being compared.
+  under different settings from being compared. `tarp_error` is an
+  **objective** and requires supplied reference points. `tarp_error_random`
+  is registered as a **diagnostic** and is rejected by
+  `validate_objective_metric_kinds()` if passed in `objective_metrics`: with
+  random references the statistic is blind to a posterior that ignores its
+  data, so it cannot be optimized against.
 - `lc2st` is a registered objective metric with a `METRIC_DIRECTIONS` entry.
   It needs the `sklearn` extra.
 - Joint metrics are **off** `PeriodicValidationCallback` by default
@@ -60,8 +64,13 @@
   threaded through `run_validation_pipeline`, `ObjectiveConfig`,
   `PeriodicValidationCallback`, `validate_once`, `default_validate_fn`,
   `make_lc2st_validate_fn` and `optimize()`, which rejects an invalid value
-  up front. A batch that already fits takes the original single-call path,
-  and the assembled array is identical either way.
+  up front. A batch that already fits takes the original single-call path.
+  Chunking preserves the assembled array's shape, row order and draws per
+  simulation, including the single-parameter trailing-axis squeeze; it does
+  **not** reproduce the same draws, because each chunk is its own
+  `approximator.sample()` call and BayesFlow sampling is stochastic. A
+  chunked run and an unchunked one at the same seed can therefore give
+  different metric values.
 - `estimate_validation_memory_mb` budgets one `sample()` call, and the
   objective now checks it alongside the training estimate. Over-budget trials
   are rejected pre-training with `rejected_reason="validation_memory_budget"`,
