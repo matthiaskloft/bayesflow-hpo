@@ -339,3 +339,68 @@ def test_the_tuple_primary_form_is_still_caught(joint_metric):
     joint_metric("joint_slow", lambda inputs: {"joint_slow": 0.1})
     with pytest.raises(ValueError, match="no pruning decision"):
         _callback("joint_slow", pruning_strategy=("primary", "joint_slow"))
+
+
+# ---------------------------------------------------------------------------
+# The exclusion must cover overrides, not just the registry route
+# ---------------------------------------------------------------------------
+
+
+def test_an_overridden_joint_metric_is_excluded_too(joint_metric):
+    """`joint_metrics=` bypasses the `metrics=` filter entirely.
+
+    `run_validation_pipeline` merges the override dict UNCONDITIONALLY,
+    independent of `metrics` -- that is how `make_lc2st_validate_fn` adds a
+    metric its own list omits. So filtering `metrics` excludes nothing that
+    arrives by override, which is every metric that needs one at all:
+    `tarp_error`, or a configured L-C2ST. The callback logged the metric as
+    excluded, computed it anyway at ~56 s per condition, and then discarded
+    the value, because the extraction keys on `intermediate_metrics`.
+    """
+    calls: list[int] = []
+
+    def expensive(inputs):
+        calls.append(inputs.cond_id)
+        return {"joint_slow": 0.1}
+
+    joint_metric("joint_slow", expensive)
+    cb = _pipeline_callback(
+        "joint_slow", joint_metrics={"joint_slow": expensive}
+    )
+    cb.on_epoch_end(0)
+
+    assert cb._step == 1, "validation did not complete; the test is vacuous"
+    assert calls == [], (
+        "an overridden joint metric ran during intermediate validation "
+        "despite being excluded from the intermediate set"
+    )
+
+
+def test_opting_in_runs_the_overridden_metric(joint_metric):
+    """The escape hatch has to work through the override route as well."""
+    calls: list[int] = []
+
+    def expensive(inputs):
+        calls.append(inputs.cond_id)
+        return {"joint_slow": 0.1}
+
+    joint_metric("joint_slow", expensive)
+    cb = _pipeline_callback(
+        "joint_slow",
+        joint_metrics={"joint_slow": expensive},
+        include_joint_metrics=True,
+    )
+    cb.on_epoch_end(0)
+
+    assert calls, "opting in did not run the overridden metric"
+    assert cb._step == 1
+
+
+def test_include_joint_metrics_is_reachable_from_optimize():
+    """Three of this callback's error messages tell the caller to set it."""
+    import inspect
+
+    from bayesflow_hpo import optimize
+
+    assert "include_joint_metrics" in inspect.signature(optimize).parameters
+

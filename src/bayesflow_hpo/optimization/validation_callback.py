@@ -504,6 +504,23 @@ class PeriodicValidationCallback(Callback):
             )
         return False  # pragma: no cover
 
+    def _intermediate_joint_metrics(self) -> dict[str, Any] | None:
+        """Overrides for the joint metrics that run at an interval.
+
+        The intermediate metric set is the authority on what runs here; an
+        override supplies a metric's CONFIGURATION, not permission to run
+        it. Returning ``None`` rather than an empty dict keeps the pipeline
+        on its ordinary path when nothing is overridden.
+        """
+        if not self.joint_metrics:
+            return None
+        kept = {
+            name: fn
+            for name, fn in self.joint_metrics.items()
+            if canonical_metric_name(name) in self.intermediate_metrics
+        }
+        return kept or None
+
     def _run_lightweight_validation(self) -> dict[str, float] | None:
         """Compute objective_metrics via validation pipeline."""
         try:
@@ -552,7 +569,18 @@ class PeriodicValidationCallback(Callback):
                     validation_data=self.validation_data,
                     n_posterior_samples=self.n_posterior_samples,
                     metrics=self.intermediate_metrics,
-                    joint_metrics=self.joint_metrics,
+                    # Filtered, not forwarded whole. `run_validation_pipeline`
+                    # merges the override dict UNCONDITIONALLY -- independent
+                    # of `metrics` -- because that is how
+                    # `make_lc2st_validate_fn` adds a metric its `metrics=`
+                    # list omits. So filtering `metrics` alone excludes
+                    # nothing that arrives this way, which is every metric
+                    # needing an override at all: `tarp_error`, or a
+                    # configured L-C2ST. The callback would then log that a
+                    # metric is excluded, compute it anyway at ~56 s per
+                    # condition, and discard the value, since the extraction
+                    # below keys on `intermediate_metrics`.
+                    joint_metrics=self._intermediate_joint_metrics(),
                 )
                 extracted: dict[str, float] = {
                     k: float(result.summary[k])

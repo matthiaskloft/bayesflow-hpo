@@ -12,6 +12,7 @@ from typing import Any
 
 from bayesflow_hpo.validation.data import ValidationDataset
 from bayesflow_hpo.validation.pipeline import run_validation_pipeline
+from bayesflow_hpo.validation.registry import JointMetricConfigurationError
 from bayesflow_hpo.validation.result import ValidationResult
 
 
@@ -21,6 +22,7 @@ def validate_once(
     n_sims: int = 2,
     n_posterior_samples: int = 10,
     metrics: Sequence[str] | None = None,
+    joint_metrics: dict[str, Any] | None = None,
 ) -> ValidationResult:
     """Run a lightweight validation pass to verify data compatibility.
 
@@ -69,7 +71,13 @@ def validate_once(
             validation_data=mini_dataset,
             n_posterior_samples=n_posterior_samples,
             metrics=metrics,
+            joint_metrics=joint_metrics,
         )
+    except JointMetricConfigurationError:
+        # A configuration problem, with its own message naming the fix.
+        # Rewriting it as "check that param_keys/data_keys match" sends the
+        # reader to the wrong place entirely.
+        raise
     except Exception as exc:
         raise RuntimeError(
             "Dry-run validation failed. Check that "

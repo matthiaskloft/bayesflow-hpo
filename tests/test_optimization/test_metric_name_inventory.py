@@ -85,6 +85,9 @@ _NON_METRIC_FIELDS = {
     "build_approximator_fn",
     "checkpoint_pool",
     "cost_metric",
+    # A bool, not a name: it says WHETHER the joint metrics already named in
+    # `objective_metrics` also run at each intermediate validation.
+    "include_joint_metrics",
     "early_stopping_patience",
     "early_stopping_window",
     "epochs",

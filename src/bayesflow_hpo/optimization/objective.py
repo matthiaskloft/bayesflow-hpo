@@ -451,6 +451,14 @@ class ObjectiveConfig:
     #: fires. Recorded so the pipeline metric list can include them.
     metric_constraints_soft: list[MetricConstraintSpec] | None = None
     n_posterior_samples: int = 500
+    #: Whether joint metrics are computed at every intermediate validation
+    #: as well as at final validation. False by default because they are
+    #: expensive enough to change what pruning is for -- L-C2ST measured
+    #: ~56 s per condition -- and three of
+    #: `PeriodicValidationCallback`'s own error messages tell the caller to
+    #: set this, so it has to be reachable from `optimize()` or that advice
+    #: cannot be taken.
+    include_joint_metrics: bool = False
     #: Configured joint metrics, `{name: fn}`. The route by which a joint
     #: metric that cannot run at a registry default -- `tarp_error`, which
     #: needs data-derived reference points -- reaches the validation
@@ -1336,6 +1344,7 @@ class GenericObjective:
                     pruning_strategy=config.pruning_strategy,
                     objective_metrics=config.objective_metrics,
                     joint_metrics=config.joint_metrics,
+                    include_joint_metrics=config.include_joint_metrics,
                     early_stopping_patience=config.early_stopping_patience,
                     early_stopping_window=config.early_stopping_window,
                     early_stopping_monitor=config.early_stopping_monitor,
