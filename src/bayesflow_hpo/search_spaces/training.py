@@ -64,11 +64,18 @@ class TrainingSpace(BaseSearchSpace):
         simulation budget is the one proportional to compute spent.
 
     Warmup length is deliberately *not* a dimension here.  It is configured
-    once on the objective (``lr_warmup_fraction`` / ``lr_warmup_epochs``),
-    because adding a third correlated schedule axis to ``{batch_size,
-    learning rate}`` is what Shallue et al. (2019, Sec. 5.1) report as having
-    made their own tuning unreliable, at a far larger budget than a typical
-    HPO run here.
+    once on the objective (``lr_warmup_fraction`` / ``lr_warmup_epochs``).
+    The reasoning is ours, but the cost it weighs is Shallue et al.'s
+    (2019, Sec. 4): they had to tune every optimization metaparameter anew
+    at each batch size -- the initial learning rate, the decay schedule
+    ``(alpha, T)`` and the momentum -- at roughly 100 non-divergent
+    quasi-random trials per batch size, and still could not always tell
+    whether performance had saturated.  Section 5 states the conclusion as a
+    recommendation: "practitioners tune all optimization parameters anew when
+    they change the batch size or they risk masking the true behavior of the
+    training procedure".  A third correlated schedule axis multiplies that
+    cost, and a typical HPO run here has a far smaller budget than they
+    spent.
 
     Parameters
     ----------

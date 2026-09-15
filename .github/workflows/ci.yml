@@ -20,6 +20,17 @@ jobs:
       - run: pip install ruff
       - run: ruff check src/ tests/
 
+  citations:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # Pure stdlib: it reads docs/references.md and src/, and imports
+      # nothing from the package, so it needs no backend and no install.
+      - run: python scripts/check_citations.py
+
   types:
     runs-on: ubuntu-latest
     env:

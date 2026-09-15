@@ -7,6 +7,12 @@
 - Do NOT blindly use in-memory knowledge from LLM training — verify against actual sources first.
 - Document the references backing a given implementation in docstrings and docs (e.g., API/architecture documentation).
 - Verify references via the OpenAlex API and save them formatted in APA 7 in [`docs/references.md`](docs/references.md).
+- Every locator must name the edition it was checked against and the date, e.g.
+  `(Thm. 1 -- arXiv:1804.06788, verified 2026-09-11)`. See
+  [`docs/contributing-references.md`](docs/contributing-references.md).
+- `scripts/check_citations.py` (also `tests/test_citations.py`, also a CI job)
+  asserts that every citation and locator in `src/` is stated in
+  `docs/references.md`. It checks consistency, not truth.
 
 Generic hyperparameter optimization for BayesFlow 2.x models,
 wrapping Optuna multi-objective search with BayesFlow-aware

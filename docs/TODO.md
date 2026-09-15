@@ -269,7 +269,7 @@ kwargs as dimensions:
 
 Completed all three sub-tasks for documentation-backed implementation.
 
-#### Sub-task 1: Tracked article summaries in `docs/references/`
+#### Sub-task 1: Tracked article summaries in `docs/references/` (deleted)
 
 All 16 reference summaries exist with extensive method details, algorithm
 citations, and implementation notes.
@@ -279,6 +279,11 @@ citations, and implementation notes.
 > and at least one citation to a work that does not appear to exist; the
 > directory is now marked unreliable. See the "Audit status" section of
 > [`references.md`](references.md).
+>
+> **Resolved 2026-09-15 (#89).** The directory was deleted rather than
+> rewritten. The summaries backed no code path, and rewriting meant
+> re-reading seventeen papers to a standard the originals never met.
+> [`references.md`](references.md) is now the single record.
 
 #### Sub-task 2: Docstring citations
 

@@ -353,7 +353,7 @@ METRIC_DIRECTIONS: dict[str, MetricDirection] = {
         to_minimize=lambda v: v,
         # The L-C2ST statistic is the mean of ``(p - 0.5) ** 2`` over the
         # classifier's out-of-fold probabilities (validation.c2st, the
-        # single-class MSE_0 of Linhart et al. 2023, Theorem 3.1). A
+        # single-class MSE_0 of Linhart et al. 2023, Theorem 3). A
         # probability lies in [0, 1], so the squared deviation from 0.5 is
         # bounded by 0.25 and so is its mean.
         #
