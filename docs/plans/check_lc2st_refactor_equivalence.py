@@ -6,14 +6,16 @@ this is a refactor rather than a rewrite is checkable, so it is checked
 here: the pre-refactor implementation is reconstructed verbatim from git and
 run against the same approximator, dataset and seed as the current one.
 
-Run it against the commit that introduced the refactor:
+Pass the revision holding the PRE-refactor implementation:
 
-    git show <refactor-commit>~1:src/bayesflow_hpo/validation/c2st.py
+    KERAS_BACKEND=torch python \
+        docs/plans/check_lc2st_refactor_equivalence.py \
+        --old-rev 6340216~1
 
-is what ``load_old_factory`` reads, via ``HEAD`` -- so check the refactor out
-and run this with ``HEAD`` at its parent, or edit the ref below.
-
-    KERAS_BACKEND=torch python docs/plans/check_lc2st_refactor_equivalence.py
+The default is ``HEAD~1``, not ``HEAD``: reading ``HEAD`` compares the
+working tree against itself on a clean checkout and prints ``EQUIVALENT``
+without having compared anything. A check that cannot fail is worse than no
+check, because it is quoted as evidence.
 
 Result at the time of the refactor: bit-identical for a single parameter,
 max abs diff 6.9e-18 for three. That residual is expected and is not noise
@@ -35,10 +37,14 @@ Requires scikit-learn.
 
 from __future__ import annotations
 
+import argparse
 import os
 import subprocess
 import sys
 import types
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
 
 os.environ.setdefault("KERAS_BACKEND", "torch")
 
@@ -48,12 +54,23 @@ from bayesflow_hpo.validation.data import ValidationDataset  # noqa: E402
 
 
 class FakeApproximator:
-    def __init__(self, param_keys, n_sims, seed=0):
+    """Deterministic per-condition draws, so both implementations agree.
+
+    The draws are a function of the condition's data, not of call order, so
+    the old and new factories see identical input for the same condition
+    however many times each is invoked.
+    """
+
+    def __init__(
+        self, param_keys: list[str], n_sims: int, seed: int = 0
+    ) -> None:
         self.param_keys = param_keys
         self.n_sims = n_sims
         self.seed = seed
 
-    def sample(self, *, conditions, num_samples):
+    def sample(
+        self, *, conditions: dict[str, Any], num_samples: int
+    ) -> dict[str, np.ndarray]:
         # Deterministic in the condition, so both implementations see
         # identical draws for the same condition.
         key = float(np.asarray(conditions["x"]).sum())
@@ -64,7 +81,10 @@ class FakeApproximator:
         }
 
 
-def dataset(param_keys, n_conditions, n_sims):
+def dataset(
+    param_keys: list[str], n_conditions: int, n_sims: int
+) -> ValidationDataset:
+    """Build a validation dataset with one entry per condition."""
     rng = np.random.default_rng(1)
     sims = [
         {
@@ -82,12 +102,47 @@ def dataset(param_keys, n_conditions, n_sims):
     )
 
 
-def load_old_factory():
-    """Import the pre-refactor c2st.py as a standalone module."""
-    src = subprocess.run(
-        ["git", "show", "HEAD:src/bayesflow_hpo/validation/c2st.py"],
-        capture_output=True, text=True, check=True,
-    ).stdout
+def load_old_factory(old_rev: str) -> Callable[..., Any]:
+    """Import the pre-refactor ``c2st.py`` as a standalone module.
+
+    Parameters
+    ----------
+    old_rev
+        Git revision holding the implementation to compare against. Must
+        NOT resolve to the same content as the working tree, or the
+        comparison is vacuous.
+
+    Returns
+    -------
+    Callable
+        That revision's ``make_lc2st_validate_fn``.
+
+    Raises
+    ------
+    SystemExit
+        If *old_rev* cannot be read, or if its ``c2st.py`` is byte-identical
+        to the working tree's -- which would make every comparison below
+        trivially pass.
+    """
+    spec = f"{old_rev}:src/bayesflow_hpo/validation/c2st.py"
+    proc = subprocess.run(
+        ["git", "show", spec], capture_output=True, text=True,
+    )
+    if proc.returncode != 0:
+        raise SystemExit(
+            f"Could not read {spec!r}: {proc.stderr.strip()}\n"
+            "Pass --old-rev pointing at the commit BEFORE the refactor."
+        )
+    src = proc.stdout
+    current = Path("src/bayesflow_hpo/validation/c2st.py").read_text(
+        encoding="utf-8"
+    )
+    if src == current:
+        raise SystemExit(
+            f"{spec!r} is byte-identical to the working tree, so every "
+            "comparison below would pass without comparing anything. Pass "
+            "--old-rev pointing at the commit BEFORE the refactor."
+        )
     mod = types.ModuleType("old_c2st")
     mod.__dict__["__file__"] = "old_c2st.py"
     # Registered BEFORE exec: @dataclass resolves its own module by name.
@@ -96,8 +151,22 @@ def load_old_factory():
     return mod.make_lc2st_validate_fn
 
 
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--old-rev",
+        default="HEAD~1",
+        help=(
+            "Git revision holding the pre-refactor c2st.py. Default HEAD~1; "
+            "HEAD would compare the working tree against itself."
+        ),
+    )
+    return parser.parse_args()
+
+
 def main() -> None:
-    old_factory = load_old_factory()
+    args = _parse_args()
+    old_factory = load_old_factory(args.old_rev)
     from bayesflow_hpo.validation.c2st import make_lc2st_validate_fn as new_factory
 
     for param_keys in (["theta"], ["a", "b", "c"]):

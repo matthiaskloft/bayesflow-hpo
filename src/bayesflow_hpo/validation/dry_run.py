@@ -43,6 +43,10 @@ def validate_once(
         Number of posterior draws (keep small for speed).
     metrics
         Metric names to test (defaults to registry defaults).
+    joint_metrics
+        Configured joint metrics as ``{name: fn}``, forwarded to the
+        pipeline. Needed for any joint metric that cannot run at a registry
+        default, such as ``tarp_error``.
     """
     import numpy as np
 

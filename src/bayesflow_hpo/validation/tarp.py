@@ -470,6 +470,7 @@ def make_tarp_joint_metric(
     metric: str = "euclidean",
     standardize: bool = True,
     seed: int = 42,
+    reference_id: str | None = None,
 ) -> JointMetricFn:
     """Create a TARP metric for the validation pipeline's joint dispatch.
 
@@ -508,6 +509,20 @@ def make_tarp_joint_metric(
         is given. Not defaulted to ``None``: with ``seed=None`` two
         identical calls return different numbers, which as an HPO objective
         means trials are not comparable.
+    reference_id
+        An optional label for *which* reference the provider produces,
+        recorded in the study's joint metric settings so a resume detects a
+        change of reference.
+
+        Without it the pin records only ``reference_mode="provided"``,
+        because a callable is not serializable: two studies both reporting
+        ``tarp_error`` may have used entirely different providers and the
+        settings check passes. Nothing can derive this automatically -- a
+        provider's output depends on the data it is given -- so it is the
+        caller's to supply and the caller's to change when the reference
+        changes. Supplying it turns the pin from "a provider was used" into
+        "this provider was used"; leaving it ``None`` keeps the weaker
+        guarantee, stated rather than implied.
 
     Returns
     -------
@@ -574,6 +589,10 @@ def make_tarp_joint_metric(
         "standardize": bool(standardize),
         "seed": int(seed),
         "reference_mode": "random" if reference_points is None else "provided",
+        # None unless the caller labelled the reference. Recorded either
+        # way, so a study that adds a label later reads as changed -- which
+        # it is, in the only sense the pin can check.
+        "reference_id": reference_id,
     }
     return _tarp_metric
 

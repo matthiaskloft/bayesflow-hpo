@@ -123,8 +123,11 @@ class ValidationResult:
             lines.append(f"  Parameters: {list(self.per_parameter.keys())}")
         if self.failed_joint_metrics:
             lines.append("  Failed joint metrics:")
-            for k, v in self.failed_joint_metrics.items():
-                lines.append(f"    {k}: {v}")
+            # Distinct names from the summary loop above, whose `v` mypy
+            # infers as float from `dict[str, float]`. Reusing them assigns
+            # a str to a float-typed variable.
+            for name, reason in self.failed_joint_metrics.items():
+                lines.append(f"    {name}: {reason}")
         if self.timing:
             total = sum(self.timing.values())
             lines.append(f"  Timing: {total:.1f}s total")

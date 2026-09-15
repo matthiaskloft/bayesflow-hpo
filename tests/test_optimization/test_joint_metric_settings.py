@@ -177,6 +177,10 @@ def test_the_settings_come_from_the_callable_that_ran():
         "standardize": True,
         "seed": 3,
         "reference_mode": "random",
+        # Recorded even when unset, so a study that starts labelling its
+        # reference reads as changed -- which it is, in the only sense the
+        # pin can check.
+        "reference_id": None,
     }
 
 
@@ -249,4 +253,40 @@ def test_every_runnable_registered_joint_metric_declares_settings():
         f"registered joint metrics {undeclared} declare no settings, so a "
         "study using them records nothing and compares nothing"
     )
+
+
+def test_a_labelled_reference_is_pinned():
+    """What `reference_mode="provided"` alone cannot say: WHICH provider.
+
+    A callable is not serializable, so two studies both reporting
+    `tarp_error` may have used entirely different providers and the
+    settings check passes. Nothing can derive the identity automatically --
+    a provider's output depends on the data it is given -- so the caller
+    supplies it, and supplying it turns the pin from "a provider was used"
+    into "this provider was used".
+    """
+    from bayesflow_hpo.validation.tarp import make_tarp_joint_metric
+
+    a = make_tarp_joint_metric(
+        reference_points=lambda i: None, reference_id="item-difficulty-v1"
+    )
+    b = make_tarp_joint_metric(
+        reference_points=lambda i: None, reference_id="item-difficulty-v2"
+    )
+    assert a.joint_metric_settings["reference_id"] == "item-difficulty-v1"
+    assert (
+        a.joint_metric_settings["reference_id"]
+        != b.joint_metric_settings["reference_id"]
+    ), "two labelled references must be distinguishable by the pin"
+
+    study = _study()
+    check_or_stamp_joint_metric_settings(
+        study, {"tarp_error": a.joint_metric_settings}, n_completed_trials=0
+    )
+    with pytest.raises(ValueError, match="reference_id"):
+        check_or_stamp_joint_metric_settings(
+            study,
+            {"tarp_error": b.joint_metric_settings},
+            n_completed_trials=1,
+        )
 

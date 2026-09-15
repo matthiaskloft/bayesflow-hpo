@@ -369,6 +369,54 @@ def register_joint_metric(
     _JOINT.add(name)
 
 
+def unregister_metric(name: str) -> bool:
+    """Remove *name* and every table entry that mentions it.
+
+    `register_metric` writes to six tables, so removing a metric by popping
+    `_REGISTRY` alone leaves the rest stale, and the leftovers are not
+    inert: `producer_for_key` still resolves a declared output key to a
+    metric `get_metric` can no longer find, `validate_objective_metric_kinds`
+    still rejects a removed diagnostic, and the objective-encoding inventory
+    still counts it as a candidate. Test teardown is the usual caller, and
+    partial teardown leaks across tests in exactly those three ways.
+
+    Parameters
+    ----------
+    name
+        Canonical name. An alias does not identify a metric to remove --
+        removing "the metric this alias points at" is a different and more
+        surprising operation -- so an alias raises rather than guessing.
+
+    Returns
+    -------
+    bool
+        ``True`` if a metric was removed, ``False`` if *name* was not
+        registered. Idempotent, so teardown need not check first.
+
+    Raises
+    ------
+    ValueError
+        If *name* is a registered alias rather than a canonical name.
+    """
+    if name in _ALIASES:
+        raise ValueError(
+            f"{name!r} is an alias of {_ALIASES[name]!r}, not a canonical "
+            "metric name. Pass the canonical name to remove the metric, or "
+            "delete the alias from `_ALIASES` to remove only the alias."
+        )
+    if name not in _REGISTRY:
+        return False
+    del _REGISTRY[name]
+    _KINDS.pop(name, None)
+    _OUTPUTS.pop(name, None)
+    _DESCRIPTIONS.pop(name, None)
+    _REQUIRES.pop(name, None)
+    _JOINT.discard(name)
+    for alias in [a for a, target in _ALIASES.items() if target == name]:
+        del _ALIASES[alias]
+    return True
+
+
 def is_joint_metric(name: str) -> bool:
     """Return whether *name* (or its alias) is registered as a joint metric.
 

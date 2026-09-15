@@ -534,7 +534,13 @@ def _subsampled_conditions(n_conditions: int, n_keep: int) -> set[int]:
     """
     if n_keep >= n_conditions:
         return set(range(n_conditions))
-    if n_keep <= 1:
+    if n_keep < 1:
+        # Silently keeping one condition would break the documented "at
+        # most this many" contract in the direction that costs money, and
+        # zero conditions would leave the metric absent from every summary
+        # -- which the objective reads as a failure and penalizes.
+        raise ValueError(f"max_conditions must be at least 1, got {n_keep}.")
+    if n_keep == 1:
         # `np.linspace(0, n-1, 1)` is [0], the grid's first corner -- the
         # exact prefix this function exists to avoid. The middle is the
         # least unrepresentative single condition available.

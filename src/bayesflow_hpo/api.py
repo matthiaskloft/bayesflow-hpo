@@ -126,8 +126,6 @@ def optimize(
     n_posterior_samples: int = 500,
     # Objectives
     objective_metrics: list[str] | None = None,
-    joint_metrics: dict[str, Any] | None = None,
-    include_joint_metrics: bool = False,
     objective_mode: str = "pareto",
     cost_metric: str | None = "inference_time",
     # Pruning
@@ -170,6 +168,8 @@ def optimize(
     # rebind a caller's trailing positional arguments.
     *,
     sampler_n_startup_trials: int | None = None,
+    joint_metrics: dict[str, Any] | None = None,
+    include_joint_metrics: bool = False,
 ) -> optuna.Study:
     """Run HPO with a high-level convenience API.
 

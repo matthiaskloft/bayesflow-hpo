@@ -19,6 +19,8 @@ Design: ``docs/plans/plan-joint-metric-path.md`` D6, D7.
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 import optuna
 import pytest
@@ -37,14 +39,16 @@ from bayesflow_hpo.validation.tarp import make_tarp_joint_metric
 
 
 class _Approximator:
-    def __init__(self, param_keys, n_sims):
+    def __init__(self, param_keys: list[str], n_sims: int) -> None:
         self.param_keys = param_keys
         self.n_sims = n_sims
 
-    def get_weights(self):
+    def get_weights(self) -> list[Any]:
         return []
 
-    def sample(self, *, conditions, num_samples):
+    def sample(
+        self, *, conditions: Any, num_samples: int
+    ) -> dict[str, np.ndarray]:
         rng = np.random.default_rng(0)
         return {
             k: rng.normal(size=(self.n_sims, num_samples, 1))
@@ -52,7 +56,7 @@ class _Approximator:
         }
 
 
-def _dataset(n_conditions=2, n_sims=30):
+def _dataset(n_conditions: int = 2, n_sims: int = 30) -> ValidationDataset:
     rng = np.random.default_rng(1)
     sims = [
         {"a": rng.normal(size=n_sims), "b": rng.normal(size=n_sims),
@@ -73,7 +77,7 @@ def _dataset(n_conditions=2, n_sims=30):
 # ---------------------------------------------------------------------------
 
 
-def test_a_configured_tarp_error_overrides_its_placeholder():
+def test_a_configured_tarp_error_overrides_its_placeholder() -> None:
     """The remedy `tarp_error`'s own error message prescribes must work.
 
     The objective path unions the objective names into `metrics=`, so
@@ -101,7 +105,7 @@ def test_a_configured_tarp_error_overrides_its_placeholder():
     assert result.failed_joint_metrics == {}
 
 
-def test_without_an_override_the_placeholder_still_refuses():
+def test_without_an_override_the_placeholder_still_refuses() -> None:
     """The refusal must survive the override mechanism being added."""
     with pytest.raises(JointMetricConfigurationError, match="reference points"):
         run_validation_pipeline(
@@ -112,14 +116,14 @@ def test_without_an_override_the_placeholder_still_refuses():
         )
 
 
-def test_the_override_is_not_resolved_from_the_registry():
+def test_the_override_is_not_resolved_from_the_registry() -> None:
     """Directly: an overridden name must not be looked up at all."""
     assert resolve_joint_metrics(["tarp_error"], overridden=["tarp_error"]) == {}
     with pytest.raises(JointMetricConfigurationError):
         resolve_joint_metrics(["tarp_error"])
 
 
-def test_optimize_exposes_a_route_for_configured_joint_metrics():
+def test_optimize_exposes_a_route_for_configured_joint_metrics() -> None:
     """Without a parameter on the public API the feature is unreachable."""
     import inspect
 
@@ -133,7 +137,7 @@ def test_optimize_exposes_a_route_for_configured_joint_metrics():
 # ---------------------------------------------------------------------------
 
 
-def test_a_settings_mismatch_raises_a_type_the_objective_re_raises():
+def test_a_settings_mismatch_raises_a_type_the_objective_re_raises() -> None:
     """`GenericObjective` converts a caught exception into a fallback score.
 
     So this refusal has to be a type it re-raises explicitly. Were it a
@@ -151,7 +155,7 @@ def test_a_settings_mismatch_raises_a_type_the_objective_re_raises():
         )
 
 
-def test_the_objective_re_raises_it_instead_of_penalizing():
+def test_the_objective_re_raises_it_instead_of_penalizing() -> None:
     """Asserted against the source, since the handler order is the fix."""
     import inspect
 
@@ -166,7 +170,7 @@ def test_the_objective_re_raises_it_instead_of_penalizing():
     )
 
 
-def test_a_missing_optional_dependency_refuses_at_resolve_time():
+def test_a_missing_optional_dependency_refuses_at_resolve_time() -> None:
     """Otherwise the study trains to completion while optimizing a constant.
 
     A missing scikit-learn made `lc2st` raise once per condition, which the
@@ -194,6 +198,6 @@ def test_a_missing_optional_dependency_refuses_at_resolve_time():
     assert isinstance(excinfo.value.__cause__, ImportError)
 
 
-def test_a_present_dependency_resolves_normally():
+def test_a_present_dependency_resolves_normally() -> None:
     pytest.importorskip("sklearn")
     assert set(resolve_joint_metrics(["lc2st"])) == {"lc2st"}

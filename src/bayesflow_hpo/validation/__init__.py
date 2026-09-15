@@ -34,6 +34,7 @@ from bayesflow_hpo.validation.registry import (
     register_metric,
     resolve_joint_metrics,
     resolve_metrics,
+    unregister_metric,
 )
 from bayesflow_hpo.validation.result import ValidationResult
 from bayesflow_hpo.validation.sbc_tests import compute_sbc_uniformity_tests
@@ -71,6 +72,7 @@ __all__ = [
     "register_joint_metric",
     "resolve_joint_metrics",
     "resolve_metrics",
+    "unregister_metric",
     "run_validation_pipeline",
     "save_validation_dataset",
     "validate_once",

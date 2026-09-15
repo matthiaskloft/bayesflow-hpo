@@ -243,6 +243,13 @@ def check_pipeline(
     objective_metrics
         Metric keys the objective expects. Default
         ``["calibration_error", "nrmse"]``.
+    joint_metrics
+        Configured joint metrics as ``{name: fn}``, forwarded to the
+        validation step. Required for any joint metric that cannot run at a
+        registry default -- ``tarp_error`` needs caller-supplied reference
+        points -- because this pre-flight resolves the same metric list the
+        study will, and would otherwise reject the configuration it is
+        meant to be checking.
     sims_per_condition
         Simulations per condition for tiny validation dataset.
     n_posterior_samples

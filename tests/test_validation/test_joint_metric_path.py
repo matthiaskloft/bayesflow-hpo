@@ -12,6 +12,9 @@ Design: ``docs/plans/plan-joint-metric-path.md``, decisions D2, D3, D4, D8.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterator
+from typing import Any
+
 import numpy as np
 import pytest
 
@@ -19,23 +22,30 @@ from bayesflow_hpo.validation.data import ValidationDataset
 from bayesflow_hpo.validation.inference import make_bayesflow_infer_fn
 from bayesflow_hpo.validation.pipeline import run_validation_pipeline
 from bayesflow_hpo.validation.registry import (
-    _JOINT,
-    _REGISTRY,
     JointMetricInputs,
     is_joint_metric,
     register_joint_metric,
     register_metric,
     resolve_joint_metrics,
     resolve_metrics,
+    unregister_metric,
 )
+from bayesflow_hpo.validation.result import ValidationResult
 
 
 @pytest.fixture
-def joint_metric():
-    """Register joint metrics for one test and remove them afterwards."""
+def joint_metric() -> Iterator[Callable[..., str]]:
+    """Register joint metrics for one test and remove them afterwards.
+
+    Teardown goes through `unregister_metric`, not `_REGISTRY.pop`:
+    registration writes to six tables, and clearing one leaves
+    `producer_for_key` resolving a declared output to a metric `get_metric`
+    can no longer find, plus a stale `_KINDS` entry that the
+    objective-encoding inventory counts as a candidate.
+    """
     registered: list[str] = []
 
-    def _register(name: str, fn, **kwargs) -> str:
+    def _register(name: str, fn: Any, **kwargs: Any) -> str:
         register_joint_metric(name, fn, **kwargs)
         registered.append(name)
         return name
@@ -43,8 +53,7 @@ def joint_metric():
     yield _register
 
     for name in registered:
-        _REGISTRY.pop(name, None)
-        _JOINT.discard(name)
+        unregister_metric(name)
 
 
 class _FakeApproximator:
@@ -61,7 +70,9 @@ class _FakeApproximator:
         self.param_keys = param_keys
         self.n_sims = n_sims
 
-    def sample(self, *, conditions, num_samples):
+    def sample(
+        self, *, conditions: Any, num_samples: int
+    ) -> dict[str, np.ndarray]:
         rng = np.random.default_rng(0)
         return {
             key: rng.normal(size=(self.n_sims, num_samples, 1))
@@ -69,7 +80,9 @@ class _FakeApproximator:
         }
 
 
-def _dataset(param_keys: list[str], n_conditions: int, n_sims: int):
+def _dataset(
+    param_keys: list[str], n_conditions: int, n_sims: int
+) -> ValidationDataset:
     rng = np.random.default_rng(1)
     sims = [
         {
@@ -87,7 +100,13 @@ def _dataset(param_keys: list[str], n_conditions: int, n_sims: int):
     )
 
 
-def _run(param_keys, metric_names, n_conditions=3, n_sims=8, n_samples=16):
+def _run(
+    param_keys: list[str],
+    metric_names: list[str],
+    n_conditions: int = 3,
+    n_sims: int = 8,
+    n_samples: int = 16,
+) -> ValidationResult:
     data = _dataset(param_keys, n_conditions, n_sims)
     approximator = _FakeApproximator(param_keys, n_sims)
     return run_validation_pipeline(
@@ -155,7 +174,9 @@ def test_marginal_metrics_still_see_two_dimensional_draws():
     """Normalizing for the joint path must not change the marginal one."""
     marginal_ndim: list[int] = []
 
-    def record_marginal(draws, true_values):
+    def record_marginal(
+        draws: np.ndarray, true_values: np.ndarray
+    ) -> dict[str, float]:
         marginal_ndim.append(draws.ndim)
         return {"marginal_probe": 0.0}
 
@@ -164,7 +185,7 @@ def test_marginal_metrics_still_see_two_dimensional_draws():
         _run(["theta"], ["marginal_probe"])
         assert marginal_ndim and set(marginal_ndim) == {2}
     finally:
-        _REGISTRY.pop("marginal_probe", None)
+        unregister_metric("marginal_probe")
 
 
 # ---------------------------------------------------------------------------
@@ -383,7 +404,7 @@ def test_overwriting_a_joint_name_with_a_marginal_one_clears_the_marker(
         )
         assert not is_joint_metric("joint_then_marginal")
     finally:
-        _REGISTRY.pop("joint_then_marginal", None)
+        unregister_metric("joint_then_marginal")
 
 
 # ---------------------------------------------------------------------------
@@ -422,8 +443,9 @@ def test_importing_the_package_does_not_require_sklearn():
     from unittest.mock import patch
 
     from bayesflow_hpo.validation.c2st import _default_lc2st_metric
+    from bayesflow_hpo.validation.registry import get_metric
 
-    assert _REGISTRY["lc2st"] is _default_lc2st_metric
+    assert get_metric("lc2st") is _default_lc2st_metric
     with patch(
         "bayesflow_hpo.validation.c2st._require_sklearn",
         side_effect=ImportError("no sklearn"),
@@ -573,7 +595,6 @@ def test_an_aliased_override_suppresses_its_registry_entry():
     `validate_once` and a direct pipeline call were not.
     """
     from bayesflow_hpo.validation.registry import (
-        _ALIASES,
         register_joint_metric,
         resolve_joint_metrics,
     )
@@ -591,7 +612,6 @@ def test_an_aliased_override_suppresses_its_registry_entry():
         # Without an override it still resolves, under either spelling.
         assert set(resolve_joint_metrics(["aj"])) == {"aj"}
     finally:
-        _REGISTRY.pop("aliased_joint", None)
-        _JOINT.discard("aliased_joint")
-        _ALIASES.pop("aj", None)
+        # Removes the alias too, which is why teardown is one call.
+        unregister_metric("aliased_joint")
 
