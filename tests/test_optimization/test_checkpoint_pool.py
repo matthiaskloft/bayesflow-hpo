@@ -2,7 +2,8 @@
 
 import json
 from collections import Counter
-from unittest.mock import MagicMock
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -217,6 +218,90 @@ class TestPrunedPool:
             pool.save_pruned(4, mock_approximator, step=1)
         assert pool.pruned_trial_numbers == [4]
         assert (pool.pruned_pool_dir / "trial_0004").is_dir()
+
+    def test_reoffer_updates_in_place_below_capacity(
+        self, pool_dir, mock_approximator
+    ):
+        """One trial is one member of the population, not two.
+
+        Appending a second entry for the same trial would let a later
+        eviction delete the shared directory while the other entry still
+        reported the trial as retained.
+        """
+        pool = CheckpointPool(
+            pool_dir=pool_dir, pruned_pool_size=4, seed=0,
+        )
+        pool.save_pruned(2, mock_approximator, step=1)
+        pool.save_pruned(2, mock_approximator, step=7)
+
+        assert pool.pruned_trial_numbers == [2]
+        assert pool._pruned_seen == 1
+        meta = json.loads(
+            (pool.pruned_pool_dir / "trial_0002" / "checkpoint.json").read_text()
+        )
+        assert meta["pruned_at_step"] == 7
+
+    def test_failed_weights_write_leaves_no_orphan_directory(self, pool_dir):
+        """A saver that writes bytes and then raises must leave nothing.
+
+        The caller never records a failed checkpoint, so an orphan
+        directory is unreachable by eviction and grows the pool past its
+        cap.
+        """
+        def _write_then_raise(path):
+            p = Path(path)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_bytes(b"partial")
+            raise RuntimeError("disk full")
+
+        approx = MagicMock()
+        approx.save_weights.side_effect = _write_then_raise
+        pool = CheckpointPool(
+            pool_dir=pool_dir, pruned_pool_size=2, seed=0,
+        )
+        for n in range(5):
+            assert pool.save_pruned(n, approx, step=1) is False
+
+        assert pool.pruned_trial_numbers == []
+        leftovers = (
+            list(pool.pruned_pool_dir.iterdir())
+            if pool.pruned_pool_dir.exists()
+            else []
+        )
+        assert leftovers == []
+
+    def test_metadata_failure_does_not_publish_the_checkpoint(self, pool_dir):
+        """Weights without their rung are not a usable pruned checkpoint."""
+        pool = CheckpointPool(
+            pool_dir=pool_dir, pruned_pool_size=2, seed=0,
+        )
+        approx = MagicMock()
+        with patch(
+            "bayesflow_hpo.optimization.checkpoint_pool.Path.write_text",
+            side_effect=OSError("read-only"),
+        ):
+            assert pool.save_pruned(0, approx, step=1) is False
+
+        assert pool.pruned_trial_numbers == []
+        assert not (pool.pruned_pool_dir / "trial_0000").exists()
+
+    def test_failed_reoffer_preserves_the_existing_checkpoint(
+        self, pool_dir, mock_approximator
+    ):
+        pool = CheckpointPool(
+            pool_dir=pool_dir, pruned_pool_size=2, seed=0,
+        )
+        pool.save_pruned(1, mock_approximator, step=3)
+
+        broken = MagicMock()
+        broken.save_weights.side_effect = RuntimeError("disk full")
+        assert pool.save_pruned(1, broken, step=9) is False
+
+        assert pool.pruned_trial_numbers == [1]
+        meta = json.loads(
+            (pool.pruned_pool_dir / "trial_0001" / "checkpoint.json").read_text()
+        )
+        assert meta["pruned_at_step"] == 3
 
     def test_cleanup_clears_pruned_pool(self, pool_dir, mock_approximator):
         pool = CheckpointPool(

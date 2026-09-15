@@ -68,6 +68,96 @@ class TestPruningRung:
         assert score == 0.03
 
 
+class _FakeApproximator:
+    """Minimal weights holder for the early-stopping restore path."""
+
+    def __init__(self) -> None:
+        self.weights = ["epoch_0"]
+        self.stop_training = False
+
+    def get_weights(self):
+        return list(self.weights)
+
+    def set_weights(self, weights) -> None:
+        self.weights = list(weights)
+
+
+class TestRungMatchesTheWeightsInMemory:
+    """Early stopping restores older weights before the pruning decision.
+
+    ``_update_early_stopping`` runs first in ``on_epoch_end``, and on
+    patience expiry it calls ``set_weights(best_weights)``. Execution then
+    continues and can still raise ``TrialPruned`` for the CURRENT scores.
+    Recording the current step would label the retained checkpoint with a
+    rung its weights were never measured at.
+    """
+
+    def _run(self, approximator, scores_per_step):
+        study = optuna.create_study(directions=["minimize"] * 2)
+        cb = PeriodicValidationCallback(
+            trial=study.ask(),
+            approximator=approximator,
+            validation_data=_DUMMY_VALIDATION_DATA,
+            interval=1,
+            warmup=0,
+            pruning_strategy="none",
+            objective_metrics=["calibration_error", "nrmse"],
+            early_stopping_patience=1,
+            early_stopping_window=1,
+        )
+        for epoch, raw in enumerate(scores_per_step):
+            approximator.weights = [f"epoch_{epoch}"]
+            with patch.object(
+                cb, "_run_lightweight_validation", return_value=raw,
+            ):
+                cb.on_epoch_end(epoch=epoch)
+        return cb
+
+    def test_restored_weights_report_their_own_rung(self):
+        approx = _FakeApproximator()
+        cb = self._run(
+            approx,
+            [
+                {"calibration_error": 0.01, "nrmse": 0.01},
+                {"calibration_error": 0.90, "nrmse": 0.90},
+            ],
+        )
+
+        # Patience expired on the worse second check, so the weights in
+        # memory are the first check's.
+        assert approx.weights == ["epoch_0"]
+        step, score = _pruning_rung([cb])
+        assert step == 1
+        assert score == 0.01
+
+    def test_without_a_restore_the_latest_rung_is_reported(self):
+        approx = _FakeApproximator()
+        cb = self._run(
+            approx,
+            [
+                {"calibration_error": 0.90, "nrmse": 0.90},
+                {"calibration_error": 0.01, "nrmse": 0.01},
+            ],
+        )
+
+        assert approx.weights == ["epoch_1"]
+        step, score = _pruning_rung([cb])
+        assert step == 2
+        assert score == 0.01
+
+    def test_on_train_end_restore_is_tracked_too(self):
+        """The final-validation pruning path sees restored weights."""
+        approx = _FakeApproximator()
+        cb = self._run(
+            approx, [{"calibration_error": 0.01, "nrmse": 0.01}],
+        )
+        approx.weights = ["epoch_99"]
+        cb.on_train_end()
+
+        assert approx.weights == ["epoch_0"]
+        assert _pruning_rung([cb]) == (1, 0.01)
+
+
 class TestRetainPruned:
     def _objective(self, pool: CheckpointPool) -> GenericObjective:
         obj = GenericObjective.__new__(GenericObjective)

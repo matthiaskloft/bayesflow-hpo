@@ -189,10 +189,28 @@ class CheckpointPool:
         if self.pruned_pool_size <= 0:
             return False
 
+        dest = self.pruned_pool_dir / f"trial_{trial_number:04d}"
+        existing_slot = next(
+            (
+                i
+                for i, (num, _) in enumerate(self._pruned_entries)
+                if num == trial_number
+            ),
+            None,
+        )
+
         n_offered = self._pruned_seen + 1
 
         evict_slot: int | None = None
-        if len(self._pruned_entries) >= self.pruned_pool_size:
+        if existing_slot is not None:
+            # A trial already in the pool is one member of the population,
+            # not a second one: re-offering it must refresh its checkpoint
+            # in place rather than appending a duplicate entry (which a
+            # later eviction could then delete out from under) or drawing
+            # again against `_pruned_seen`.
+            n_offered = self._pruned_seen
+            evict_slot = existing_slot
+        elif len(self._pruned_entries) >= self.pruned_pool_size:
             # Keep the n-th offer with probability k/n, replacing a
             # uniformly chosen incumbent. This is what keeps every pruned
             # trial of the study equally likely to be in the final pool,
@@ -204,7 +222,6 @@ class CheckpointPool:
                 return False
             evict_slot = self._rng.randrange(self.pruned_pool_size)
 
-        dest = self.pruned_pool_dir / f"trial_{trial_number:04d}"
         if not _write_checkpoint(
             dest,
             approximator,
@@ -229,9 +246,6 @@ class CheckpointPool:
             self._pruned_entries.append((trial_number, dest))
         else:
             evicted_num, evicted_path = self._pruned_entries[evict_slot]
-            # A re-offer of a trial already in the pool can draw its own
-            # slot, and removing `evicted_path` would then delete the
-            # checkpoint just written to `dest`.
             if evicted_path != dest:
                 _safe_rmtree(evicted_path)
                 logger.debug(
@@ -273,19 +287,22 @@ def _write_checkpoint(
     metadata: dict[str, Any],
     trial_number: int,
 ) -> bool:
-    """Write weights plus the ``checkpoint.json`` sidecar to *dest*."""
-    try:
-        dest.mkdir(parents=True, exist_ok=True)
-        approximator.save_weights(str(dest / _WEIGHTS_FILE))
-    except Exception:
-        logger.warning(
-            "Failed to save checkpoint for trial %d", trial_number,
-            exc_info=True,
-        )
-        return False
+    """Write weights plus the ``checkpoint.json`` sidecar to *dest*.
 
+    Staged through a temporary directory and published by a rename, so
+    the pool never exposes a half-written checkpoint.  Two failure modes
+    make that worth the extra move: a saver that writes bytes and then
+    raises would otherwise leave an orphan directory that no eviction
+    can reach, because the caller never records it; and weights whose
+    sidecar failed to write would be retained without the rung that
+    makes a pruned checkpoint interpretable at all.
+    """
+    staging = dest.parent / f".{dest.name}.tmp"
+    _safe_rmtree(staging)
     try:
-        (dest / _METADATA_FILE).write_text(
+        staging.mkdir(parents=True, exist_ok=True)
+        approximator.save_weights(str(staging / _WEIGHTS_FILE))
+        (staging / _METADATA_FILE).write_text(
             json.dumps(
                 {
                     **metadata,
@@ -300,13 +317,26 @@ def _write_checkpoint(
             ),
             encoding="utf-8",
         )
-    except OSError:
-        # The weights are the payload; a missing sidecar is a loss of
-        # provenance, not of the checkpoint.
-        logger.debug(
-            "Could not write checkpoint metadata for trial %d", trial_number,
+    except Exception:
+        logger.warning(
+            "Failed to save checkpoint for trial %d", trial_number,
             exc_info=True,
         )
+        _safe_rmtree(staging)
+        return False
+
+    try:
+        # Only reached once the staged copy is complete, so the existing
+        # checkpoint is never dropped for a write that then fails.
+        _safe_rmtree(dest)
+        staging.replace(dest)
+    except OSError:
+        logger.warning(
+            "Failed to publish checkpoint for trial %d", trial_number,
+            exc_info=True,
+        )
+        _safe_rmtree(staging)
+        return False
     return True
 
 

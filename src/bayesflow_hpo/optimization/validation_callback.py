@@ -231,6 +231,14 @@ class PeriodicValidationCallback(Callback):
         self._early_stopping_wait = 0
         self.best_validation_score = np.inf
         self.best_weights: Any = None
+        # Provenance of `best_weights`, carried so that a restore can hand
+        # the rung back to `weights_step` instead of leaving the current
+        # step describing weights from an earlier one.
+        self._best_weights_step = 0
+        self._best_weights_scores: dict[str, float] | None = None
+        # Set when `_update_early_stopping` restores `best_weights`, which
+        # happens BEFORE the pruning decision in the same `on_epoch_end`.
+        self._weights_restored = False
 
         if early_stopping_patience is not None and early_stopping_patience < 1:
             raise ValueError("early_stopping_patience must be >= 1 or None.")
@@ -367,23 +375,43 @@ class PeriodicValidationCallback(Callback):
                 )
 
 
+    def _to_minimize(self, raw_scores: dict[str, float]) -> dict[str, float]:
+        """Convert raw pipeline values to minimize-is-better scores."""
+        return {
+            metric: _metric_to_minimize(
+                metric, RawScore(float(raw_scores[metric]))
+            )
+            for metric in self.intermediate_metrics
+        }
+
     @property
     def validation_step(self) -> int:
-        """Number of intermediate validations run so far.
+        """Rung the approximator's CURRENT weights were measured at.
 
-        Zero before the first one.  This is the rung a pruned trial
-        stopped at, which is the only thing that makes its retained
-        weights interpretable (see
+        Normally the number of intermediate validations run so far, and
+        zero before the first one.  Not always: early stopping restores
+        ``best_weights`` from an earlier rung, and it does so *before* the
+        pruning decision in the same ``on_epoch_end``, so a trial can be
+        pruned holding weights older than ``_step``.  Reporting ``_step``
+        there would label the retained checkpoint with a rung it was never
+        measured at, which is exactly the provenance a pruned checkpoint
+        exists to carry (see
         :class:`~bayesflow_hpo.optimization.checkpoint_pool.CheckpointPool`).
         """
+        if self._weights_restored:
+            return self._best_weights_step
         return self._step
 
     @property
     def last_scores(self) -> dict[str, float] | None:
-        """Most recent intermediate scores, converted to minimize-space.
+        """Scores of the approximator's CURRENT weights, minimize-space.
 
         ``None`` until the first successful intermediate validation.
+        Tracks :attr:`validation_step`: after an early-stopping restore
+        these are the restored weights' scores, not the latest ones.
         """
+        if self._weights_restored:
+            return self._best_weights_scores
         return self._last_scores
 
     def on_epoch_end(self, epoch: int, logs: Any = None) -> None:
@@ -414,12 +442,7 @@ class PeriodicValidationCallback(Callback):
         self._step += 1
 
         self._update_early_stopping(raw_scores)
-        scores: dict[str, float] = {
-            metric: _metric_to_minimize(
-                metric, RawScore(float(raw_scores[metric]))
-            )
-            for metric in self.intermediate_metrics
-        }
+        scores = self._to_minimize(raw_scores)
         self._last_scores = scores
 
         if self._is_multi_objective:
@@ -497,6 +520,8 @@ class PeriodicValidationCallback(Callback):
             self.best_validation_score = moving_average
             self._early_stopping_wait = 0
             self.best_weights = self.approximator.get_weights()
+            self._best_weights_step = self._step
+            self._best_weights_scores = self._to_minimize(raw_scores)
             return
 
         self._early_stopping_wait += 1
@@ -504,11 +529,13 @@ class PeriodicValidationCallback(Callback):
             self.approximator.stop_training = True
             if self.best_weights is not None:
                 self.approximator.set_weights(self.best_weights)
+                self._weights_restored = True
 
     def on_train_end(self, logs: Any = None) -> None:
         """Restore the best validation weights when training reaches its cap."""
         if self.early_stopping_patience is not None and self.best_weights is not None:
             self.approximator.set_weights(self.best_weights)
+            self._weights_restored = True
 
     # ------------------------------------------------------------------
     # Internal
