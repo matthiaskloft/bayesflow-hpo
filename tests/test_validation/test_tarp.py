@@ -251,11 +251,16 @@ def _load_reference_implementation():
         src = subprocess.run(
             ["git", "-C", str(path), "show", f"{pinned}:src/bayesflow_irt/sbc.py"],
             capture_output=True,
-            text=True,
         )
         if src.returncode != 0:
-            pytest.skip(f"commit {pinned[:7]} not in {path}: {src.stderr.strip()}")
-        source = src.stdout
+            detail = src.stderr.decode("utf-8", "replace").strip()
+            pytest.skip(f"commit {pinned[:7]} not in {path}: {detail}")
+        # Decoded as UTF-8 explicitly, matching the `path.is_file()` branch
+        # below. `text=True` decodes with the LOCALE codec, so on a Windows
+        # box every non-ASCII character in the reference implementation is
+        # replaced and the module compared against is not the source it
+        # claims to be -- silently, since the mangling lands in comments.
+        source = src.stdout.decode("utf-8")
     elif path.is_file():
         source = path.read_text(encoding="utf-8")
     else:

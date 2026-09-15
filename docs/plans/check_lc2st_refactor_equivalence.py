@@ -102,6 +102,15 @@ def dataset(
     )
 
 
+def _normalize(text: str) -> str:
+    """Strip line-ending differences so a content comparison is meaningful.
+
+    `git show` emits LF while a Windows working tree is checked out CRLF, so
+    a raw comparison never matches and the identity guard would not guard.
+    """
+    return text.replace("\r\n", "\n")
+
+
 def load_old_factory(old_rev: str) -> Callable[..., Any]:
     """Import the pre-refactor ``c2st.py`` as a standalone module.
 
@@ -125,19 +134,32 @@ def load_old_factory(old_rev: str) -> Callable[..., Any]:
         trivially pass.
     """
     spec = f"{old_rev}:src/bayesflow_hpo/validation/c2st.py"
-    proc = subprocess.run(
-        ["git", "show", spec], capture_output=True, text=True,
-    )
+    # Bytes, decoded as UTF-8 explicitly. `text=True` decodes with the
+    # LOCALE codec -- cp1252 on a German Windows box -- which replaces every
+    # non-ASCII character in the source. The module still execs (the
+    # mangling lands in comments and docstrings), so nothing fails; but the
+    # identity comparison below never matches, so the guard silently stops
+    # guarding, and the module exec'd is not the source it claims to be.
+    proc = subprocess.run(["git", "show", spec], capture_output=True)
     if proc.returncode != 0:
         raise SystemExit(
-            f"Could not read {spec!r}: {proc.stderr.strip()}\n"
+            f"Could not read {spec!r}: "
+            f"{proc.stderr.decode('utf-8', 'replace').strip()}\n"
             "Pass --old-rev pointing at the commit BEFORE the refactor."
         )
-    src = proc.stdout
+    src = proc.stdout.decode("utf-8")
     current = Path("src/bayesflow_hpo/validation/c2st.py").read_text(
         encoding="utf-8"
     )
-    if src == current:
+    # Line endings normalized before comparing: `git show` emits LF while a
+    # Windows working tree is checked out CRLF, so a raw byte comparison
+    # never matches and the guard silently stops guarding -- which is the
+    # same class of defect as the one it was added to prevent.
+    # Line endings normalized before comparing: `git show` emits LF while
+    # a Windows working tree is checked out CRLF, so a raw byte comparison
+    # never matches and the guard silently stops guarding -- the same
+    # class of defect as the one it was added to prevent.
+    if _normalize(src) == _normalize(current):
         raise SystemExit(
             f"{spec!r} is byte-identical to the working tree, so every "
             "comparison below would pass without comparing anything. Pass "
