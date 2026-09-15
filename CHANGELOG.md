@@ -2,6 +2,44 @@
 
 ## Unreleased
 
+## 0.4.0
+
+A feature release. No change here alters what a stored objective value
+*means* -- every metric is the same quantity on the same scale, so 0.3.0
+studies resume and their values stay interpretable side by side. Exact
+reproducibility at a fixed seed does change, though, and that is the first
+item below. Every *new* feature is opt-in and off by default.
+
+Three things to check before upgrading.
+
+**`optimize()` now rejects an invalid `max_samples_per_call` up front**, and
+validation inference is chunked at 20,000 draws per `approximator.sample()`
+call by default. A run that previously sampled a whole condition batch in one
+call will now make several. That preserves the assembled array's shape, row
+order and draws per simulation -- but *not* the draws themselves, because
+each chunk is its own stochastic `sample()` call. **Metric values from a
+0.4.0 run are therefore not bit-comparable with a 0.3.0 run at the same
+seed**, even though they are the same quantity. Pass
+`max_samples_per_call=None` to restore the single-call behaviour exactly.
+
+**Trials can now be rejected before training for validation memory**, with
+`rejected_reason="validation_memory_budget"`. This is the fix for a real
+failure -- validation dying *after* the training run had been paid for, and
+recording a model-quality penalty for what is a resource problem -- but it
+means a study that previously trained a trial and then failed it will now
+skip it, and budget-rejected trials do not count toward `n_trials`.
+
+**`tarp_error_random` is a diagnostic, not an objective.** Passing it in
+`objective_metrics` raises. With random reference points the statistic
+cannot detect a posterior that ignores its data, so it is registered
+`kind="diagnostic"`; `tarp_error`, which takes supplied reference points, is
+the objective.
+
+Also worth knowing: joint metrics are excluded from intermediate validation
+unless you pass `include_joint_metrics=True`, because L-C2ST measured ~54 s
+per condition and a pruning decision that costs more than the training it
+saves is not a pruning decision. And `lc2st` now needs the `sklearn` extra.
+
 ### Added
 
 - `TrainingSpace(lr_reference_batch_size=...)` reparametrizes the peak
