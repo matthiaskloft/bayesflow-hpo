@@ -44,27 +44,28 @@ from pathlib import Path
 
 __all__ = ["Citation", "collect_source_citations", "main", "parse_matrix_entries"]
 
-#: Words that look like a surname to the citation regex but never are. Without
-#: this, "Published as a conference paper at ICLR 2017" reads as a citation.
+#: Venue and publisher names that appear next to a year in exactly the shape a
+#: citation takes -- "*ICLR 2017*", "AISTATS 2021, PMLR 130". The positive test
+#: below rejects most non-citations on shape alone; these survive it because
+#: they are genuinely written the way a citation is written.
 _NON_AUTHOR_TOKENS = frozenset(
     {
-        "april",
-        "august",
-        "december",
-        "february",
-        "icml",
+        "aistats",
+        "arxiv",
+        "cvpr",
         "iclr",
-        "january",
-        "july",
-        "june",
-        "march",
-        "may",
+        "icml",
+        "ijcai",
+        "jmlr",
+        "keras",
         "neurips",
-        "november",
-        "october",
+        "nips",
         "optuna",
         "pmlr",
-        "september",
+        "pytorch",
+        "scipy",
+        "tensorflow",
+        "uai",
     }
 )
 
@@ -101,14 +102,22 @@ _LOCATOR_KINDS = {
 _SURNAME = r"[A-Z][A-Za-zÀ-ɏ'’-]*"
 
 #: "Talts et al. (2018)" / "(Schmucker et al., 2021)" / "Deb & Jain (2014)" /
-#: "Lemos, Coogan, Hezaveh and Perreault-Levasseur (2023)". Spelled-out author
-#: lists must be matched whole, or the trailing surnames read as a citation of
-#: their own and the entry lookup fails on an author who is not first.
+#: "Lemos, Coogan, Hezaveh and Perreault-Levasseur (2023)" /
+#: "Shallue et al.'s (2019)". Two things this has to get right:
+#:
+#: - Spelled-out author lists must be matched whole, or the trailing surnames
+#:   read as a citation of their own and the entry lookup fails on an author
+#:   who is not first.
+#: - The possessive is a normal way to write a citation in prose and must not
+#:   hide one. `search_spaces/training.py` says "Shallue et al.'s (2019,
+#:   Sec. 4)"; without the `'s` branch the whole citation went unseen, and with
+#:   it the locator check caught a missing entry on the first run.
 _CITATION_RE = re.compile(
     rf"(?P<authors>{_SURNAME}(?:,\s*{_SURNAME})*"
     rf"(?:\s*(?:&|and)\s*{_SURNAME})?"
     r"(?:\s+et\s+al\.?)?)"
-    r"[,\s]*\(?(?P<year>(?:19|20)\d{2})\)?"
+    r"(?:'s|\u2019s)?"
+    r"[,\s]*(?P<open>\()?(?P<year>(?:19|20)\d{2})(?P<close>\))?"
 )
 
 #: "Thm. 1", "Section 3.2", "Algs. 1--2", "Equation (7)".
@@ -117,6 +126,13 @@ _LOCATOR_RE = re.compile(
     r"\.?\s*\(?(?P<number>\d+(?:\.\d+)*)\)?",
     re.IGNORECASE,
 )
+
+#: Floors below which the check is assumed broken rather than satisfied. Set
+#: well under the current counts (~29 entries, ~48 citations) so ordinary
+#: editing never trips them, and well above zero so a parser that has stopped
+#: matching does. See the guard in ``main()``.
+_MIN_EXPECTED_ENTRIES = 20
+_MIN_EXPECTED_CITATIONS = 25
 
 #: How far *after* a citation a locator still counts as attached to it. Long
 #: enough to span "Talts et al. (2018), Theorem 1 (Sec. 4.1)", short enough not
@@ -147,6 +163,37 @@ def _author_key(authors: str) -> str:
     """Reduce an author string to its first surname, folded."""
     head = re.split(r"\s*(?:,|&|\sand\s)\s*|\s+et\s+al", authors)[0]
     return _fold(head.strip())
+
+
+def _looks_like_a_citation(text: str, match: re.Match[str]) -> bool:
+    """Whether a surname-then-year match is written the way a citation is.
+
+    A denylist of words that are not surnames does not scale: every capitalised
+    word before a year joins it ("Copyright 2024", "Expected 2020 samples",
+    "Verified 2026-09-11"), and a list that has to grow to stay correct fails
+    open on whatever was not thought of. Test the shape instead. A citation
+    carries at least one of:
+
+    - an ``et al.``, or an ``&``/``and`` joining two surnames;
+    - a parenthesised year, ``Talts (2018)``;
+    - enclosure in parentheses as a whole, ``(Gneiting, 2011)``.
+
+    Ordinary prose that happens to put a capitalised word before a year has
+    none of these.
+    """
+    authors = match.group("authors")
+    if re.search(r"\bet\s+al|&|\sand\s", authors):
+        return True
+    if match.group("open") and match.group("close"):
+        return True
+    before = text[: match.start()].rstrip()
+    if not before.endswith("("):
+        return False
+    # The closing bracket may already have been consumed as the year's own,
+    # which is how "(Gneiting, 2011)" parses: no opening bracket on the year,
+    # but the citation as a whole is parenthesised.
+    after = text[match.end() :].lstrip()
+    return bool(match.group("close")) or after.startswith(")")
 
 
 @dataclass(frozen=True)
@@ -226,8 +273,8 @@ def collect_source_citations(root: Path) -> list[Citation]:
         found = [
             match
             for match in _CITATION_RE.finditer(text)
-            if _author_key(match.group("authors"))
-            and _author_key(match.group("authors")) not in _NON_AUTHOR_TOKENS
+            if _author_key(match.group("authors")) not in _NON_AUTHOR_TOKENS
+            and _looks_like_a_citation(text, match)
         ]
         locators = _assign_locators(text, [(m.start(), m.end()) for m in found])
         for match, attached in zip(found, locators):
@@ -244,14 +291,32 @@ def collect_source_citations(root: Path) -> list[Citation]:
 
 
 def _entry_states_locator(entry: str, kind: str, number: str) -> bool:
-    """Whether ``entry`` mentions the ``kind number`` locator in any spelling."""
+    """Whether ``entry`` mentions the ``kind number`` locator in any spelling.
+
+    Matching is deliberately loose in one direction and strict in the other.
+    ``Section 3`` is satisfied by an entry that says ``Section 3.1``, since an
+    entry that locates a claim more precisely than the docstring has not
+    contradicted it. ``Theorem 1`` is *not* satisfied by ``Theorem 10``.
+
+    Ranges and lists count for every number they contain, so ``Secs. 3--4``
+    and ``Sections 4 and 5`` satisfy a docstring citing either endpoint. An
+    entry writing the range is stating both, and forcing it to spell them out
+    separately would make the entry worse to read in order to please the
+    check.
+    """
     folded = _fold(entry)
-    for alias, canonical in _LOCATOR_KINDS.items():
-        if canonical != kind:
-            continue
-        pattern = rf"\b{re.escape(alias)}\.?\s*\(?{re.escape(number)}\b"
-        if re.search(pattern, folded):
-            return True
+    aliases = [
+        alias for alias, canonical in _LOCATOR_KINDS.items() if canonical == kind
+    ]
+    for alias in aliases:
+        run = r"\d+(?:\.\d+)*(?:\s*(?:--|-|–|,|and)\s*\d+(?:\.\d+)*)*"
+        for match in re.finditer(rf"\b{re.escape(alias)}\.?\s*\(?({run})", folded):
+            stated = re.split(r"\s*(?:--|-|–|,|and)\s*", match.group(1))
+            # A dotted subsection satisfies its parent: an entry that locates
+            # the claim at "Section 3.1" has not contradicted a docstring
+            # citing "Section 3", it has been more precise than it.
+            if any(one == number or one.startswith(f"{number}.") for one in stated):
+                return True
     return False
 
 
@@ -268,6 +333,29 @@ def main(argv: list[str] | None = None) -> int:
     matrix_path = args.root / "docs" / "references.md"
     entries = parse_matrix_entries(matrix_path.read_text(encoding="utf-8"))
     citations = collect_source_citations(args.root)
+
+    # A checker that finds nothing reports success, which is the one failure
+    # this tool must not have: a regression in the citation regex, a moved
+    # `src/`, or a wrong --root would all degrade to a green run that proves
+    # nothing. Neither side of the comparison is ever legitimately empty, so
+    # treat an empty one as a broken checker rather than a clean repository.
+    if len(entries) < _MIN_EXPECTED_ENTRIES:
+        print(
+            f"{matrix_path} parsed into {len(entries)} entries, expected at "
+            f"least {_MIN_EXPECTED_ENTRIES}. The heading format has probably "
+            f"changed and this check is no longer reading the matrix.",
+            file=sys.stderr,
+        )
+        return 2
+    if len(citations) < _MIN_EXPECTED_CITATIONS:
+        print(
+            f"Found {len(citations)} citation(s) in {args.root / 'src'}, "
+            f"expected at least {_MIN_EXPECTED_CITATIONS}. The citation "
+            f"pattern has probably stopped matching; this check is not "
+            f"looking at what it thinks it is.",
+            file=sys.stderr,
+        )
+        return 2
 
     missing_entries: list[Citation] = []
     missing_locators: list[tuple[Citation, str, str]] = []

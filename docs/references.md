@@ -82,10 +82,12 @@ OpenAlex API. Claims are grouped below by what actually happened to them.
 
 ### Corrected (third pass, 2026-09-15)
 
-Fourteen entries had been left with metadata resolved and their descriptive
-text never read back. All fourteen were read against a full text in this
-pass. Two were wrong, both in the same way -- a result the paper *uses* was
-described as a result the paper *introduces*:
+Issue #90 listed fourteen entries with metadata resolved and descriptive text
+never read back. One of them, Lemos et al. (2023), had already been verified
+against full text in the TARP commit (`a88ffd7`) before this pass began, so
+the list was stale by one; **the remaining thirteen were read here.** Two
+were wrong, both in the same way -- a result the paper *uses* was described
+as a result the paper *introduces*:
 
 | Claim | Was | Is |
 |---|---|---|
@@ -112,10 +114,29 @@ against the authors' corrected reproduction.
 ### Bulk metadata check
 
 Every DOI in this file was resolved against the OpenAlex API. All resolve.
-Five entries carry a year differing from OpenAlex's (Balandat 2020/2019, Deb &
-Jain 2014/2013, Modrák 2025/2023, Smith 2018/2017): each is a published-version
-year cited against a preprint or online-first DOI, which is the intended
-convention, not an error.
+
+**Seven entries cite a published year against a preprint or online-first
+DOI**, so the year here differs from OpenAlex's `publication_year`. This is
+the intended convention, not an error, and the count is stated in full
+because an earlier version of this paragraph said "five" and then listed
+four:
+
+| Entry | Cited | OpenAlex | DOI resolved |
+|---|---|---|---|
+| Balandat et al. | 2020 | 2019 | `10.48550/arXiv.1910.06403` |
+| Deb & Jain | 2014 | 2013 | `10.1109/TEVC.2013.2281535` (online-first) |
+| Modrák et al. | 2025 | 2023 | `10.1214/23-BA1404` (online-first) |
+| Smith et al. | 2018 | 2017 | `10.48550/arXiv.1711.00489` |
+| Li et al. | 2018 | 2016 | `10.48550/arXiv.1603.06560` |
+| Lopez-Paz & Oquab | 2017 | 2016 | `10.48550/arXiv.1610.06545` |
+| Shallue et al. | 2019 | 2018 | `10.48550/arXiv.1811.03600` |
+
+The last three are new as of 2026-09-15: resolving the missing DOIs (#91)
+necessarily created the mismatches, since the only DOI those works have
+belongs to the preprint. Updating the count in the same pass is the point of
+the convention -- the previous "five" was correct when written and silently
+false afterwards, which is failure mode (2) in
+[`contributing-references.md`](contributing-references.md).
 
 **The five entries that carried no DOI are now resolved (2026-09-15).** Four
 had an arXiv DOI available for the preprint of the cited version, and take it
@@ -154,7 +175,21 @@ index and on arXiv.
 ### Still not verified
 
 The two Optuna issue-tracker pointers in `study.py`, which need repository
-access this audit did not have. Nothing else in this file is now unverified.
+access this audit did not have.
+
+### Verified, but before the stamp convention existed
+
+Six entries were read against full texts in the first or second pass and so
+carry no verification stamp, because the convention postdates them:
+
+Daulton et al. (2021) · Deb et al. (2002) · Joe & Kuo (2008) ·
+Säilynoja et al. (2022) · Naeini et al. (2015) · Lemos et al. (2023)
+
+They are listed rather than left silent because
+[`contributing-references.md`](contributing-references.md) defines an absent
+stamp as meaning "nobody has read this back", which is not true of these.
+Stamp them when they are next touched; do not treat the gap as a finding
+against their content.
 
 ## Coverage Matrix
 
@@ -844,7 +879,28 @@ paper also reports "no evidence that larger batch sizes degrade out-of-sample
 performance", which is why the search space does not cap batch size on
 quality grounds.
 
-(Abstract, Sec. 1 -- JMLR 20 (2019) 1--49 / arXiv:1811.03600, verified
+**Sections 4 and 5** are the locators for the warmup decision in
+`search_spaces/training.py`. Section 4's preamble records the tuning cost:
+the metaparameters were tuned "independently [...] at each batch size,
+including the initial learning rate and, when learning rate decay was used,
+the decay schedule", by quasi-random search at roughly 100 non-divergent
+trials per batch size, and even so the authors report that "despite sampling
+100 metaparameter configurations per batch size and training for up to 25
+hours per configuration, it is still not certain whether we truly saturated
+performance". Section 5 ("Discussion") states the conclusion as a
+recommendation: "practitioners tune all optimization parameters anew when
+they change the batch size or they risk masking the true behavior of the
+training procedure".
+
+Note what this does *not* say. An earlier version of the `training.py`
+docstring cited "Sec. 5.1" for the claim that a third correlated schedule
+axis "made their own tuning unreliable". Section 5 has no subsections, and
+the paper reports the opposite: the decay schedule was tuned successfully
+alongside the learning rate. What the paper supports is the *cost* of
+retuning everything whenever batch size moves; treating that cost as a reason
+to fix the warmup length is this package's inference, not theirs.
+
+(Abstract, Secs. 1, 4--5 -- JMLR 20 (2019) 1--49 / arXiv:1811.03600, verified
 2026-09-15.)
 
 ### Sobol', I. M. (1967)
