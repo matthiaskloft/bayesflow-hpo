@@ -67,7 +67,8 @@ hpo.plot_pareto_front(study)
 | [Validation](validation.md) | Validation datasets, metric registry, coverage, C2ST, SBC tests, result tables |
 | [Results & Export](results.md) | Pareto extraction, lexicographic-Pareto selection, visualization, model export |
 | [API Reference](api_reference.md) | Complete public API with signatures and descriptions |
-| [Changelog](quality_report.md) | Changes implemented in the v0.2.0 workover and post-v0.2.0 enhancements |
+| [Release notes](../CHANGELOG.md) | Current changelog, one section per release |
+| [v0.2.0 workover report](quality_report.md) | Historical record of the v0.2.0 quality fixes |
 | [References](references.md) | Verified APA 7 bibliography, coverage matrix, and audit status |
 | [Citing sources](contributing-references.md) | How to cite a source here: the verification-stamp convention and the consistency check |
 
@@ -78,6 +79,7 @@ pip install bayesflow-hpo
 
 # With optional dependencies
 pip install bayesflow-hpo[dashboard]  # Optuna dashboard
+pip install bayesflow-hpo[sklearn]    # C2ST metrics (lc2st)
 pip install bayesflow-hpo[dev]        # Development tools
 ```
 
@@ -85,5 +87,5 @@ pip install bayesflow-hpo[dev]        # Development tools
 
 - Python >= 3.11
 - BayesFlow >= 2.0.0
-- Optuna >= 4.0.0
+- Optuna >= 5.0.0, < 6.0.0
 - Keras >= 3.9, < 3.13 (PyTorch backend recommended)

@@ -70,6 +70,7 @@ class ValidationDataset:
     param_keys: list[str]
     data_keys: list[str]
     seed: int
+    sim_time_per_sim: float | None = None
 ```
 
 ### Persistence
@@ -117,11 +118,42 @@ These wrap `bf.diagnostics.*` functions, reshaping `(n_sims, n_samples)` to the 
 | `coverage` | Two-sided SBC rank-based calibration | `coverage_50`, ..., `coverage_99`, `mean_cal_error` |
 | `coverage_left` | Left-sided coverage (efficiency for RCTs) | `left_coverage_50`, ..., `left_mean_cal_error` |
 | `coverage_right` | Right-sided coverage (futility for RCTs) | `right_coverage_50`, ..., `right_mean_cal_error` |
-| `bias` | Mean signed error of posterior mean | `bias` |
+| `bias` | Mean signed error of posterior mean (diagnostic) | `bias` |
 | `mae` | Mean absolute error of posterior mean | `mae` |
 | `correlation` | Pearson association of posterior means and truth; diagnostic only, not recovery error | `correlation` |
+| `sbc` | Deprecated; delegates to `sbc_ks` + `sbc_chi2` (diagnostic) | `sbc_ks`, `sbc_chi2` |
 
 Aliases: `cal_error` -> `calibration_error`, `corr` -> `correlation`, `coverage_two_sided` -> `coverage`.
+
+#### Joint Metrics
+
+These see a whole condition batch — draws, true values, and the data behind
+them — rather than one parameter's marginal, so they are registered through
+`register_joint_metric()` and passed via `joint_metrics=` rather than
+`metrics=`.  They receive a `JointMetricInputs`.
+
+| Name | Kind | Description |
+|------|------|-------------|
+| `tarp_error` | objective | TARP expected-coverage error against **supplied** reference points. Cannot run at its registered default — build it with `make_tarp_joint_metric(reference_points=...)`. |
+| `tarp_error_random` | diagnostic | TARP with random reference points. Diagnostic because Lemos et al. (2023, Sec. 4.3) show it cannot detect a posterior that ignores its data, so it is rejected in `objective_metrics`. |
+| `lc2st` | objective | L-C2ST on the full joint posterior. Requires the `sklearn` extra, and costs roughly 700x a TARP evaluation. |
+
+```python
+from bayesflow_hpo import run_validation_pipeline
+from bayesflow_hpo.validation.tarp import make_tarp_joint_metric
+
+result = run_validation_pipeline(
+    approximator, val_data,
+    joint_metrics={"tarp_error": make_tarp_joint_metric(reference_points=refs)},
+)
+```
+
+Joint metrics are excluded from *intermediate* validation unless
+`optimize(include_joint_metrics=True)`; see
+[optimization.md](optimization.md#pruning-strategy).
+
+Call `describe_metrics()` for the live registry, with each metric's kind,
+aliases, description, and extra dependency.
 
 ### `calibration_error` vs `mean_calibration_error`
 
@@ -249,6 +281,8 @@ class ValidationResult:
     n_conditions: int
     n_posterior_samples: int
     metric_names: list[str]
+    failed_joint_metrics: dict[str, str]  # joint metric name -> error message
+    joint_metric_settings: dict[str, dict[str, Any]]  # configuration actually used
 ```
 
 ### Table Methods
@@ -310,6 +344,9 @@ The default `run_validation_pipeline` expects flat 2D posteriors `(batch, param_
 **Solution**: provide a custom `validate_fn` to `optimize()` that flattens the structured posteriors before computing metrics:
 
 ```python
+from bayesflow_hpo.validation.registry import resolve_metrics
+
+
 def validate_irt(approximator, validation_data, n_posterior_samples):
     metric_fns = resolve_metrics(["calibration_error", "correlation"])
     all_rows = []
@@ -355,8 +392,10 @@ result = lc2st(
     n_null_trials=0,     # permutation null trials (0 = skip)
     seed=42,
 )
-# result.accuracy: float  (0.5 = perfect, 1.0 = distinguishable)
-# result.per_fold: list[float]
+# result.statistic: float              (mean single-class MSE_0; near 0 = calibrated)
+# result.p_value: float | None         (None unless n_null_trials > 0)
+# result.null_statistics: np.ndarray   (empty unless n_null_trials > 0)
+# result.per_observation_stats: np.ndarray
 ```
 
 ### Global C2ST
@@ -371,8 +410,9 @@ result = global_c2st(
     samples_q,  # (n, d) approximate posterior samples
     seed=42,
 )
-# result.accuracy: float
-# result.per_fold: list[float]
+# result.accuracy: float  (0.5 = indistinguishable, 1.0 = fully separable)
+# result.p_value: float
+# result.n_test: int
 ```
 
 ### ValidateFn Factory
@@ -398,9 +438,10 @@ study = hpo.optimize(
 
 - **Prior-scale NRMSE:** evaluate replacing validation-sample range normalization with a fixed prior-scale normalization. This could make scores less sensitive to the realized validation sample, but requires a compatibility and aggregation design.
 - **Held-out posterior NLL for density-evaluable NPE:** average `-log q(theta | x)` over a large prior-predictive validation set. Lueckmann et al. (2021) describe this as appropriate when evaluated across many observations; it should not be inferred from a handful of cases.
-- **TARP for sample-only joint validation:** add Tests of Accuracy with Random Points to assess joint posterior coverage when reference posterior samples are unavailable (Lemos et al., 2023).
 
-These are prospective features, not currently available metrics.
+These are prospective features, not currently available metrics.  TARP, which
+this list used to name among them, is implemented — see
+[Joint Metrics](#joint-metrics).
 
 ## SBC Tests
 
@@ -409,7 +450,7 @@ These are prospective features, not currently available metrics.
 If the posterior is well-calibrated, SBC ranks should be uniform over `[0, n_posterior_samples]`.
 
 ```python
-from bayesflow_hpo import compute_sbc_uniformity_tests
+from bayesflow_hpo.validation.sbc_tests import compute_sbc_uniformity_tests
 
 results = compute_sbc_uniformity_tests(ranks, n_posterior_samples, n_bins=20)
 # {"ks_statistic": ..., "ks_pvalue": ..., "chi2_statistic": ..., "chi2_pvalue": ...}

@@ -124,9 +124,9 @@ A single HPO run follows this pipeline:
                     └──────────┬───────────────────┘
                                │
                     ┌──────────▼───────────────────┐
-                    │   7. Return objectives        │
-                    │   (configurable metric key,   │
-                    │    normalized_param_score)    │
+                    │   8. Return objectives        │
+                    │   (one per quality metric,    │
+                    │    plus cost unless disabled) │
                     └──────────────────────────────┘
 ```
 
@@ -202,7 +202,7 @@ Two-layer constraint system:
 ### Multi-Objective Pruning
 
 Since Optuna doesn't support `trial.report()` for multi-objective studies, `PeriodicValidationCallback` implements custom pruning strategies:
-- `"domiance"` — Normalized median AND rule (adapted from MO-ASHA)
+- `"dominance"` — Normalized median AND rule (adapted from MO-ASHA)
 - `"mo-sha"` — Non-dominated sorting with bottom-fraction pruning
 - `("primary", metric)` — Single-metric median pruning
 - `"none"` — No intermediate validation

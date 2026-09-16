@@ -1,13 +1,10 @@
-# Changelog
+# v0.2.0 Workover Report
 
-## Unreleased
-
-- Training budgets now use explicit `fixed_budget` and `open_ended` modes.
-  Existing studies should not be resumed across this change: intermediate
-  higher-is-better metrics such as `contraction` are now stored and reported in
-  minimize-oriented form, so their historical values are not comparable.
-
-Changes implemented during the v0.2.0 workover (quality fixes, BayesFlow decoupling, validation redesign).
+A historical record of the quality fixes, BayesFlow decoupling, and validation
+redesign carried out for v0.2.0.  It describes the code **as it stood then**
+and is not updated as the package evolves — the release-by-release changelog
+is [`CHANGELOG.md`](../CHANGELOG.md), and current behaviour is documented in
+[`api_reference.md`](api_reference.md) and [`defaults.md`](defaults.md).
 
 ---
 
@@ -33,6 +30,8 @@ Training exceptions were caught with a bare `except Exception` and no logging. N
 - Exceptions are logged via `logging.warning`
 - Error message stored as `trial.set_user_attr("training_error", str(exc))`
 - Separate `training_failure_penalty` field on `ObjectiveConfig`
+  (since removed; penalties are now derived per metric — see
+  [optimization.md](optimization.md#penalty-values))
 
 ### `assert` used for runtime validation
 

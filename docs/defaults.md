@@ -32,9 +32,18 @@ objects (e.g. `ObjectiveConfig`, `create_study`) directly.
 | `pruning_strategy` | **`"dominance"`** | Multi-objective pruning strategy (`"dominance"`, `"mo-sha"`, `("primary", metric)`, `"none"`). |
 | `pruning_n_startup_trials` | **None** (auto-detect) | Min completed trials before pruning. Auto-detects from sampler when None. |
 | `sampler` | **`None`** (= `"tpe"`) | Sampler preset or instance. |
-| `pruner` | **`None`** | Pruner preset or instance. |
+| `sampler_n_startup_trials` | **None** | Override a preset sampler's startup-trial count. Ignored for a sampler instance. |
 | `resume` | **`False`** | Continue a previously persisted study instead of starting fresh. |
 | `sims_per_condition` | **200** | Simulations per condition grid point in validation data. |
+| `n_posterior_samples` | **500** | Posterior draws per simulation in final validation. |
+| `max_samples_per_call` | **20 000** | Keyword-only cap on draws per `approximator.sample()` call during validation; `None` samples each condition in one call. |
+| `validation_simulator` | **None** | Separate simulator for the validation dataset; defaults to `simulator`. |
+| `validation_conditions` | **None** | Condition grid for the validation dataset. |
+| `early_stopping_monitor` | **`"objective_mean"`** | Mean of the minimize-oriented `objective_metrics`, or a single metric name. |
+| `include_joint_metrics` | **False** | Whether joint metrics also run during intermediate validation. |
+| `joint_metrics` | **None** | Joint-metric configuration (e.g. `tarp_error`, `lc2st`). |
+| `checkpoint_pool` | **None** | Optional `CheckpointPool` for persisting trial weights. |
+| `warm_start_from` | **None** | Source study to warm-start from. |
 | `storage` | **`"sqlite:///bayesflow_hpo.db"`** | Optuna storage for persistence & crash recovery. |
 | `study_name` | **`"bayesflow_hpo"`** | Optuna study name. |
 | `directions` | **`None`** (auto-derived) | Auto-derives `["minimize"] * n_objectives` from `objective_mode` and `cost_metric`. With N metrics: N+1 directions in pareto mode, 2 in mean mode; with `cost_metric=None`, N and 1 respectively. |
@@ -45,9 +54,13 @@ objects (e.g. `ObjectiveConfig`, `create_study`) directly.
 
 ---
 
-## Default Search Space
+## Search Space Defaults
 
-When `search_space=None`, `optimize()` creates:
+`search_space` is a **required** argument of `optimize()`; there is no
+implicit default space.  The dimension defaults below are what the listed
+space classes carry when constructed with no arguments.
+
+To let Optuna pick the architecture, wrap candidates in a selection space:
 
 ```python
 CompositeSearchSpace(
@@ -63,7 +76,7 @@ CompositeSearchSpace(
 )
 ```
 
-Optuna selects the network type as a categorical hyperparameter, then
+Optuna then selects the network type as a categorical hyperparameter and
 samples the corresponding network-specific dimensions.
 
 ### CouplingFlowSpace
@@ -118,12 +131,13 @@ Profile helpers:
 | `ds_width` | 32--256, step 32 | yes | — |
 | `ds_dropout` | 0.0--0.3 | yes | — |
 | `ds_activation` | silu, mish | no | `"silu"` |
-| `ds_spectral_norm` | True, False | no | `False` |
+| `ds_spectral_normalization` | True, False | no | `False` |
+| `ds_inner_pooling` | — | no | `"mean"` |
+| `ds_output_pooling` | — | no | `"mean"` |
 
 Architecture: the `invariant_outer` MLP uses `(width, summary_dim)`
 as a bottleneck, matching BayesFlow's default architecture.  All other
-MLPs use `(width, width)`.  `inner_pooling="mean"` and `output_pooling="mean"`
-are hardcoded in `build()`.
+MLPs use `(width, width)`.
 
 ### SetTransformerSpace
 
@@ -134,9 +148,9 @@ are hardcoded in `build()`.
 | `st_num_heads` | 1, 2, 4, 8 | yes | — |
 | `st_num_layers` | 1--4 | yes | — |
 | `st_dropout` | 0.0--0.3 | yes | — |
-| `st_mlp_width` | 64--512, step 64 | no | `128` |
-| `st_mlp_depth` | 1--4 | no | `2` |
-| `st_num_inducing` | 8--64, step 8 | no | `None` |
+| `st_mlp_width` | — | no | `128` |
+| `st_mlp_depth` | — | no | `2` |
+| `st_num_inducing_points` | — | no | `None` |
 
 ### TrainingSpace
 
@@ -145,6 +159,11 @@ are hardcoded in `build()`.
 | `initial_lr` | 1e-4 -- 1e-2 (log) | yes | — |
 | `batch_size` | 32--256, step 32 | yes | — |
 | `epochs` | -- | opt-in | `None` (objective setting) |
+
+`TrainingSpace` also takes two optional couplings, both `None` by default:
+`lr_reference_batch_size` (samples `lr_ref` and derives `initial_lr`) and
+`simulation_budget` (derives `num_batches`).  See
+[search_spaces.md](search_spaces.md#training-space).
 
 Constant dimensions can be made tunable by setting `constant=_UNSET`
 on individual dimensions or creating the space with overridden fields.
@@ -158,7 +177,7 @@ on individual dimensions or creating the space with overridden fields.
 | Optimizer | **Adam** | `GenericObjective` |
 | Fixed-budget LR schedule | Optional linear warmup, then cosine decay over the remaining trial budget | `GenericObjective` |
 | Open-ended LR schedule | Linear warmup then inverse-square-root decay | `GenericObjective` |
-| Batch size (when not tuned) | **256** | `_default_train_fn()` |
+| Batch size (when not tuned) | **256** | `default_train_fn()` |
 | Default stopping | Full fixed budget | `ObjectiveConfig` |
 | Open-ended stopping monitor | Mean of minimize-oriented `objective_metrics` on validation data | `PeriodicValidationCallback` |
 | Restore best open-ended weights | `True` | `PeriodicValidationCallback` |
@@ -203,9 +222,8 @@ on individual dimensions or creating the space with overridden fields.
 |---------|---------|----------|
 | `max_param_count` | **1 000 000** | `optimize()` |
 | `max_memory_mb` | **None** (disabled) | `optimize()` |
-| Failed-trial calibration error | **1.0** | `FAILED_TRIAL_CAL_ERROR` |
+| Failed-trial quality penalty | Per-metric worst value (`FAILED_TRIAL_CAL_ERROR` = **1.0** for `calibration_error`) | `worst_objective_value()` |
 | Failed-trial cost penalty | **1e6** | `FAILED_TRIAL_COST` |
-| Failed-trial param score | **1.01** | `FAILED_TRIAL_PARAM_SCORE` |
 | Param normalization | `log10(count/1K) / log10(1M/1K)` (0--1) | `normalize_param_count()` |
 | Min param reference | **1 000** | `MIN_PARAM_COUNT` |
 | Max param reference | **1 000 000** | `MAX_PARAM_COUNT` |
@@ -229,6 +247,10 @@ on individual dimensions or creating the space with overridden fields.
 `DEFAULT_RESULT_ATTRS` controls which trial user-attributes appear as
 columns in `trials_to_dataframe()`:
 
-- `param_count`, `training_time_s`, `inference_time_s`
-- `calibration_error`, `nrmse`, `correlation`
+- `param_count`, `simulations`, `training_time_s`, `inference_time_s`
+- `calibration_error`, `mean_cal_error`, `nrmse`, `correlation`, `rmse`,
+  `contraction`, `coverage_90`, `coverage_95`
 - `training_error`, `rejected_reason`
+
+Values a search space derived rather than sampled are merged in from the
+`derived_params` user attribute.

@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+### Documentation
+
+- Audited every file in `docs/` against the code and corrected the
+  disagreements. The substantive ones: `optimize()` has no `pruner`
+  parameter (`api_reference.md`, `defaults.md` both listed one) and five
+  parameters were undocumented (`validation_simulator`, `report_frequency`,
+  `sampler_n_startup_trials`, `joint_metrics`, `include_joint_metrics`);
+  `search_space` is required, so `defaults.md`'s "default search space" did
+  not exist; trial penalties are per-metric worst values plus
+  `FAILED_TRIAL_COST = 1e6`, not the `(1.0, 1.5)` and
+  `training_failure_penalty` field of v0.2.0; TARP was listed as a
+  prospective feature although `tarp_error` and `tarp_error_random` are
+  registered; the joint-metric path was undocumented outside the changelog;
+  `correlation` was named as the only diagnostic-kind metric, of eight;
+  `LC2STResult` and `GlobalC2STResult` fields were wrong; and roughly
+  twenty search-space dimensions were listed under a stale name, range, or
+  constant (`ds_spectral_norm`, `st_num_inducing`, `tst_time_embed`,
+  `cm_sigma2`, `cm_s0`, `scm_sigma`, `tsn_skip_steps`, and every
+  `log`-annotated integer dimension, which are stepped rather than
+  log-scaled).
+- `docs/quality_report.md` is retitled "v0.2.0 Workover Report". It was
+  titled "Changelog" with its own `Unreleased` section, competing with this
+  file; it is a historical record and is no longer updated.
+- Symbols that `docs/api_reference.md` listed as public but that are not
+  top-level exports (`DerivedDimension`, `resume_study`,
+  `estimate_param_count`, `compute_sbc_uniformity_tests`, `get_metric`,
+  `resolve_metrics`, `sample_hyperparameters`) now carry their submodule
+  import path.
+
 ## 0.4.0
 
 A feature release. No change here alters what a stored objective value

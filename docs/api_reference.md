@@ -1,6 +1,8 @@
 # API Reference
 
-Complete list of public symbols exported from `bayesflow_hpo`.
+Complete list of public symbols exported from `bayesflow_hpo`.  A few
+entries below are *not* top-level exports — they are reached through their
+submodule, and each such entry names the import path.
 
 ## High-Level API
 
@@ -14,15 +16,17 @@ def optimize(
     # Custom approximator hooks (all optional)
     build_approximator_fn=None, train_fn=None, validate_fn=None,
     # Validation data
-    validation_conditions=None, sims_per_condition=200, n_posterior_samples=500,
+    validation_simulator=None, validation_conditions=None,
+    sims_per_condition=200, n_posterior_samples=500,
     # Objectives
     objective_metrics=None, objective_mode="pareto", cost_metric="inference_time",
+    pruning_strategy="dominance",
     # Training
     training_mode="fixed_budget", epochs=200, num_batches=50,
     early_stopping_patience=None, early_stopping_window=7,
     early_stopping_monitor="objective_mean",
     lr_warmup_epochs=None, lr_warmup_steps=None, lr_warmup_fraction=None,
-    pruning_strategy="dominance",
+    report_frequency=10,
     # Budget
     max_param_count=1_000_000, max_memory_mb=None,
     metric_constraints_hard=None, metric_constraints_soft=None,
@@ -30,12 +34,13 @@ def optimize(
     # Study
     n_trials=50, max_total_trials=None,
     study_name="bayesflow_hpo", storage=DEFAULT_STORAGE, resume=False,
-    sampler=None, pruner=None,
+    sampler=None,
     # Optional
     directions=None, warm_start_from=None, warm_start_top_k=25,
     qmc_startup_trials=0,
     checkpoint_pool=None, show_progress_bar=True,
-    *, max_samples_per_call=20_000,
+    *, max_samples_per_call=20_000, sampler_n_startup_trials=None,
+    joint_metrics=None, include_joint_metrics=False,
 ) -> optuna.Study
 ```
 
@@ -47,6 +52,7 @@ def optimize(
 | `build_approximator_fn` | Optional `(hparams) -> Approximator`. Must return an **uncompiled** approximator. Defaults to `build_continuous_approximator()`. |
 | `train_fn` | Optional `(approximator, simulator, hparams, callbacks) -> None`. Defaults to `default_train_fn()`. |
 | `validate_fn` | Optional `(approximator, validation_data, n_posterior_samples) -> dict[str, float]`. Defaults to `default_validate_fn()`. |
+| `validation_simulator` | Simulator used *only* to generate the validation dataset. `None` (default) uses `simulator`. |
 | `validation_conditions` | Condition grid (e.g. `{"N": [50, 100, 200]}`). |
 | `sims_per_condition` | Simulations per condition grid point (default 200). |
 | `n_posterior_samples` | Posterior draws for validation (default 500). |
@@ -64,6 +70,9 @@ def optimize(
 | `lr_warmup_steps` | Exact step override; a sequence enables categorical HPO. |
 | `lr_warmup_fraction` | Fixed-budget fraction; `None` selects 5%, maximum 10%. A sequence enables categorical HPO. |
 | `pruning_strategy` | Multi-objective pruning: `"dominance"` (default), `"mo-sha"`, `("primary", "metric")`, or `"none"`. |
+| `report_frequency` | Epochs between `OptunaReportCallback` reports (default 10). |
+| `joint_metrics` | Configuration for joint metrics such as `tarp_error` and `lc2st`. Ignored when a custom `validate_fn` is supplied. |
+| `include_joint_metrics` | Whether joint metrics also run at every *intermediate* validation (default `False`, because L-C2ST costs more than the pruning saves). |
 | `max_param_count` | Reject trials exceeding this param count pre-training (default 1 000 000). |
 | `max_memory_mb` | Optional peak-memory budget in MB, or `"auto"` for CUDA free-memory auto-detection. Checked against both the training estimate and the validation-sampling estimate. |
 | `metric_constraints_hard` | Optional hard metric constraints `[(metric, threshold, "above" \| "below"), ...]` (reject after validation). |
@@ -72,10 +81,15 @@ def optimize(
 | `n_trials` | Number of *trained* trials to collect (default 50). |
 | `max_total_trials` | Hard cap on non-rejected trials. Defaults to `3 * n_trials`. |
 | `sampler` | Sampler preset string (`"tpe"`, `"gp"`, `"botorch"`, `"nsga2"`, `"nsga3"`, `"auto"`, `"random"`) or `BaseSampler` instance. Default `None` = TPE. |
-| `pruner` | Pruner preset string (`"median"`, `"hyperband"`, `"none"`) or `BasePruner` instance. |
+| `sampler_n_startup_trials` | Keyword-only override of a preset sampler's startup-trial count. Ignored (with a warning) when `sampler` is an instance. |
 | `resume` | If `True`, continue a previously persisted study. |
 | `qmc_startup_trials` | Sobol QMC trials before main sampler (default 0 = disabled). |
 | `checkpoint_pool` | Optional `CheckpointPool` for persisting best trial weights. |
+
+`optimize()` takes no `pruner` argument: it drives multi-objective studies,
+where `trial.report()` — and therefore Optuna's own pruner — is unusable. Use
+`pruning_strategy` here, and `create_study(pruner=...)` for a single-objective
+study.
 
 ### `check_pipeline(...)`
 
@@ -85,7 +99,7 @@ Pre-flight validation that catches interface errors before launching expensive s
 def check_pipeline(
     simulator, adapter, search_space,
     build_approximator_fn=None, train_fn=None, validate_fn=None,
-    objective_metrics=("calibration_error", "nrmse"),
+    objective_metrics=None,
     sims_per_condition=5, n_posterior_samples=2,
     validation_conditions=None, epochs=1, num_batches=1,
 ) -> None
@@ -118,7 +132,8 @@ ValidateFn = Callable[[Any, ValidationDataset, int], dict[str, float]]
 | `IntDimension(name, low, high, step, log, constant)` | Integer hyperparameter. Set `constant=<value>` to fix. |
 | `FloatDimension(name, low, high, log, constant)` | Float hyperparameter. Set `constant=<value>` to fix. |
 | `CategoricalDimension(name, choices, constant)` | Categorical hyperparameter. Set `constant=<value>` to fix. |
-| `DerivedDimension(name, derive)` | Value computed after the sampled dimensions. |
+| `BoolDimension(name, constant)` | Boolean hyperparameter. Set `constant=<value>` to fix. |
+| `DerivedDimension(name, derive)` | Value computed after the sampled dimensions. Not a top-level export: `from bayesflow_hpo.search_spaces.base import DerivedDimension`. |
 
 When `constant` is set, the dimension is not tuned by Optuna — it uses the constant value instead. When unset (default `_UNSET` sentinel), the dimension is tunable.
 
@@ -156,7 +171,7 @@ defaults at runtime (`bf.networks.TimeMLP` signature defaults and
 
 | Class | Controls |
 |-------|----------|
-| `TrainingSpace()` | `initial_lr`, `batch_size`, optional `epochs` |
+| `TrainingSpace()` | `initial_lr`, `batch_size`, optional `epochs`; plus the optional couplings `lr_reference_batch_size` and `simulation_budget` |
 
 ### Composite Spaces
 
@@ -190,7 +205,9 @@ Builds an **uncompiled** `ContinuousApproximator` from sampled hyperparameters. 
 
 ```python
 default_train_fn(approximator, simulator, hparams, callbacks) -> None
-default_validate_fn(approximator, validation_data, n_posterior_samples) -> dict[str, float]
+default_validate_fn(approximator, validation_data, n_posterior_samples,
+                    objective_metrics=None, joint_metrics=None,
+                    max_samples_per_call=20_000) -> dict[str, float]
 ```
 
 Public default implementations used by `optimize()` when no custom hooks are provided.
@@ -219,8 +236,15 @@ Public default implementations used by `optimize()` when no custom hooks are pro
 | `max_param_count` | `1_000_000` | Pre-training param budget |
 | `max_memory_mb` | `None` | Peak-memory budget (disabled) |
 | `metric_constraints_hard` | `None` | Hard metric constraints (post-validation rejection) |
+| `metric_constraints_soft` | `None` | Soft metric constraints (sampler feasibility guidance) |
 | `n_posterior_samples` | `500` | Posterior draws for final validation |
 | `max_samples_per_call` | `20_000` | Posterior-draw cap per `sample()` call (`None` disables chunking) |
+| `include_joint_metrics` | `False` | Whether joint metrics run at intermediate validation too |
+| `joint_metrics` | `None` | Joint-metric configuration |
+| `n_intermediate_posterior_samples` | `250` | Posterior draws per intermediate validation |
+| `intermediate_validation_interval` | `10` | Epochs between intermediate validations |
+| `intermediate_validation_warmup` | `10` | Epochs before the first intermediate validation |
+| `report_frequency` | `10` | Epochs between `OptunaReportCallback` reports |
 | `pruning_strategy` | `"dominance"` | Multi-objective pruning strategy (`"dominance"`, `"mo-sha"`, `("primary", metric)`, `"none"`) |
 | `pruning_n_startup_trials` | `None` | Min completed trials before pruning (`None` = auto-detect from sampler) |
 | `objective_metrics` | `["calibration_error", "nrmse"]` | Metric keys to optimize |
@@ -241,20 +265,36 @@ values = objective(trial: optuna.Trial)  # tuple of floats
 ### Study Management
 
 ```python
-create_study(study_name, directions, storage, load_if_exists,
+create_study(study_name="bayesflow_hpo", directions=None, metric_names=None,
+             storage=DEFAULT_STORAGE, load_if_exists=True,
              sampler: str | BaseSampler | None = None,  # "tpe", "gp", "botorch", "nsga2", "nsga3", "auto", "random"
              pruner: str | BasePruner | None = None,    # "median", "hyperband", "none"
-             metric_constraints_soft=None,
-             metric_names, warm_start_from, warm_start_top_k,
-             qmc_startup_trials=0) -> optuna.Study
+             warm_start_from=None, warm_start_top_k=25,
+             budget_aware=True, metric_constraints_soft=None,
+             qmc_startup_trials=0, *,
+             sampler_n_startup_trials=None, has_cost=True) -> optuna.Study
+
+optimize_until(study, objective, n_trained, *,
+               max_total_trials=None, show_progress_bar=True) -> None
+
+warm_start_study(target_study, source_study, top_k=25, has_cost=True) -> int
+
+count_trained_trials(study) -> int
+
+mean_objective_score(values, has_cost=True) -> float
+
+# Not a top-level export:
+#   from bayesflow_hpo.optimization.study import resume_study
 resume_study(study_name, storage) -> optuna.Study
-optimize_until(study, objective, n_trained, max_total_trials, show_progress_bar) -> None
-warm_start_study(target_study, source_study, top_k=25) -> int
 ```
 
 ### Sampling
 
+Not a top-level export:
+
 ```python
+from bayesflow_hpo.optimization.sampling import sample_hyperparameters
+
 sample_hyperparameters(trial, space: CompositeSearchSpace) -> dict[str, Any]
 ```
 
@@ -262,11 +302,15 @@ sample_hyperparameters(trial, space: CompositeSearchSpace) -> dict[str, Any]
 
 ```python
 OptunaReportCallback(trial, monitor="loss", report_frequency=10)
-MovingAverageEarlyStopping(monitor="loss", window=5, patience=3, restore_best_weights=True)
+MovingAverageEarlyStopping(monitor="loss", window=7, patience=5, restore_best_weights=True)
 PeriodicValidationCallback(trial, approximator, validation_data, ...)
 ```
 
 ### Constraints
+
+All four live in `bayesflow_hpo.optimization.constraints`;
+`estimate_param_count()` is the only one not also re-exported at the top
+level.
 
 ```python
 estimate_param_count(params) -> int
@@ -373,25 +417,45 @@ class ValidationResult:
     n_conditions: int = 0
     n_posterior_samples: int = 0
     metric_names: list[str]
+    failed_joint_metrics: dict[str, str]
+    joint_metric_settings: dict[str, dict[str, Any]]
 
-    def summary_table(self) -> pd.DataFrame
-    def condition_table(self, metric: str | None = None) -> pd.DataFrame
-    def parameter_table(self) -> pd.DataFrame | None
+    def summary_table(self) -> DisplayDataFrame
+    def condition_table(self, metric: str | None = None) -> DisplayDataFrame
+    def parameter_table(self) -> DisplayDataFrame | None
     def objective_scalar(self, key: str = "calibration_error") -> float
 ```
 
 ### Metric Registry
 
 ```python
-register_metric(name, fn, aliases=None, overwrite=False, description=None, kind="objective", requires="") -> None
-get_metric(name) -> MetricFn
-resolve_metrics(names: list[str]) -> dict[str, MetricFn]
+register_metric(name, fn, aliases=None, overwrite=False, description=None,
+                kind="objective", requires="", outputs=()) -> None
+register_joint_metric(name, fn, aliases=None, overwrite=False, description=None,
+                      kind="objective", requires="", outputs=()) -> None
 list_metrics() -> list[str]
+describe_metrics() -> MetricTable
 make_coverage_metric(levels=None, side="two-sided", weights=None, prefix="") -> MetricFn
 DEFAULT_METRICS: list[str]
+
+# Not top-level exports:
+#   from bayesflow_hpo.validation.registry import get_metric, resolve_metrics
+get_metric(name) -> MetricFn
+resolve_metrics(names: list[str]) -> dict[str, MetricFn]
 ```
 
-Metrics registered with `kind="diagnostic"` remain available to validation reports but are rejected in `objective_metrics`. In particular, `correlation` is diagnostic-only because it measures linear association rather than recovery agreement.
+Metrics registered with `kind="diagnostic"` remain available to validation
+reports but are rejected in `objective_metrics`.  `describe_metrics()` prints
+the registry with each metric's kind, aliases and description; the current
+diagnostics are `bias`, `correlation`, `coverage`, `coverage_left`,
+`coverage_right`, `sbc`, `tarp_error_random` and `z_score`.  `correlation`,
+for instance, is diagnostic-only because it measures linear association rather
+than recovery agreement.
+
+A *joint* metric sees the whole condition batch — draws, true values and the
+data behind them — rather than one parameter's marginal, which is what
+`tarp_error` and `lc2st` need.  `JointMetricInputs` is the dataclass it
+receives.
 
 ### Metrics
 
@@ -415,9 +479,28 @@ make_lc2st_validate_fn(base_metrics=None, n_folds=5, n_null_trials=0,
 
 `make_lc2st_validate_fn()` returns a `ValidateFn` compatible with `optimize(validate_fn=...)` that computes standard per-parameter metrics and L-C2ST from a single inference pass.
 
+```python
+@dataclass
+class LC2STResult:
+    statistic: float
+    p_value: float | None
+    null_statistics: np.ndarray
+    per_observation_stats: np.ndarray
+
+@dataclass
+class GlobalC2STResult:
+    accuracy: float
+    p_value: float
+    n_test: int
+```
+
 ### SBC Tests
 
+Not a top-level export:
+
 ```python
+from bayesflow_hpo.validation.sbc_tests import compute_sbc_uniformity_tests
+
 compute_sbc_uniformity_tests(ranks, n_posterior_samples, n_bins=20) -> dict[str, float]
 ```
 
@@ -474,7 +557,8 @@ plot_metric_scatter(study, x_metric, y_metric, ax=None, *,
 plot_metric_panels(study, metrics=None, axes=None, *,
                    max_cols=3, figsize=None) -> Axes | np.ndarray
 
-plot_pareto_3d(study, ax=None, *, cost_display="color") -> Axes
+plot_pareto_3d(study, ax=None, *, cost_display="color",
+               xlabel=None, ylabel=None, zlabel=None) -> Axes
 
 plot_pareto_projections(study, axes=None, *, cost_display="color",
                         max_cols=3, figsize=None) -> Axes

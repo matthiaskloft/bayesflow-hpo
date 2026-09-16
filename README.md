@@ -14,6 +14,7 @@ Tunes inference networks, summary networks, and training hyperparameters — so 
 ```bash
 pip install bayesflow-hpo            # core
 pip install bayesflow-hpo[dashboard] # + Optuna dashboard
+pip install bayesflow-hpo[sklearn]   # + C2ST metrics
 ```
 
 Requires Python >= 3.11 and a Keras 3 backend (PyTorch recommended: `export KERAS_BACKEND=torch`).
@@ -55,7 +56,7 @@ Requires Python >= 3.11 and a Keras 3 backend (PyTorch recommended: `export KERA
 - **Pre-flight validation** — `check_pipeline()` catches interface errors before GPU hours are wasted
 - **Multi-objective** — single-metric, mean-aggregated, or full Pareto-front optimization (2-3 objectives)
 - **Rich visualization** — `plot_study()` adaptive dashboard with pairwise Pareto projections, per-objective history, and parameter importance; plus standalone `plot_pareto_3d()`, `plot_parallel_coordinates()`, and more
-- **16 built-in validation metrics** — calibration, accuracy, SBC diagnostics, C2ST, plus a registry for custom metrics
+- **19 built-in validation metrics** — calibration, accuracy, SBC diagnostics, C2ST, plus a registry for custom metrics
 - **Budget constraints** — reject infeasible architectures before training (`max_param_count`, `max_memory_mb="auto"`)
 - **Custom network registration** — plug in your own inference/summary networks
 - **Study management** — resume, warm-start, save/load workflows, analyze results

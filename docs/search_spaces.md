@@ -11,7 +11,12 @@ All dimensions are defined in `search_spaces/base.py`:
 | `IntDimension` | name, low, high, step, log, constant | `IntDimension("depth", 2, 12)` |
 | `FloatDimension` | name, low, high, log, constant | `FloatDimension("dropout", 0.0, 0.3)` |
 | `CategoricalDimension` | name, choices, constant | `CategoricalDimension("activation", ["relu", "silu"])` |
+| `BoolDimension` | name, constant | `BoolDimension("use_actnorm")` |
 | `DerivedDimension` | name, derive | `DerivedDimension("num_batches", lambda p: ...)` |
+
+`IntDimension`, `FloatDimension`, `CategoricalDimension` and `BoolDimension`
+are re-exported at the top level.  `DerivedDimension` is not, and is imported
+as `from bayesflow_hpo.search_spaces.base import DerivedDimension`.
 
 The `constant` field controls whether a dimension is tuned:
 - `constant` not set (default `_UNSET`) — dimension is tunable, Optuna samples from range/choices
@@ -28,7 +33,7 @@ This supports the workload-aware joint-tuning rationale of Shallue et al.
 (2019); see [References](references.md).
 
 ```python
-num_batches = hpo.DerivedDimension(
+num_batches = DerivedDimension(
     "num_batches",
     lambda p: p["simulation_budget"] // (p["batch_size"] * p["epochs"]),
 )
@@ -46,13 +51,13 @@ Coupling-based normalizing flow (BayesFlow `CouplingFlow`).
 | Dimension | Type | Range | Tuned | Constant |
 |-----------|------|-------|-------|----------|
 | `cf_depth` | int | [2, 8] | yes | — |
-| `cf_subnet_width` | int | [32, 256], log | yes | — |
+| `cf_subnet_width` | int | [32, 256], step 32 | yes | — |
 | `cf_subnet_depth` | int | [1, 3] | yes | — |
 | `cf_dropout` | float | [0.0, 0.3] | yes | — |
 | `cf_activation` | cat | silu, relu, mish | no | `"silu"` |
 | `cf_transform` | cat | affine, spline | no | `"affine"` |
 | `cf_permutation` | cat | random, orthogonal | no | `"random"` |
-| `cf_use_actnorm` | cat | True, False | no | `True` |
+| `cf_use_actnorm` | bool | — | no | `True` |
 
 ### FlowMatchingSpace
 
@@ -64,15 +69,15 @@ Continuous normalizing flow via flow matching (`FlowMatching`).
 | `fm_subnet_depth` | int | [1, 6] | yes | — |
 | `fm_dropout` | float | [0.0, 0.2] | yes | — |
 | `fm_activation` | cat | — | no | `"mish"` |
-| `fm_use_optimal_transport` | cat | — | no | `False` |
+| `fm_use_optimal_transport` | bool | — | no | `False` |
 | `fm_time_power_law_alpha` | float | — | no | `0.0` |
 | `fm_time_embedding_dim` | int | — | no | `32` |
 | `fm_integrate_method` | cat | — | no | `"tsit5"` |
 | `fm_integrate_steps` | cat | — | no | `"adaptive"` |
 | `fm_merge` | cat | — | no | `"concat"` |
 | `fm_norm` | cat | — | no | `"layer"` |
-| `fm_residual` | cat | — | no | `True` |
-| `fm_spectral_normalization` | cat | — | no | `False` |
+| `fm_residual` | bool | — | no | `True` |
+| `fm_spectral_normalization` | bool | — | no | `False` |
 | `fm_kernel_initializer` | cat | — | no | `"he_normal"` |
 
 Untuned constants are synchronized to BayesFlow defaults at runtime
@@ -113,7 +118,7 @@ Score-based diffusion model (`DiffusionModel`).
 
 | Dimension | Type | Range | Tuned | Constant |
 |-----------|------|-------|-------|----------|
-| `dm_subnet_width` | int | [32, 256], log | yes | — |
+| `dm_subnet_width` | int | [32, 256], step 32 | yes | — |
 | `dm_subnet_depth` | int | [1, 6] | yes | — |
 | `dm_dropout` | float | [0.0, 0.2] | yes | — |
 | `dm_activation` | cat | mish, silu | yes | — |
@@ -126,13 +131,13 @@ Consistency model (`ConsistencyModel`).
 
 | Dimension | Type | Range | Tuned | Constant |
 |-----------|------|-------|-------|----------|
-| `cm_subnet_width` | int | [32, 256], log | yes | — |
+| `cm_subnet_width` | int | [32, 256], step 32 | yes | — |
 | `cm_subnet_depth` | int | [1, 6] | yes | — |
 | `cm_dropout` | float | [0.0, 0.2] | yes | — |
-| `cm_max_time` | int | [50, 500] | no | `200` |
-| `cm_sigma2` | float | [0.1, 2.0] | no | `0.5` |
-| `cm_s0` | int | [2, 30] | no | `2` |
-| `cm_s1` | int | [20, 100] | no | `50` |
+| `cm_max_time` | int | — | no | `200` |
+| `cm_sigma2` | float | — | no | `1.0` |
+| `cm_s0` | int | — | no | `10` |
+| `cm_s1` | int | — | no | `50` |
 
 **Note:** `ConsistencyModelSpace` accepts `epochs` and `num_batches` in its constructor to compute `total_steps` for the consistency model schedule.
 
@@ -142,10 +147,10 @@ Stable variant of the consistency model (`StableConsistencyModel`).
 
 | Dimension | Type | Range | Tuned | Constant |
 |-----------|------|-------|-------|----------|
-| `scm_subnet_width` | int | [32, 256], log | yes | — |
+| `scm_subnet_width` | int | [32, 256], step 32 | yes | — |
 | `scm_subnet_depth` | int | [1, 6] | yes | — |
 | `scm_dropout` | float | [0.0, 0.2] | yes | — |
-| `scm_sigma` | float | [0.1, 2.0] | no | `0.5` |
+| `scm_sigma` | float | — | no | `1.0` |
 
 ## Summary Network Spaces
 
@@ -157,12 +162,12 @@ Permutation-invariant summary via DeepSets (`DeepSet`).
 |-----------|------|-------|-------|----------|
 | `ds_summary_dim` | int | [4, 64], step 4 | yes | — |
 | `ds_depth` | int | [1, 4] | yes | — |
-| `ds_width` | int | [32, 256], log | yes | — |
+| `ds_width` | int | [32, 256], step 32 | yes | — |
 | `ds_dropout` | float | [0.0, 0.3] | yes | — |
 | `ds_activation` | cat | silu, mish | no | `"silu"` |
-| `ds_spectral_norm` | cat | True, False | no | `False` |
-
-**Note:** `inner_pooling="mean"` and `output_pooling="mean"` are hardcoded in `build()`.
+| `ds_spectral_normalization` | bool | — | no | `False` |
+| `ds_inner_pooling` | cat | — | no | `"mean"` |
+| `ds_output_pooling` | cat | — | no | `"mean"` |
 
 ### SetTransformerSpace
 
@@ -170,14 +175,14 @@ Attention-based set summary (`SetTransformer`).
 
 | Dimension | Type | Range | Tuned | Constant |
 |-----------|------|-------|-------|----------|
-| `st_summary_dim` | int | [8, 64], log | yes | — |
-| `st_embed_dim` | int | [32, 256], log | yes | — |
+| `st_summary_dim` | int | [8, 64], step 8 | yes | — |
+| `st_embed_dim` | int | [32, 256], step 32 | yes | — |
 | `st_num_heads` | cat | 1, 2, 4, 8 | yes | — |
 | `st_num_layers` | int | [1, 4] | yes | — |
 | `st_dropout` | float | [0.0, 0.3] | yes | — |
-| `st_mlp_width` | int | [64, 512], log | no | `128` |
-| `st_mlp_depth` | int | [1, 4] | no | `2` |
-| `st_num_inducing` | int | [8, 64], step 8 | no | `None` |
+| `st_mlp_width` | int | — | no | `128` |
+| `st_mlp_depth` | int | — | no | `2` |
+| `st_num_inducing_points` | int | — | no | `None` |
 
 ### TimeSeriesNetworkSpace
 
@@ -185,13 +190,13 @@ CNN + RNN temporal summary (`TimeSeriesNetwork`).
 
 | Dimension | Type | Range | Tuned | Constant |
 |-----------|------|-------|-------|----------|
-| `tsn_summary_dim` | int | [8, 64], log | yes | — |
-| `tsn_recurrent_dim` | int | [32, 256], log | yes | — |
-| `tsn_filters` | int | [16, 128], log | yes | — |
+| `tsn_summary_dim` | int | [8, 64], step 8 | yes | — |
+| `tsn_recurrent_dim` | int | [32, 256], step 32 | yes | — |
+| `tsn_filters` | int | [16, 128], step 16 | yes | — |
 | `tsn_dropout` | float | [0.0, 0.3] | yes | — |
-| `tsn_recurrent_type` | cat | gru, lstm | no | `"gru"` |
-| `tsn_bidirectional` | cat | True, False | no | `True` |
-| `tsn_skip_steps` | int | [1, 8] | no | `1` |
+| `tsn_recurrent_type` | cat | — | no | `"gru"` |
+| `tsn_bidirectional` | bool | — | no | `True` |
+| `tsn_skip_steps` | int | — | no | `4` |
 
 ### TimeSeriesTransformerSpace
 
@@ -199,13 +204,14 @@ Transformer-based temporal summary (`TimeSeriesTransformer`).
 
 | Dimension | Type | Range | Tuned | Constant |
 |-----------|------|-------|-------|----------|
-| `tst_summary_dim` | int | [8, 64], log | yes | — |
-| `tst_embed_dim` | int | [32, 256], log | yes | — |
+| `tst_summary_dim` | int | [8, 64], step 8 | yes | — |
+| `tst_embed_dim` | int | [32, 256], step 32 | yes | — |
 | `tst_num_heads` | cat | 1, 2, 4, 8 | yes | — |
 | `tst_num_layers` | int | [1, 4] | yes | — |
 | `tst_dropout` | float | [0.0, 0.3] | yes | — |
-| `tst_mlp_width` | int | [64, 512], log | no | `128` |
-| `tst_time_embed` | cat | time2vec, lstm, gru | no | `"time2vec"` |
+| `tst_mlp_width` | int | — | no | `128` |
+| `tst_mlp_depth` | int | — | no | `2` |
+| `tst_time_embedding` | cat | — | no | `"time2vec"` |
 
 ### FusionTransformerSpace
 
@@ -213,16 +219,16 @@ Cross-attention fusion summary (`FusionTransformer`).
 
 | Dimension | Type | Range | Tuned | Constant |
 |-----------|------|-------|-------|----------|
-| `ft_summary_dim` | int | [8, 64], log | yes | — |
-| `ft_embed_dim` | int | [32, 256], log | yes | — |
+| `ft_summary_dim` | int | [8, 64], step 8 | yes | — |
+| `ft_embed_dim` | int | [32, 256], step 32 | yes | — |
 | `ft_num_heads` | cat | 1, 2, 4, 8 | yes | — |
 | `ft_num_layers` | int | [1, 4] | yes | — |
-| `ft_template_dim` | int | [32, 256], log | yes | — |
+| `ft_template_dim` | int | [32, 256], step 32 | yes | — |
 | `ft_dropout` | float | [0.0, 0.3] | yes | — |
-| `ft_mlp_width` | int | [64, 512] | no | `128` |
-| `ft_mlp_depth` | int | [1, 4] | no | `2` |
-| `ft_bidirectional` | cat | True, False | no | `True` |
-| `ft_template_type` | cat | lstm, gru | no | `"lstm"` |
+| `ft_mlp_width` | int | — | no | `128` |
+| `ft_mlp_depth` | int | — | no | `2` |
+| `ft_bidirectional` | bool | — | no | `True` |
+| `ft_template_type` | cat | — | no | `"lstm"` |
 
 ## Training Space
 
@@ -233,6 +239,9 @@ Cross-attention fusion summary (`FusionTransformer`).
 | `initial_lr` | float | [1e-4, 1e-2], log | yes | — |
 | `batch_size` | int | [32, 256], step=32 | yes | — |
 | `epochs` | int | user-defined | opt-in | `None` (objective setting) |
+
+`lr_reference_batch_size` and `simulation_budget` are constructor arguments
+rather than dimensions; both are `None` by default and are described below.
 
 When a dimension has `constant` set, the constant value is used directly. To make a constant dimension tunable, set `constant=_UNSET` or create a new dimension without a constant.
 
