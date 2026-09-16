@@ -90,11 +90,15 @@ _MIN_EXPECTED_XREFS = 20
 #: An assertion worth checking is written as a literal.
 #: A bare number may be written with digit grouping -- "1 000 000" -- so a
 #: space is consumed only when a digit follows it. Capturing just the "1"
-#: made a correct docstring disagree with ``= 1000000``.
+#: made a correct docstring disagree with ``= 1000000``.  For the same
+#: reason the number carries an optional exponent and refuses to end mid
+#: token: without those, "default 1e-5" was read as a claim of ``1``, so a
+#: correct docstring failed CI and a wrong claim of ``1e-5`` against an
+#: actual ``1`` passed.
 _DEFAULT_CLAIM = re.compile(
     r"\bdefaults?\b\s*(?:to|:|=)?\s*"
     r"(``[^`]+``|`[^`]+`|\"[^\"]*\"|'[^']*'"
-    r"|[-+]?\d(?:[\d_,]|\.\d|\s(?=\d))*)",
+    r"|[-+]?\d(?:[\d_,]|\.\d|\s(?=\d))*(?:[eE][-+]?\d+)?(?![\w.]))",
     re.I,
 )
 
@@ -172,8 +176,12 @@ def parameter_entries(doc: str) -> dict[str, str]:
             continue
         if not line[:1].isspace():
             flush()
+            # numpydoc requires variadics to keep their stars ("*args"),
+            # but the signature knows them as "args".  Strip for matching.
             names = [
-                n.strip() for n in stripped.split(":")[0].split(",") if n.strip()
+                n.strip().lstrip("*")
+                for n in stripped.split(":")[0].split(",")
+                if n.strip().lstrip("*")
             ]
             buf = []
         else:

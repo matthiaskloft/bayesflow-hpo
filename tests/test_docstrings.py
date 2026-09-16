@@ -393,9 +393,18 @@ def test_nested_option_default_is_not_a_claim(tmp_path: Path) -> None:
     assert findings == []
 
 
-def test_documented_kwargs_is_not_a_phantom(tmp_path: Path) -> None:
+@pytest.mark.parametrize("args_name,kwargs_name", [
+    ("args", "kwargs"),
+    # The spelling numpydoc actually mandates. Without star-stripping this
+    # raised two `malformed-entry` findings plus an `undocumented-parameter`
+    # for `args, kwargs` -- CI failing on the documented convention.
+    ("*args", "**kwargs"),
+])
+def test_documented_kwargs_is_not_a_phantom(
+    tmp_path: Path, args_name: str, kwargs_name: str
+) -> None:
     """``**kwargs`` is an ordinary numpydoc entry, not a phantom parameter."""
-    pkg = _write_pkg(tmp_path, {"m.py": '''
+    pkg = _write_pkg(tmp_path, {"m.py": f'''
         def f(a, *args, **kwargs):
             """S.
 
@@ -403,14 +412,41 @@ def test_documented_kwargs_is_not_a_phantom(tmp_path: Path) -> None:
             ----------
             a
                 Thing.
-            args
+            {args_name}
                 More.
-            kwargs
+            {kwargs_name}
                 Extra.
             """
     '''})
     findings, _ = check_docstrings.check_tree(pkg)
     assert findings == []
+
+
+@pytest.mark.parametrize("actual,claimed,rule", [
+    # A correct scientific-notation default must not fail the gate: the
+    # numeric token used to stop at the "e", reading "1e-5" as a claim of 1.
+    ("1e-5", "1e-5", None),
+    ("1E+6", "1E+6", None),
+    # And the same truncation let a wrong claim through, which is worse.
+    ("1", "1e-5", "wrong-default"),
+    ("100", "1E+6", "wrong-default"),
+])
+def test_scientific_notation_defaults(
+    tmp_path: Path, actual: str, claimed: str, rule: str | None
+) -> None:
+    """The exponent is part of the value, not trailing prose."""
+    pkg = _write_pkg(tmp_path, {"m.py": f'''
+        def f(rate={actual}):
+            """S.
+
+            Parameters
+            ----------
+            rate
+                Learning rate (default {claimed}).
+            """
+    '''})
+    findings, _ = check_docstrings.check_tree(pkg)
+    assert {f.rule for f in findings} == ({rule} if rule else set())
 
 
 def test_class_annotation_does_not_shadow_init(tmp_path: Path) -> None:
