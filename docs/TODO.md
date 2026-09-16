@@ -138,12 +138,38 @@ covering [issue #82](https://github.com/matthiaskloft/bayesflow-hpo/issues/82)
 - CI never installed scikit-learn, so the entire C2ST suite was skipped
   rather than run. Now `[dev,sklearn]`.
 
-**Not shipped: `coverage_error` (#75), plan step 6.** The contract carries
-`approximator`, which is all #75 needed from #82. The rest is #75's own: the
-plan's §4 leaves its floor treatment and its `mode` default explicitly
-undecided, and §3 records that `requires=` gates nothing today (zero call
-sites; read only by `describe_metrics`), so it needs an explicit import guard
-like `_require_sklearn` rather than a declaration.
+**Declined: `coverage_error` (#75), plan step 6.** The contract carries
+`approximator`, which is all #75 needed from #82 -- so the capability exists and
+the metric is buildable. It is not being built, and the reason is theoretical
+rather than practical.
+
+`coverage_error` **is** HPD coverage: `compute_ranks(log_prob_true,
+log_probs_samples)` is the fraction of draws with higher joint log-density than
+the truth, and `coverage_error` compares those ranks against
+`linspace(0, 1, B)`. Lemos et al. (2023) Sec. 3.1 -- verified against full text,
+see [`references.md`](references.md) -- shows the HPD region generator is **not
+positionable**, so Theorem 3 does not reach it, and works the case
+`p_hat(theta|x) = p(theta)` explicitly: an estimator that ignores the data
+entirely "has perfect HPD ECP". That is the failure `tarp_error` with an
+x-derived reference exists to catch. As an *optimization axis* it would add a
+dimension blind exactly where the shipped one sees, and an HPO search finds such
+blind spots.
+
+The issue's pitch was that it fills TARP's gap without TARP's reference-point
+choice. Sec. 4.3 makes those the same property: the x-*independent* reference
+shares the blind spot, which is why `tarp_error_random` is a diagnostic rather
+than an objective. Needing no reference and being blind are one fact.
+
+This moots #75's own open questions rather than answering them -- the floor
+treatment (§4) and the `mode` default (§4) only matter for a metric being
+optimized against. §3's finding stands independently and applies to any future
+optional-dependency metric: `requires=` gates nothing today (zero call sites;
+read only by `describe_metrics`), so an explicit import guard like
+`_require_sklearn` is required rather than a declaration.
+
+**The constraint generalizes.** Any HPD-based statistic proposed later inherits
+Sec. 3.1's blind spot, whatever package it comes from. Weigh a joint metric by
+whether its region generator is positionable, not by whether it is joint.
 
 Both paper claims the plan rests on are **verified against full text** and
 recorded in [`references.md`](references.md) -- Lemos et al. (2023) Sec. 3.1 on

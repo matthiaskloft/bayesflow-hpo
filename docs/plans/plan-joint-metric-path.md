@@ -601,8 +601,11 @@ precedent), or `requires=` is given enforcement. #75's open question is answered
   at validation time or reports excess over the floor, and whether the floor
   correction holds empirically, remain #75's open questions. This contract
   carries `approximator`, which is all #75 needed from *this* issue.
+  **Moot as of #75's closure** -- see step 6 in §5; a declined metric has no
+  floor to treat.
 - **`mode` for `coverage_error`** (#75 constraint 3). Exploitable at the package
-  default; a metric-side decision, not a contract one.
+  default; a metric-side decision, not a contract one. **Moot as of #75's
+  closure**, for the same reason.
 - **The `bayesflow-irt` consumer change.** #82 constraint 2 is explicit that
   `make_irt_hooks`' closure would not reach TARP even through a fixed pipeline.
   A companion issue there is required and is out of this repository's scope.
@@ -628,8 +631,14 @@ precedent), or `requires=` is given enforcement. #75's open question is answered
    entry. Expand the Lemos entry in [`references.md`](../references.md) — it
    currently reads "not currently implemented" and carries none of the
    section-level detail this design leans on.
-6. #75's `coverage_error` on the same contract, with an explicit import guard
-   per §3.
+6. ~~#75's `coverage_error` on the same contract, with an explicit import guard
+   per §3.~~ **Declined after step 5 shipped; #75 is closed.** `coverage_error`
+   is HPD coverage, and §6's own tracing of Lemos et al. Sec. 3.1 records that
+   the HPD generator is not positionable and that `p_hat(theta|x) = p(theta)`
+   "has perfect HPD ECP" -- the failure `tarp_error` exists to catch. Step 5
+   therefore did not clear the way for step 6; it superseded it. §4's two
+   undecided items below are moot with it, since both only bite for a metric
+   being optimized against.
 
 Steps 1 and 3 are worth landing alone: together they remove a duplicated
 pipeline and close a live `worst_raw` defect, independently of whether TARP ever
