@@ -252,6 +252,11 @@ def optimize(
         Cap on posterior draws materialized by one ``approximator.sample()``
         call during validation (default
         :data:`~bayesflow_hpo.validation.inference.DEFAULT_MAX_SAMPLES_PER_CALL`).
+        Keyword-only, ``int`` or ``None``; a float is rejected. Pass
+        ``None`` to sample each condition in a single call. A custom
+        *validate_fn* does not read this and sets its own cap --
+        :func:`~bayesflow_hpo.make_lc2st_validate_fn` takes one.
+
         Validation allocates ``sims_per_condition x n_posterior_samples``
         draws per condition -- 100,000 at the defaults -- which the
         pre-training memory budget does not cover, since neither factor is a
@@ -291,12 +296,13 @@ def optimize(
         or :func:`~bayesflow_hpo.register_metric` to add custom ones.
     joint_metrics
         Configured joint metrics as ``{name: fn}``, forwarded to the
-        validation pipeline. This is how a joint metric whose configuration
+        validation pipeline.  Build one with
+        :func:`~bayesflow_hpo.validation.tarp.make_tarp_joint_metric`.
+
+        This is how a joint metric whose configuration
         belongs to one study reaches a trial: ``tarp_error`` needs reference
         points derived from the data, which no registry default can supply,
-        so without this it is registered, resolvable, and unusable. Build
-        one with
-        :func:`~bayesflow_hpo.validation.tarp.make_tarp_joint_metric`. A
+        so without this it is registered, resolvable, and unusable. A
         name given here overrides its registered entry rather than being
         resolved alongside it, so a placeholder never raises in its place.
         The key must name a registered joint metric: an unchecked key would
@@ -314,7 +320,9 @@ def optimize(
         Whether joint metrics also run at every *intermediate* validation,
         under
         :class:`~bayesflow_hpo.optimization.validation_callback.PeriodicValidationCallback`.
-        ``False`` by default: L-C2ST measured ~56 s per condition, so a
+        ``False`` by default, because the cost changes what pruning is for.
+
+        L-C2ST measured ~56 s per condition, so a
         20-condition grid would spend ~18 minutes per interval deciding
         whether to prune, and a pruning decision that costs more than the
         training it might save is not a pruning decision. TARP is ~79 ms per
@@ -333,7 +341,10 @@ def optimize(
     cost_metric
         Which cost objective to use as the last Optuna direction.
         ``"inference_time"`` (default) or ``"param_count"``, or
-        ``None`` to search over the quality metrics alone.
+        ``None`` to search over the quality metrics alone -- with
+        ``None``, ``param_count`` and ``inference_time_s`` are still
+        recorded as trial user attributes and ``max_param_count`` still
+        applies.
 
         ``None`` is not the same as ignoring the cost column when
         selecting a trial. As an Optuna direction, cost shapes the
@@ -428,8 +439,10 @@ def optimize(
         Trials with actual parameter count above this value are
         rejected before training (default 1 000 000).
     max_memory_mb
-        Optional peak-memory budget in MB. Pass ``"auto"`` to detect
-        free CUDA memory and apply ``memory_safety_margin``.
+        Optional peak-memory budget in MB, checked against both the
+        training estimate and the validation-sampling estimate. Pass
+        ``"auto"`` to detect free CUDA memory and apply
+        ``memory_safety_margin``.
     metric_constraints_hard
         Optional hard metric thresholds as
         ``[(metric, threshold, "above"|"below"), ...]``.
@@ -444,8 +457,11 @@ def optimize(
     n_trials
         Number of *trained* trials to collect (default 50).
     max_total_trials
-        Hard cap on total trials including budget-rejected ones.
-        Defaults to ``3 * n_trials``.
+        Cap on *non-rejected* trials -- trained plus failed plus
+        pruned.  Budget-rejected trials are free and do not count
+        toward it; a separate hard cap of ``5 * max_total_trials``
+        covers *all* trials, rejected ones included.  Defaults to
+        ``3 * n_trials``.
     study_name
         Optuna study name (default ``"bayesflow_hpo"``).
     storage
@@ -455,9 +471,10 @@ def optimize(
         If ``True``, continue a previously persisted study.  If
         ``False`` (default), any existing study is deleted first.
     sampler
-        Optuna sampler.  Accepts a string preset, a ``BaseSampler``
-        instance, or ``None`` (default ``"tpe"``).  See
-        :func:`~bayesflow_hpo.create_study` for the full preset table.
+        Optuna sampler: a ``BaseSampler`` instance, ``None`` (default
+        ``"tpe"``), or one of the presets ``"tpe"``, ``"gp"``,
+        ``"botorch"``, ``"nsga2"``, ``"nsga3"``, ``"auto"``, ``"random"``.
+        See :func:`~bayesflow_hpo.create_study` for what each configures.
     directions
         Optimization directions.  Default ``None`` (auto-derived as
         ``["minimize"] * n_objectives``).
@@ -487,10 +504,12 @@ def optimize(
     sampler_n_startup_trials
         Override how many trials a string sampler preset draws before
         its model takes over.  ``None`` (default) keeps the preset
-        value -- 25 for ``"tpe"``.  Optuna counts the study's COMPLETE
+        value -- 25 for ``"tpe"``.  Ignored when *sampler* is a sampler
+        instance.
+
+        Optuna counts the study's COMPLETE
         and PRUNED trials here, not the sampler's own draws, so a
-        ``qmc_startup_trials`` warm-up already counts toward it.
-        Ignored when *sampler* is a sampler instance.  See
+        ``qmc_startup_trials`` warm-up already counts toward it.  See
         :func:`~bayesflow_hpo.create_study` for details.
     checkpoint_pool
         Optional :class:`CheckpointPool` for persisting the best

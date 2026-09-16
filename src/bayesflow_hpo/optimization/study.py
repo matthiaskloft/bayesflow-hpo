@@ -194,6 +194,11 @@ def _resolve_sampler(
     budget_aware
         Whether to include budget rejection in the composed
         constraints function for samplers that support it.
+    soft_thresholds
+        Optional soft metric constraints composed into the same
+        constraints function, so a sampler that supports them is steered
+        away from infeasible regions without hard rejection.  ``None``
+        adds none.
     n_startup_trials
         Override the preset's startup-trial count for the presets that
         take one (``"tpe"``, ``"gp"``, ``"botorch"``).  ``None`` keeps

@@ -51,7 +51,8 @@ def _declares_infinity(key: str, value: float) -> bool:
     *key* is canonicalized here rather than assumed canonical. Callers in this
     module have already canonicalized, and the operation is idempotent, so this
     costs nothing -- but it keeps the raw/canonical distinction that
-    :class:`~bayesflow_hpo.types.CanonicalMetricName` exists to enforce from
+    :data:`~bayesflow_hpo.validation.registry.CanonicalMetricName` exists to
+    enforce from
     depending on where the helper is called from.
 
     References

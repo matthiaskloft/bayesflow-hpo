@@ -13,6 +13,12 @@
 - `scripts/check_citations.py` (also `tests/test_citations.py`, also a CI job)
   asserts that every citation and locator in `src/` is stated in
   `docs/references.md`. It checks consistency, not truth.
+- `scripts/check_docstrings.py` (also `tests/test_docstrings.py`, also a CI
+  job) asserts that every docstring in `src/` agrees with its signature: no
+  documented parameter that does not exist, no undocumented parameter on a
+  function that has a `Parameters` section, no asserted default that
+  contradicts the signature, and no internal Sphinx cross-reference that does
+  not resolve. Pure stdlib -- it parses the tree rather than importing it.
 
 Generic hyperparameter optimization for BayesFlow 2.x models,
 wrapping Optuna multi-objective search with BayesFlow-aware
@@ -162,3 +168,9 @@ See [`docs/references.md`](docs/references.md) for verified APA 7 citations back
 - `check_pipeline()` runs automatically at the start of `optimize()` to catch interface errors early
 - Budget-rejected trials don't count toward `n_trials`, so actual total trials can exceed `max_total_trials`
 - Validation dataset keys must match adapter keys or you get a runtime error
+- The `optimize()` and `ObjectiveConfig` parameter tables in `docs/` are
+  GENERATED from the signatures and numpydoc docstrings, inside
+  `<!-- BEGIN GENERATED: ... -->` regions. Edit the docstring, then run
+  `scripts/gen_param_tables.py`; a table edited directly is reverted by the
+  next run. `tests/test_param_tables.py` fails when a region is stale, and an
+  undocumented parameter is an error rather than a blank cell

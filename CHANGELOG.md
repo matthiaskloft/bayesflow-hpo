@@ -2,6 +2,91 @@
 
 ## Unreleased
 
+### Fixed
+
+- `docs/validation.md` marked four of the eight `kind="diagnostic"` metrics.
+  `coverage`, `coverage_left`, `coverage_right` and `z_score` are also
+  diagnostic — passing any of them in `objective_metrics` raises — and their
+  rows did not say so. `tests/test_metric_kinds.py` now pins every row's
+  kind to the registry, in both directions, so this table cannot drift a
+  third time.
+- Two `optimize()` docstring entries (`joint_metrics`,
+  `sampler_n_startup_trials`) each repeated a sentence, left behind when
+  their lead paragraph was reshaped for the generated tables.
+
+### Added
+
+- `scripts/check_docstrings.py` asserts that every docstring in `src/`
+  agrees with the code it documents: no documented parameter that is not in
+  the signature, no undocumented parameter on a function that already has a
+  `Parameters` section, no asserted default contradicting the signature, and
+  no internal Sphinx cross-reference that fails to resolve. It also rejects
+  a paragraph left at column 0 inside a `Parameters` block, which numpydoc
+  reads as a parameter named after the whole sentence. Pure stdlib — it
+  parses the source tree rather than importing it, so it needs no backend
+  and no install, and runs as its own CI job beside `check_citations.py`.
+  Like that check, it verifies consistency, not truth. It currently covers
+  482 parameter entries and 43 cross-references, and enforces vacuity floors
+  so that a parser which silently inspects nothing fails instead of
+  reporting success. An independent review found four holes in the first
+  version, all now closed with regression tests: a quoted string default was
+  treated as a named constant and so never verified (blinding the rule to
+  most of `optimize()`'s defaults); a substring comparison let `default 1`
+  agree with `= 100`; a documented `**kwargs` was reported as a phantom
+  parameter; and a class-level annotation shadowed its own `__init__`, as
+  did an inherited dataclass field. The last three were false *failures* —
+  the one outcome a CI gate must not produce.
+- `scripts/gen_param_tables.py` generates the `optimize()` and
+  `ObjectiveConfig` parameter tables — and the `optimize()` signature and
+  `ObjectiveConfig` dataclass listings — from the signatures and numpydoc
+  docstrings, into `<!-- BEGIN GENERATED: ... -->` regions in
+  `docs/api_reference.md`, `docs/defaults.md` and `docs/optimization.md`.
+  Edit the docstring and rerun it; `--check` reports staleness as a diff.
+  `tests/test_param_tables.py` runs that check in CI, so a parameter added,
+  removed or renamed without regenerating fails the suite. A parameter with
+  no docstring entry is an error rather than a blank cell — the gap that let
+  six `ObjectiveConfig` fields go unlisted. Prose outside the regions is
+  untouched: only name, default and lead-paragraph description are
+  mechanical.
+
+### Changed
+
+- `ObjectiveConfig` gained numpydoc entries for `metric_constraints_hard`,
+  `metric_constraints_soft`, `max_samples_per_call`, `include_joint_metrics`
+  and `joint_metrics`, which previously carried only `#:` rationale
+  comments, and its combined `simulator, adapter` entry is now two. Four
+  long `optimize()` entries gained a paragraph break so they lead with a
+  summary. No behaviour changes; the docstring is now the tables' source.
+
+### Documentation
+
+- Audited every file in `docs/` against the code and corrected the
+  disagreements. The substantive ones: `optimize()` has no `pruner`
+  parameter (`api_reference.md`, `defaults.md` both listed one) and five
+  parameters were undocumented (`validation_simulator`, `report_frequency`,
+  `sampler_n_startup_trials`, `joint_metrics`, `include_joint_metrics`);
+  `search_space` is required, so `defaults.md`'s "default search space" did
+  not exist; trial penalties are per-metric worst values plus
+  `FAILED_TRIAL_COST = 1e6`, not the `(1.0, 1.5)` and
+  `training_failure_penalty` field of v0.2.0; TARP was listed as a
+  prospective feature although `tarp_error` and `tarp_error_random` are
+  registered; the joint-metric path was undocumented outside the changelog;
+  `correlation` was named as the only diagnostic-kind metric, of eight;
+  `LC2STResult` and `GlobalC2STResult` fields were wrong; and roughly
+  twenty search-space dimensions were listed under a stale name, range, or
+  constant (`ds_spectral_norm`, `st_num_inducing`, `tst_time_embed`,
+  `cm_sigma2`, `cm_s0`, `scm_sigma`, `tsn_skip_steps`, and every
+  `log`-annotated integer dimension, which are stepped rather than
+  log-scaled).
+- `docs/quality_report.md` is retitled "v0.2.0 Workover Report". It was
+  titled "Changelog" with its own `Unreleased` section, competing with this
+  file; it is a historical record and is no longer updated.
+- Symbols that `docs/api_reference.md` listed as public but that are not
+  top-level exports (`DerivedDimension`, `resume_study`,
+  `estimate_param_count`, `compute_sbc_uniformity_tests`, `get_metric`,
+  `resolve_metrics`, `sample_hyperparameters`) now carry their submodule
+  import path.
+
 ## 0.4.0
 
 A feature release. No change here alters what a stored objective value
