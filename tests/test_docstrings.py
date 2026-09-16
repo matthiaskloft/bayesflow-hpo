@@ -28,7 +28,11 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
-check_docstrings = pytest.importorskip("check_docstrings")
+# A plain import, not importorskip: `check_docstrings` is a repository-local
+# module importing only the standard library, so an ImportError here means the
+# checker is broken, not absent. Skipping the module would turn that into a
+# green suite -- the exact vacuous pass this file argues against.
+import check_docstrings  # noqa: E402
 
 
 def _write_pkg(root: Path, modules: dict[str, str]) -> Path:

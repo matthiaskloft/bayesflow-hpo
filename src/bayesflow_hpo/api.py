@@ -457,8 +457,11 @@ def optimize(
     n_trials
         Number of *trained* trials to collect (default 50).
     max_total_trials
-        Hard cap on total trials including budget-rejected ones.
-        Defaults to ``3 * n_trials``.
+        Cap on *non-rejected* trials -- trained plus failed plus
+        pruned.  Budget-rejected trials are free and do not count
+        toward it; a separate hard cap of ``5 * max_total_trials``
+        covers *all* trials, rejected ones included.  Defaults to
+        ``3 * n_trials``.
     study_name
         Optuna study name (default ``"bayesflow_hpo"``).
     storage

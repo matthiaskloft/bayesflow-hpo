@@ -78,7 +78,7 @@ def optimize(
 | `metric_constraints_soft` | Optional soft metric thresholds as `[(metric, threshold, "above"\|"below"), ...]`. Passed to Optuna's `constraints_func` for feasibility-guided sampling (when using sampler presets). |
 | `memory_safety_margin` | Safety margin for `max_memory_mb="auto"`. Default 0.2 (20%). |
 | `n_trials` | Number of *trained* trials to collect (default 50). |
-| `max_total_trials` | Hard cap on total trials including budget-rejected ones. Defaults to `3 * n_trials`. |
+| `max_total_trials` | Cap on *non-rejected* trials -- trained plus failed plus pruned. Budget-rejected trials are free and do not count toward it; a separate hard cap of `5 * max_total_trials` covers *all* trials, rejected ones included. Defaults to `3 * n_trials`. |
 | `study_name` | Optuna study name (default `"bayesflow_hpo"`). |
 | `storage` | Optuna storage URL (default `"sqlite:///bayesflow_hpo.db"`). Pass `None` for in-memory. |
 | `resume` | If `True`, continue a previously persisted study. If `False` (default), any existing study is deleted first. |
