@@ -241,6 +241,9 @@ def default_validate_fn(
         *not* default, so pre-flight reported them as missing keys and
         rejected the run before training started -- the headline metric could
         not be optimized through the public workflow at all.
+    joint_metrics
+        Configured joint metrics, ``{name: fn}``, forwarded to
+        ``run_validation_pipeline``.  ``None`` computes none of them.
     max_samples_per_call
         Cap on posterior draws per ``approximator.sample()`` call, forwarded
         to ``run_validation_pipeline``.  ``None`` samples each condition in
@@ -374,7 +377,10 @@ def _validate_metric_keys(
         given key is looked up here; keys not present fall back to
         ``FAILED_TRIAL_CAL_ERROR``.
 
-    Returns a cleaned copy of the dict.
+    Returns
+    -------
+    dict[str, float]
+        A cleaned copy of *raw*.
     """
     # `objective_metrics` was canonicalized at the public boundary, but a
     # custom hook returns whatever spelling its author used -- and the
