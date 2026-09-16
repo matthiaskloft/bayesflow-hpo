@@ -288,6 +288,180 @@ def test_indented_section_heading_does_not_end_parameters(tmp_path: Path) -> Non
 
 
 # --------------------------------------------------------------------------
+# Holes an independent review found in the first version of this checker
+# --------------------------------------------------------------------------
+
+def test_string_default_lie_is_caught(tmp_path: Path) -> None:
+    """A quoted string is not a named constant.
+
+    ``_normalize`` strips quotes, after which ``'tpe'`` is a valid
+    identifier and the named-constant escape hatch swallowed it -- blinding
+    the rule to every string default in the package, which is most of
+    ``optimize()``'s.
+    """
+    pkg = _write_pkg(tmp_path, {"m.py": '''
+        def f(kind="tpe"):
+            """S.
+
+            Parameters
+            ----------
+            kind
+                Sampler. Defaults to ``"nsga2"``.
+            """
+    '''})
+    findings, _ = check_docstrings.check_tree(pkg)
+    assert _rules(findings) == {"wrong-default"}
+
+
+def test_true_string_default_is_not_flagged(tmp_path: Path) -> None:
+    pkg = _write_pkg(tmp_path, {"m.py": '''
+        def f(kind="tpe"):
+            """S.
+
+            Parameters
+            ----------
+            kind
+                Sampler. Defaults to ``"tpe"``.
+            """
+    '''})
+    findings, _ = check_docstrings.check_tree(pkg)
+    assert findings == []
+
+
+@pytest.mark.parametrize("default,claimed", [
+    ("100", "1"),      # "1" is a substring of "100"
+    ("0.05", "5"),     # "5" is a substring of "0.05"
+    ("20", "2"),
+])
+def test_substring_numeric_lie_is_caught(
+    tmp_path: Path, default: str, claimed: str
+) -> None:
+    """The substring fallback used to let a wrong number through."""
+    pkg = _write_pkg(tmp_path, {"m.py": f'''
+        def f(a={default}):
+            """S.
+
+            Parameters
+            ----------
+            a
+                A thing (default {claimed}).
+            """
+    '''})
+    findings, _ = check_docstrings.check_tree(pkg)
+    assert _rules(findings) == {"wrong-default"}
+
+
+def test_grouped_digits_are_read_whole(tmp_path: Path) -> None:
+    """"(default 1 000 000)" is one number, not a claim of 1."""
+    pkg = _write_pkg(tmp_path, {"m.py": '''
+        def f(n=1000000):
+            """S.
+
+            Parameters
+            ----------
+            n
+                Cap (default 1 000 000).
+            """
+    '''})
+    findings, _ = check_docstrings.check_tree(pkg)
+    assert findings == []
+
+
+def test_nested_option_default_is_not_a_claim(tmp_path: Path) -> None:
+    """A default of a sub-option is not a claim about the parameter.
+
+    "For ``"primary"``, the metric defaults to ``objective_metrics[0]``"
+    documents the tuple's second element, not ``strategy`` itself.
+    """
+    pkg = _write_pkg(tmp_path, {"m.py": '''
+        def f(strategy="dominance"):
+            """S.
+
+            Parameters
+            ----------
+            strategy
+                One of ``"dominance"`` (default) or ``"primary"``. For
+                ``"primary"``, the metric defaults to
+                ``objective_metrics[0]``.
+            """
+    '''})
+    findings, _ = check_docstrings.check_tree(pkg)
+    assert findings == []
+
+
+def test_documented_kwargs_is_not_a_phantom(tmp_path: Path) -> None:
+    """``**kwargs`` is an ordinary numpydoc entry, not a phantom parameter."""
+    pkg = _write_pkg(tmp_path, {"m.py": '''
+        def f(a, *args, **kwargs):
+            """S.
+
+            Parameters
+            ----------
+            a
+                Thing.
+            args
+                More.
+            kwargs
+                Extra.
+            """
+    '''})
+    findings, _ = check_docstrings.check_tree(pkg)
+    assert findings == []
+
+
+def test_class_annotation_does_not_shadow_init(tmp_path: Path) -> None:
+    """An unrelated class-level annotation must not hide ``__init__``."""
+    pkg = _write_pkg(tmp_path, {"m.py": '''
+        class C:
+            """S.
+
+            Parameters
+            ----------
+            alpha
+                Thing.
+            """
+
+            _cache: dict = {}
+
+            def __init__(self, alpha=1):
+                pass
+    '''})
+    findings, _ = check_docstrings.check_tree(pkg)
+    assert findings == []
+
+
+def test_inherited_dataclass_field_is_not_a_phantom(tmp_path: Path) -> None:
+    """Only ``node.body`` is parsed, so a base's fields are invisible."""
+    pkg = _write_pkg(tmp_path, {"m.py": '''
+        from dataclasses import dataclass
+
+
+        @dataclass
+        class Base:
+            """B."""
+
+            shared: int = 1
+
+
+        @dataclass
+        class Child(Base):
+            """S.
+
+            Parameters
+            ----------
+            shared
+                Inherited.
+            own
+                Mine.
+            """
+
+            own: int = 2
+    '''})
+    findings, _ = check_docstrings.check_tree(pkg)
+    assert findings == []
+
+
+# --------------------------------------------------------------------------
 # Vacuity
 # --------------------------------------------------------------------------
 

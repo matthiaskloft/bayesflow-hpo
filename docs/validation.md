@@ -106,7 +106,7 @@ These wrap `bf.diagnostics.*` functions, reshaping `(n_sims, n_samples)` to the 
 | `rmse` | `bf.diagnostics.root_mean_squared_error` | `rmse` |
 | `nrmse` | `bf.diagnostics.root_mean_squared_error(normalize="range")` | `nrmse` |
 | `contraction` | `bf.diagnostics.posterior_contraction` | `contraction` |
-| `z_score` | `bf.diagnostics.posterior_z_score` | `mean_abs_z_score`, `mean_z_score` |
+| `z_score` | `bf.diagnostics.posterior_z_score` (diagnostic) | `mean_abs_z_score`, `mean_z_score` |
 | `log_gamma` | `bf.diagnostics.calibration_log_gamma` | `log_gamma` |
 
 #### Native Metrics
@@ -115,15 +115,20 @@ These wrap `bf.diagnostics.*` functions, reshaping `(n_sims, n_samples)` to the 
 |------|-------------|-------------|
 | `sbc_ks` | SBC KS statistic (minimize → 0 = uniform ranks) | `sbc_ks` |
 | `sbc_chi2` | SBC chi-squared statistic (minimize → 0 = uniform ranks) | `sbc_chi2` |
-| `coverage` | Two-sided SBC rank-based calibration | `coverage_50`, ..., `coverage_99`, `mean_cal_error` |
-| `coverage_left` | Left-sided coverage (efficiency for RCTs) | `left_coverage_50`, ..., `left_mean_cal_error` |
-| `coverage_right` | Right-sided coverage (futility for RCTs) | `right_coverage_50`, ..., `right_mean_cal_error` |
+| `coverage` | Two-sided SBC rank-based calibration (diagnostic) | `coverage_50`, ..., `coverage_99`, `mean_cal_error` |
+| `coverage_left` | Left-sided coverage, efficiency for RCTs (diagnostic) | `left_coverage_50`, ..., `left_mean_cal_error` |
+| `coverage_right` | Right-sided coverage, futility for RCTs (diagnostic) | `right_coverage_50`, ..., `right_mean_cal_error` |
 | `bias` | Mean signed error of posterior mean (diagnostic) | `bias` |
 | `mae` | Mean absolute error of posterior mean | `mae` |
 | `correlation` | Pearson association of posterior means and truth; diagnostic only, not recovery error | `correlation` |
 | `sbc` | Deprecated; delegates to `sbc_ks` + `sbc_chi2` (diagnostic) | `sbc_ks`, `sbc_chi2` |
 
 Aliases: `cal_error` -> `calibration_error`, `corr` -> `correlation`, `coverage_two_sided` -> `coverage`.
+
+Rows marked **(diagnostic)** are registered `kind="diagnostic"`: they are
+computed and reported, but passing one in `objective_metrics` raises. The
+authoritative list is `describe_metrics()`; `tests/test_metric_kinds.py`
+fails if this table drifts from it.
 
 #### Joint Metrics
 

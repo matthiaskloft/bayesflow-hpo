@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Fixed
+
+- `docs/validation.md` marked four of the eight `kind="diagnostic"` metrics.
+  `coverage`, `coverage_left`, `coverage_right` and `z_score` are also
+  diagnostic — passing any of them in `objective_metrics` raises — and their
+  rows did not say so. `tests/test_metric_kinds.py` now pins every row's
+  kind to the registry, in both directions, so this table cannot drift a
+  third time.
+- Two `optimize()` docstring entries (`joint_metrics`,
+  `sampler_n_startup_trials`) each repeated a sentence, left behind when
+  their lead paragraph was reshaped for the generated tables.
+
 ### Added
 
 - `scripts/check_docstrings.py` asserts that every docstring in `src/`
@@ -16,7 +28,14 @@
   Like that check, it verifies consistency, not truth. It currently covers
   482 parameter entries and 43 cross-references, and enforces vacuity floors
   so that a parser which silently inspects nothing fails instead of
-  reporting success.
+  reporting success. An independent review found four holes in the first
+  version, all now closed with regression tests: a quoted string default was
+  treated as a named constant and so never verified (blinding the rule to
+  most of `optimize()`'s defaults); a substring comparison let `default 1`
+  agree with `= 100`; a documented `**kwargs` was reported as a phantom
+  parameter; and a class-level annotation shadowed its own `__init__`, as
+  did an inherited dataclass field. The last three were false *failures* —
+  the one outcome a CI gate must not produce.
 - `scripts/gen_param_tables.py` generates the `optimize()` and
   `ObjectiveConfig` parameter tables — and the `optimize()` signature and
   `ObjectiveConfig` dataclass listings — from the signatures and numpydoc

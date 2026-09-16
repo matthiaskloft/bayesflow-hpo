@@ -88,9 +88,13 @@ _MIN_EXPECTED_XREFS = 20
 #: pool" -- and treating the next English word as an asserted value produced
 #: seven false positives reading "docstring says default via" and the like.
 #: An assertion worth checking is written as a literal.
+#: A bare number may be written with digit grouping -- "1 000 000" -- so a
+#: space is consumed only when a digit follows it. Capturing just the "1"
+#: made a correct docstring disagree with ``= 1000000``.
 _DEFAULT_CLAIM = re.compile(
     r"\bdefaults?\b\s*(?:to|:|=)?\s*"
-    r"(``[^`]+``|`[^`]+`|\"[^\"]*\"|'[^']*'|[-+]?\d[\w.]*)",
+    r"(``[^`]+``|`[^`]+`|\"[^\"]*\"|'[^']*'"
+    r"|[-+]?\d(?:[\d_,]|\.\d|\s(?=\d))*)",
     re.I,
 )
 
@@ -197,25 +201,51 @@ def _signature_params(
         out[arg.arg] = ast.unparse(default) if default is not None else None
     for arg, default in zip(args.kwonlyargs, args.kw_defaults):
         out[arg.arg] = ast.unparse(default) if default is not None else None
+    # ``*args`` and ``**kwargs`` are ordinary numpydoc entries. Omitting them
+    # made a correct docstring fail the check as a phantom parameter -- a
+    # false CI red, which is the one outcome a gate must not produce.
+    if args.vararg is not None:
+        out[args.vararg.arg] = None
+    if args.kwarg is not None:
+        out[args.kwarg.arg] = None
     return out
 
 
 def _class_params(node: ast.ClassDef) -> dict[str, str | None]:
-    """Annotated class attributes, or ``__init__``'s parameters."""
-    annotated = {
-        stmt.target.id: (
-            ast.unparse(stmt.value) if stmt.value is not None else None
-        )
-        for stmt in node.body
-        if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name)
-    }
-    if annotated:
-        return annotated
+    """Annotated class attributes, merged with ``__init__``'s parameters.
+
+    Both are merged rather than the first non-empty one winning: a plain
+    class carrying an unrelated class-level annotation (``_cache: dict =
+    {}``) would otherwise shadow its own ``__init__`` and report every
+    documented argument as a phantom.
+    """
+    out: dict[str, str | None] = {}
+    for stmt in node.body:
+        if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
+            out[stmt.target.id] = (
+                ast.unparse(stmt.value) if stmt.value is not None else None
+            )
     for stmt in node.body:
         if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
             if stmt.name == "__init__":
-                return _signature_params(stmt)
-    return {}
+                for name, default in _signature_params(stmt).items():
+                    out.setdefault(name, default)
+    return out
+
+
+def _has_base(node: ast.ClassDef) -> bool:
+    """Whether a class inherits, and so may document an inherited field.
+
+    A dataclass subclass documenting a field declared on its parent is
+    correct numpydoc. Only ``node.body`` is parsed here, so the parent's
+    fields are invisible and would read as phantoms; the undocumented-
+    parameter rule still applies, only the phantom rule is relaxed.
+    """
+    return bool([b for b in node.bases if not _is_object(b)])
+
+
+def _is_object(node: ast.expr) -> bool:
+    return isinstance(node, ast.Name) and node.id == "object"
 
 
 # --------------------------------------------------------------------------
@@ -251,11 +281,29 @@ def _unwrap_field(expr: str) -> str:
     return expr
 
 
-def _normalize(value: str) -> str:
+def _normalize(value: str) -> tuple[str, bool]:
+    """Return the bare value and whether it was written as a quoted string.
+
+    The flag matters: ``'tpe'`` with its quotes stripped is a valid Python
+    identifier, and the named-constant escape below would then treat every
+    string default in the package as unverifiable -- which it did, blinding
+    the rule to ``'pareto'``, ``'dominance'``, ``'fixed_budget'`` and the
+    rest of ``optimize()``'s string defaults.
+    """
     text = value.strip().strip("`").strip().rstrip(").,;:")
-    if len(text) > 1 and text[0] in "\"'" and text[-1] in "\"'":
+    quoted = len(text) > 1 and text[0] in "\"'" and text[-1] in "\"'"
+    if quoted:
         text = text[1:-1]
-    return text
+    return text, quoted
+
+
+def _is_literal(text: str) -> bool:
+    """Whether *text* is a Python literal this check can compare."""
+    try:
+        ast.literal_eval(text)
+    except (ValueError, SyntaxError, TypeError, MemoryError):
+        return False
+    return True
 
 
 def default_is_consistent(claimed: str, actual: str | None) -> bool:
@@ -265,7 +313,15 @@ def default_is_consistent(claimed: str, actual: str | None) -> bool:
         # contradict.
         return True
     actual = _unwrap_field(actual)
-    want, got = _normalize(claimed), _normalize(actual)
+    want, want_quoted = _normalize(claimed)
+    got, got_quoted = _normalize(actual)
+    if not want_quoted and not _is_literal(want):
+        # The claim is an expression, not a value: "defaults to
+        # ``objective_metrics[0]``" documents which metric the
+        # ``("primary", metric)`` tuple falls back to, not what
+        # ``pruning_strategy`` itself defaults to. Nothing statically
+        # checkable, and reading it as a claim about the parameter is wrong.
+        return True
     # Compare as Python values where both sides are literals, so that
     # ``["a", "b"]`` and ``['a', 'b']`` -- the same list written with the
     # other quote character -- agree.
@@ -293,12 +349,23 @@ def default_is_consistent(claimed: str, actual: str | None) -> bool:
             return True
     except ValueError:
         pass
-    # A named constant: prose may spell the name or the value it holds, and
-    # this check cannot evaluate it without importing.
-    if got.replace(".", "").isidentifier() and got not in ("None", "True", "False"):
+    # A named constant (``MAX_PARAM_COUNT``, ``DEFAULT_STORAGE``): prose may
+    # spell the name or the value it holds, and this check cannot evaluate it
+    # without importing. A quoted string is NOT a named constant, however much
+    # its contents look like an identifier.
+    if (
+        not got_quoted
+        and got.replace(".", "").isidentifier()
+        and got not in ("None", "True", "False")
+    ):
         return True
-    # "0.05" claimed against "0.05 in fixed_budget mode".
-    return want in got or got in want
+    # "0.05" claimed against "0.05 in fixed_budget mode" -- a value the
+    # signature qualifies in prose. Restricted to a qualified `got`: without
+    # that, "default 1" agreed with `= 100` because "1" is a substring of
+    # "100", and "default 5" agreed with `= 0.05`.
+    if " " in got:
+        return want in got
+    return False
 
 
 # --------------------------------------------------------------------------
@@ -466,6 +533,9 @@ def check_tree(package_root: Path) -> tuple[list[Finding], Counts]:
             phantom = sorted(
                 n for n in documented - actual if n.isidentifier()
             )
+            if phantom and isinstance(node, ast.ClassDef) and _has_base(node):
+                # Could be an inherited field; this parser cannot see the base.
+                phantom = []
             if phantom:
                 findings.append(Finding(
                     rel, node.lineno, "no-such-parameter",

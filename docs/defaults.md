@@ -26,7 +26,7 @@ objects (e.g. `ObjectiveConfig`, `create_study`) directly.
 | `n_posterior_samples` | `500` | Posterior draws for validation. |
 | `objective_metrics` | `None` | List of metric keys to optimize simultaneously. Default `["calibration_error", "nrmse"]`. |
 | `objective_mode` | `'pareto'` | `"pareto"` (default) — each metric is its own objective; study has `len(objective_metrics) + 1` directions (one per metric when `cost_metric=None`). `"mean"` — arithmetic mean of the listed metrics forms one scalar; study has 2 directions (mean + cost), or 1 when `cost_metric=None`. |
-| `cost_metric` | `'inference_time'` | Which cost objective to use as the last Optuna direction. `"inference_time"` (default) or `"param_count"`, or `None` to search over the quality metrics alone. |
+| `cost_metric` | `'inference_time'` | Which cost objective to use as the last Optuna direction. `"inference_time"` (default) or `"param_count"`, or `None` to search over the quality metrics alone -- with `None`, `param_count` and `inference_time_s` are still recorded as trial user attributes and `max_param_count` still applies. |
 | `pruning_strategy` | `'dominance'` | Multi-objective pruning strategy. One of `"dominance"` (default), `"mo-sha"`, `"primary"`, or `"none"`. For `"primary"`, pass a tuple `("primary", metric_name)` to specify which metric to prune on (defaults to `objective_metrics[0]`). `"none"` disables pruning, but `open_ended` mode still runs intermediate validation for stopping. |
 | `training_mode` | `'fixed_budget'` | `"fixed_budget"` (default) couples cosine decay with training to the full trial budget. `"open_ended"` couples inverse-square-root decay with validation-objective early stopping. |
 | `epochs` | `200` | Training epochs per trial. In `open_ended` mode this is a generous safety cap. |
@@ -37,9 +37,9 @@ objects (e.g. `ObjectiveConfig`, `create_study`) directly.
 | `lr_warmup_epochs` | `None` | Linear-warmup length measured in each trial's actual epochs. `None` selects 0 for `fixed_budget` and 1 for `open_ended`. A sequence enables opt-in categorical HPO. |
 | `lr_warmup_steps` | `None` | Exact optimizer-step warmup override. A sequence enables opt-in categorical HPO. Takes precedence over `lr_warmup_epochs`. |
 | `lr_warmup_fraction` | `None` | Fixed-budget warmup fraction, capped at 0.1. `None` selects 0.05. A sequence enables opt-in categorical HPO. Exact steps and epochs take precedence. Not valid in `open_ended` mode. |
-| `report_frequency` | `10` | How often (in epochs) the `OptunaReportCallback` stores `epoch_{N}_loss` user attributes on each trial. Higher values reduce SQLite bloat at the cost of coarser loss curves. Default 10. |
+| `report_frequency` | `10` | How often (in epochs) the `OptunaReportCallback` stores `epoch_{N}_loss` user attributes on each trial. Higher values reduce SQLite bloat at the cost of coarser loss curves. |
 | `max_param_count` | `1000000` | Trials with actual parameter count above this value are rejected before training. |
-| `max_memory_mb` | `None` | Optional peak-memory budget in MB. Pass `"auto"` to detect free CUDA memory and apply `memory_safety_margin`. |
+| `max_memory_mb` | `None` | Optional peak-memory budget in MB, checked against both the training estimate and the validation-sampling estimate. Pass `"auto"` to detect free CUDA memory and apply `memory_safety_margin`. |
 | `metric_constraints_hard` | `None` | Optional hard metric thresholds as `[(metric, threshold, "above"\|"below"), ...]`. Violating trials are rejected after final validation. |
 | `metric_constraints_soft` | `None` | Optional soft metric thresholds as `[(metric, threshold, "above"\|"below"), ...]`. Passed to Optuna's `constraints_func` for feasibility-guided sampling (when using sampler presets). |
 | `memory_safety_margin` | `0.2` | Safety margin for `max_memory_mb="auto"`. Default 0.2 (20%). |
@@ -48,14 +48,14 @@ objects (e.g. `ObjectiveConfig`, `create_study`) directly.
 | `study_name` | `'bayesflow_hpo'` | Optuna study name. |
 | `storage` | `'sqlite:///bayesflow_hpo.db'` | Optuna storage URL (default `"sqlite:///bayesflow_hpo.db"`). Pass `None` for in-memory. |
 | `resume` | `False` | If `True`, continue a previously persisted study. If `False` (default), any existing study is deleted first. |
-| `sampler` | `None` | Optuna sampler. Accepts a string preset, a `BaseSampler` instance, or `None` (default `"tpe"`). See `create_study` for the full preset table. |
+| `sampler` | `None` | Optuna sampler: a `BaseSampler` instance, `None` (default `"tpe"`), or one of the presets `"tpe"`, `"gp"`, `"botorch"`, `"nsga2"`, `"nsga3"`, `"auto"`, `"random"`. See `create_study` for what each configures. |
 | `directions` | `None` | Optimization directions. Default `None` (auto-derived as `["minimize"] * n_objectives`). |
 | `warm_start_from` | `None` | Optional source `optuna.Study` to seed initial trials from. |
 | `warm_start_top_k` | `25` | Number of best trials to copy from the source study. |
 | `qmc_startup_trials` | `0` | Number of initial trials to sample with a Sobol quasi-random sequence before the main sampler takes over. Provides better space-filling coverage than random startup. Only non-rejected completions count. Default 0 (disabled). See `create_study` for details. |
 | `checkpoint_pool` | `None` | Optional `CheckpointPool` for persisting the best trial weights. Pass one built with `pruned_pool_size > 0` to also retain a bounded sample of *pruned* trials' weights, which the default pool discards. |
 | `show_progress_bar` | `True` | Whether to show Optuna's progress bar. |
-| `max_samples_per_call` | `20000` | Cap on posterior draws materialized by one `approximator.sample()` call during validation (default `DEFAULT_MAX_SAMPLES_PER_CALL`). Pass `None` to sample each condition in a single call. |
+| `max_samples_per_call` | `20000` | Cap on posterior draws materialized by one `approximator.sample()` call during validation (default `DEFAULT_MAX_SAMPLES_PER_CALL`). Keyword-only, `int` or `None`; a float is rejected. Pass `None` to sample each condition in a single call. A custom *validate_fn* does not read this and sets its own cap -- `make_lc2st_validate_fn` takes one. |
 | `sampler_n_startup_trials` | `None` | Override how many trials a string sampler preset draws before its model takes over. `None` (default) keeps the preset value -- 25 for `"tpe"`. Ignored when *sampler* is a sampler instance. |
 | `joint_metrics` | `None` | Configured joint metrics as `{name: fn}`, forwarded to the validation pipeline. Build one with `make_tarp_joint_metric`. |
 | `include_joint_metrics` | `False` | Whether joint metrics also run at every *intermediate* validation, under `PeriodicValidationCallback`. `False` by default, because the cost changes what pruning is for. |

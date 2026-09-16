@@ -23,7 +23,10 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
-gen = pytest.importorskip("gen_param_tables")
+# A plain import, not importorskip: if the script under test fails to
+# import, that must be a red suite, not a skipped one. The whole point
+# of this module is that a vacuous pass is worse than a failure.
+import gen_param_tables as gen  # noqa: E402
 
 
 def test_docs_are_current() -> None:
@@ -189,6 +192,28 @@ def test_splice_refuses_a_malformed_region(text: str) -> None:
     """A region that cannot be found must fail, not be skipped."""
     with pytest.raises(ValueError, match="exactly one"):
         gen.splice(text, "t", "new")
+
+
+# --------------------------------------------------------------------------
+# Restated defaults
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize("text,rendered,expected", [
+    # Restates the column exactly -> dropped.
+    ("Stores loss curves. Default 10.", "10", "Stores loss curves."),
+    ("Batches per epoch (default 50).", "50", "Batches per epoch."),
+    # Says something the column does not -> kept, because for a `None`
+    # default this sentence is the only place the real value appears.
+    ("Hard cap. Defaults to `3 * n_trials`.", "None",
+     "Hard cap. Defaults to `3 * n_trials`."),
+    # Trailing gloss the strip would swallow -> left alone.
+    ("Safety margin. Default 0.2 (20%).", "0.2",
+     "Safety margin. Default 0.2 (20%)."),
+])
+def test_only_a_restated_default_is_stripped(
+    text: str, rendered: str, expected: str
+) -> None:
+    assert gen._strip_restated_default(text, rendered) == expected
 
 
 def test_check_mode_does_not_write(tmp_path: Path) -> None:

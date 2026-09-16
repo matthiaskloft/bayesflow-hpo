@@ -274,6 +274,29 @@ def collect_params(obj: Callable[..., Any] | type) -> list[Param]:
 #: A trailing "(default 50)" restating the Default column beside it.
 _TRAILING_DEFAULT = re.compile(r"\s*\((?:the\s+)?default[^()]*\)\s*(?=\.?$)", re.I)
 
+#: A trailing sentence "Default 10." doing the same. Stripped only when its
+#: value MATCHES the Default column: "Defaults to `3 * n_trials`." sits beside
+#: a column reading `None` and is the only place the real default appears, so
+#: removing it by shape alone would delete the informative half.
+_TRAILING_DEFAULT_SENTENCE = re.compile(
+    r"\s*\bDefaults?\s*(?:to|:|=)?\s*(`[^`]+`|[-+]?[\w.\"']+)\s*\.?\s*$", re.I
+)
+
+
+def _strip_restated_default(text: str, rendered: str) -> str:
+    """Drop a trailing default claim that only repeats *rendered*."""
+    text = _TRAILING_DEFAULT.sub("", text).strip()
+    match = _TRAILING_DEFAULT_SENTENCE.search(text)
+    if match:
+        # rstrip("."): the value class includes "." for floats, so "Default
+        # 10." captures "10." and would never equal the rendered "10".
+        claimed = match.group(1).strip("`\"'").rstrip(".")
+        if claimed == rendered.strip("`\"'"):
+            text = text[: match.start()].rstrip()
+            if not text.endswith("."):
+                text += "."
+    return text
+
 
 def render_table(params: list[Param], *, header: str, defaults: bool) -> str:
     """Render rows as a Markdown table."""
@@ -283,7 +306,7 @@ def render_table(params: list[Param], *, header: str, defaults: bool) -> str:
         for p in params:
             default = "*(required)*" if p.value is None else f"`{p.value}`"
             # The column already says it; saying it twice per row is noise.
-            text = _TRAILING_DEFAULT.sub("", p.description).strip()
+            text = _strip_restated_default(p.description, p.value or "")
             out.append(f"| `{p.name}` | {default} | {text} |")
     else:
         out = [f"| {header} | Description |", "|---|---|"]
@@ -295,6 +318,7 @@ def render_table(params: list[Param], *, header: str, defaults: bool) -> str:
 def render_signature_block(obj: Callable[..., Any], name: str) -> str:
     """Render ``def name(...) -> R`` as a wrapped code fence."""
     sig = inspect.signature(obj)
+    literals = _source_defaults(obj)  # hoisted: this reparses the source
     parts: list[str] = []
     star_emitted = False
     for pname, p in sig.parameters.items():
@@ -308,8 +332,16 @@ def render_signature_block(obj: Callable[..., Any], name: str) -> str:
         if p.kind is p.KEYWORD_ONLY and not star_emitted:
             parts.append("*")
             star_emitted = True
-        literal = _source_defaults(obj).get(pname)
-        parts.append(pname if p.default is p.empty else f"{pname}={literal}")
+        literal = literals.get(pname)
+        if p.default is p.empty:
+            parts.append(pname)
+        elif literal is None:
+            # A default exists but the AST lookup missed it (a decorated or
+            # re-exported target). Fall back to the evaluated value rather
+            # than rendering a literal `None` that is not the default.
+            parts.append(f"{pname}={p.default!r}")
+        else:
+            parts.append(f"{pname}={literal}")
 
     returns = ""
     if sig.return_annotation is not sig.empty:
@@ -355,6 +387,10 @@ def splice(text: str, region: str, body: str) -> str:
     begin, end = _BEGIN.format(region), _END.format(region)
     if text.count(begin) != 1 or text.count(end) != 1:
         raise ValueError(f"expected exactly one {begin} ... {end} pair")
+    if text.index(begin) > text.index(end):
+        # Reversed markers would otherwise fail on tuple unpacking, with an
+        # error naming neither the region nor the problem.
+        raise ValueError(f"expected exactly one {begin} ... {end} pair, in that order")
     head, rest = text.split(begin, 1)
     _, tail = rest.split(end, 1)
     return f"{head}{begin}\n{_NOTE}\n\n{body}\n{end}{tail}"
