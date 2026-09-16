@@ -4,6 +4,19 @@
 
 ### Added
 
+- `scripts/check_docstrings.py` asserts that every docstring in `src/`
+  agrees with the code it documents: no documented parameter that is not in
+  the signature, no undocumented parameter on a function that already has a
+  `Parameters` section, no asserted default contradicting the signature, and
+  no internal Sphinx cross-reference that fails to resolve. It also rejects
+  a paragraph left at column 0 inside a `Parameters` block, which numpydoc
+  reads as a parameter named after the whole sentence. Pure stdlib — it
+  parses the source tree rather than importing it, so it needs no backend
+  and no install, and runs as its own CI job beside `check_citations.py`.
+  Like that check, it verifies consistency, not truth. It currently covers
+  482 parameter entries and 43 cross-references, and enforces vacuity floors
+  so that a parser which silently inspects nothing fails instead of
+  reporting success.
 - `scripts/gen_param_tables.py` generates the `optimize()` and
   `ObjectiveConfig` parameter tables — and the `optimize()` signature and
   `ObjectiveConfig` dataclass listings — from the signatures and numpydoc

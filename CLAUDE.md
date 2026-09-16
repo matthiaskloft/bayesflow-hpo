@@ -13,6 +13,12 @@
 - `scripts/check_citations.py` (also `tests/test_citations.py`, also a CI job)
   asserts that every citation and locator in `src/` is stated in
   `docs/references.md`. It checks consistency, not truth.
+- `scripts/check_docstrings.py` (also `tests/test_docstrings.py`, also a CI
+  job) asserts that every docstring in `src/` agrees with its signature: no
+  documented parameter that does not exist, no undocumented parameter on a
+  function that has a `Parameters` section, no asserted default that
+  contradicts the signature, and no internal Sphinx cross-reference that does
+  not resolve. Pure stdlib -- it parses the tree rather than importing it.
 
 Generic hyperparameter optimization for BayesFlow 2.x models,
 wrapping Optuna multi-objective search with BayesFlow-aware

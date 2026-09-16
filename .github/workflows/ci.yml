@@ -31,6 +31,17 @@ jobs:
       # nothing from the package, so it needs no backend and no install.
       - run: python scripts/check_citations.py
 
+  docstrings:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # Also pure stdlib: cross-references are resolved by parsing the
+      # source tree, not by importing it, so this needs no backend either.
+      - run: python scripts/check_docstrings.py
+
   types:
     runs-on: ubuntu-latest
     env:

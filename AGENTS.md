@@ -11,6 +11,12 @@ search spaces, builders, and validation.
 - Do NOT blindly use in-memory knowledge from LLM training — verify against actual sources first.
 - Document the references backing a given implementation in docstrings and docs (e.g., API/architecture documentation).
 - Verify references via the OpenAlex API and save them formatted in APA 7 in [`docs/references.md`](docs/references.md).
+- `scripts/check_docstrings.py` (also `tests/test_docstrings.py`, also a CI
+  job) asserts that every docstring in `src/` agrees with its signature: no
+  documented parameter that does not exist, no undocumented parameter on a
+  function that has a `Parameters` section, no asserted default that
+  contradicts the signature, and no internal Sphinx cross-reference that does
+  not resolve. Pure stdlib -- it parses the tree rather than importing it.
 
 ## Scope
 
