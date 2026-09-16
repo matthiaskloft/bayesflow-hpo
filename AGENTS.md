@@ -156,3 +156,9 @@ See [`docs/references.md`](docs/references.md) for verified APA 7 citations back
 - `check_pipeline()` runs automatically at the start of `optimize()` to catch interface errors early
 - Budget-rejected trials don't count toward `n_trials`, so actual total trials can exceed `max_total_trials`
 - Validation dataset keys must match adapter keys or you get a runtime error
+- The `optimize()` and `ObjectiveConfig` parameter tables in `docs/` are
+  GENERATED from the signatures and numpydoc docstrings, inside
+  `<!-- BEGIN GENERATED: ... -->` regions. Edit the docstring, then run
+  `scripts/gen_param_tables.py`; a table edited directly is reverted by the
+  next run. `tests/test_param_tables.py` fails when a region is stale, and an
+  undocumented parameter is an error rather than a blank cell

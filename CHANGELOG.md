@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+### Added
+
+- `scripts/gen_param_tables.py` generates the `optimize()` and
+  `ObjectiveConfig` parameter tables — and the `optimize()` signature and
+  `ObjectiveConfig` dataclass listings — from the signatures and numpydoc
+  docstrings, into `<!-- BEGIN GENERATED: ... -->` regions in
+  `docs/api_reference.md`, `docs/defaults.md` and `docs/optimization.md`.
+  Edit the docstring and rerun it; `--check` reports staleness as a diff.
+  `tests/test_param_tables.py` runs that check in CI, so a parameter added,
+  removed or renamed without regenerating fails the suite. A parameter with
+  no docstring entry is an error rather than a blank cell — the gap that let
+  six `ObjectiveConfig` fields go unlisted. Prose outside the regions is
+  untouched: only name, default and lead-paragraph description are
+  mechanical.
+
+### Changed
+
+- `ObjectiveConfig` gained numpydoc entries for `metric_constraints_hard`,
+  `metric_constraints_soft`, `max_samples_per_call`, `include_joint_metrics`
+  and `joint_metrics`, which previously carried only `#:` rationale
+  comments, and its combined `simulator, adapter` entry is now two. Four
+  long `optimize()` entries gained a paragraph break so they lead with a
+  summary. No behaviour changes; the docstring is now the tables' source.
+
 ### Documentation
 
 - Audited every file in `docs/` against the code and corrected the

@@ -511,8 +511,10 @@ class ObjectiveConfig:
 
     Parameters
     ----------
-    simulator, adapter
-        BayesFlow simulator and adapter.
+    simulator
+        BayesFlow simulator used for online training.
+    adapter
+        BayesFlow adapter for data preprocessing.
     search_space
         Composite search space defining the tunable dimensions.
     validation_data
@@ -554,8 +556,31 @@ class ObjectiveConfig:
         before training (default 1 000 000).
     max_memory_mb
         Optional peak-memory budget in MB (disabled by default).
+    metric_constraints_hard
+        Optional hard metric constraints ``[(metric, threshold, "above" |
+        "below"), ...]``.  A trial violating one is rejected after
+        validation and returns penalty values.
+    metric_constraints_soft
+        Optional soft metric constraints in the same form.  Optuna's
+        constraints function enforces them, not this objective, but their
+        metrics are computed here so the constraint has something to read.
     n_posterior_samples
         Posterior draws for final validation (default 500).
+    max_samples_per_call
+        Cap on posterior draws per ``approximator.sample()`` call during
+        validation (default 20 000).  ``None`` samples each condition in a
+        single call.  Bounds an allocation the training-memory estimate
+        cannot see, because neither factor is a search-space
+        hyperparameter.
+    include_joint_metrics
+        Whether joint metrics are computed at every intermediate
+        validation as well as at final validation (default ``False``,
+        because L-C2ST costs more per check than the pruning saves).
+    joint_metrics
+        Configured joint metrics, ``{name: fn}``.  The route by which a
+        joint metric that cannot run at its registry default --
+        ``tarp_error``, which needs data-derived reference points --
+        reaches the validation pipeline.
     n_intermediate_posterior_samples
         Posterior draws for mid-training pruning validation
         (default 250).

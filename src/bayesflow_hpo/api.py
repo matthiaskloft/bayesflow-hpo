@@ -252,6 +252,8 @@ def optimize(
         Cap on posterior draws materialized by one ``approximator.sample()``
         call during validation (default
         :data:`~bayesflow_hpo.validation.inference.DEFAULT_MAX_SAMPLES_PER_CALL`).
+        Pass ``None`` to sample each condition in a single call.
+
         Validation allocates ``sims_per_condition x n_posterior_samples``
         draws per condition -- 100,000 at the defaults -- which the
         pre-training memory budget does not cover, since neither factor is a
@@ -291,7 +293,10 @@ def optimize(
         or :func:`~bayesflow_hpo.register_metric` to add custom ones.
     joint_metrics
         Configured joint metrics as ``{name: fn}``, forwarded to the
-        validation pipeline. This is how a joint metric whose configuration
+        validation pipeline.  Build one with
+        :func:`~bayesflow_hpo.validation.tarp.make_tarp_joint_metric`.
+
+        This is how a joint metric whose configuration
         belongs to one study reaches a trial: ``tarp_error`` needs reference
         points derived from the data, which no registry default can supply,
         so without this it is registered, resolvable, and unusable. Build
@@ -314,7 +319,9 @@ def optimize(
         Whether joint metrics also run at every *intermediate* validation,
         under
         :class:`~bayesflow_hpo.optimization.validation_callback.PeriodicValidationCallback`.
-        ``False`` by default: L-C2ST measured ~56 s per condition, so a
+        ``False`` by default, because the cost changes what pruning is for.
+
+        L-C2ST measured ~56 s per condition, so a
         20-condition grid would spend ~18 minutes per interval deciding
         whether to prune, and a pruning decision that costs more than the
         training it might save is not a pruning decision. TARP is ~79 ms per
@@ -487,7 +494,10 @@ def optimize(
     sampler_n_startup_trials
         Override how many trials a string sampler preset draws before
         its model takes over.  ``None`` (default) keeps the preset
-        value -- 25 for ``"tpe"``.  Optuna counts the study's COMPLETE
+        value -- 25 for ``"tpe"``.  Ignored when *sampler* is a sampler
+        instance.
+
+        Optuna counts the study's COMPLETE
         and PRUNED trials here, not the sampler's own draws, so a
         ``qmc_startup_trials`` warm-up already counts toward it.
         Ignored when *sampler* is a sampler instance.  See
