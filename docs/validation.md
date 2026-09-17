@@ -140,7 +140,7 @@ them — rather than one parameter's marginal, so they are registered through
 | Name | Kind | Description |
 |------|------|-------------|
 | `tarp_error` | objective | TARP expected-coverage error against **supplied** reference points. Cannot run at its registered default — build it with `make_tarp_joint_metric(reference_points=...)`. |
-| `tarp_error_random` | diagnostic | TARP with random reference points. Diagnostic because Lemos et al. (2023, Sec. 4.3) show it cannot detect a posterior that ignores its data, so it is rejected in `objective_metrics`. |
+| `tarp_error_random` | diagnostic | TARP with reference points drawn here rather than supplied — see `reference=` below for the two distributions. Diagnostic because Lemos et al. (2023, Sec. 4.3) show an `x`-independent reference cannot detect a posterior that ignores its data, so it is rejected in `objective_metrics`. |
 | `lc2st` | objective | L-C2ST on the full joint posterior. Requires the `sklearn` extra, and costs roughly 700x a TARP evaluation. |
 
 ```python
@@ -151,6 +151,40 @@ result = run_validation_pipeline(
     approximator, val_data,
     joint_metrics={"tarp_error": make_tarp_joint_metric(reference_points=refs)},
 )
+```
+
+#### Choosing TARP reference points
+
+Which key a TARP metric emits is decided by whether *you* supply the
+reference points, not by how they are distributed:
+
+- **`reference_points=...`** — a callable on `JointMetricInputs`, or one
+  array per condition, emitting `tarp_error` (objective). Derive these from
+  the conditioning data. Only an `x`-dependent reference detects a posterior
+  that ignores its data, and that is the whole reason this key is an
+  objective. Deriving them from the posterior under test looks
+  data-dependent, is not, and nothing can detect the difference.
+- **`reference_points=None`** — drawn for you, emitting `tarp_error_random`
+  (diagnostic). `reference=` picks the distribution:
+
+| `reference` | Draw | When |
+|-------------|------|------|
+| `"uniform_box"` (default) | Uniform over the box spanned by the 1st/99th percentiles of the standardized truths. | The default; keeps existing studies' numbers comparable. |
+| `"prior_derangement"` | Each simulation references another simulation's truth, so `theta_r ~ p(theta)`. Lemos et al. (2023, Sec. 4.1) make this choice, and BayesFlow's `accuracy_random_points` follows it. | A correlated or non-box-shaped prior, where the box puts reference mass in corners no truth or draw occupies. |
+
+Both are `x`-independent, so switching does not turn the diagnostic into an
+objective. Sec. 4.2 finds the coverage curve robust across reference
+distributions, so the choice affects precision rather than the verdict. The
+setting is recorded in the study's joint-metric pin, so two studies drawing
+differently read as different configurations rather than comparable numbers.
+
+`"prior_derangement"` needs the truths to be distinct: it rejects any
+assignment that would hand a simulation a reference equal to its own truth
+(which would pin that simulation's coverage fraction at 0), and raises if a
+prior with dense atoms leaves no such assignment.
+
+```python
+make_tarp_joint_metric(reference="prior_derangement")
 ```
 
 Joint metrics are excluded from *intermediate* validation unless
