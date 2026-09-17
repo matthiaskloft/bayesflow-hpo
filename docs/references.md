@@ -756,15 +756,23 @@ implementation) for the design in
   (Sec. 4.1 -- arXiv:2302.03026 / PMLR 202, verified 2026-09-16.)
 
   BayesFlow follows the same choice by a different route. Its
-  `bayesflow.diagnostics.metrics.accuracy_random_points` (added in v2.0.13;
-  absent from the v2.0.8 this package currently resolves) defaults
+  `bayesflow.diagnostics.metrics.accuracy_random_points` defaults
   `references=None` to "a derangement of the target parameters via a random
   cyclic shift (a pure permutation with no fixed points)". Since the targets
   are prior draws, that samples the prior. This package draws a
   rejection-sampled permutation instead of one `np.roll` offset, because a
   single shift determines the whole reference set from one integer; the
-  reasoning is at the draw site in `validation/tarp.py`. (BayesFlow source,
-  `accuracy_random_points.py` on `main`, verified 2026-09-16.)
+  reasoning is at the draw site in `validation/tarp.py`.
+
+  That function first appears in BayesFlow v2.0.13 (absent in v2.0.12), so
+  it is not available at every version this package accepts:
+  `pyproject.toml` declares only `bayesflow>=2.0.0` and the repository
+  carries no lockfile, so the resolved version depends on when the
+  environment was built. Nothing here imports it -- the citation records
+  whose convention `prior_derangement` follows, not a dependency -- so the
+  floor is deliberately left alone. (BayesFlow
+  `bayesflow/diagnostics/metrics/accuracy_random_points.py` at tag
+  `v2.0.13`, verified 2026-09-16.)
 - **Sec. 4.2** explores "the dependence on the reference point distribution
   and the distance metric", which is the basis for treating the metric
   choice as not changing the verdict. The same section is the backing for

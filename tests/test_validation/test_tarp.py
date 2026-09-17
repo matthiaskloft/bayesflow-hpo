@@ -652,6 +652,17 @@ def test_a_single_simulation_cannot_be_deranged() -> None:
 
 
 def test_an_unknown_reference_is_rejected() -> None:
+    """Only the two reference distributions the module implements are valid.
+
+    ``reference`` is closed rather than open because each value names a
+    specific draw with its own statistical standing: ``"uniform_box"`` and
+    ``"prior_derangement"`` are both ``x``-independent and so both share the
+    blind spot of Lemos et al. (2023) Sec. 4.3, which is what lets them share
+    the ``tarp_error_random`` key. A silently accepted third name would have
+    no such analysis behind it, and a typo would otherwise fall through to
+    the ``else`` branch and be computed as a derangement under whatever name
+    the caller typed.
+    """
     draws, truth = _gaussian_case(n_sims=20, n_draws=10, correct=True)
 
     with pytest.raises(ValueError, match="reference must be one of"):
@@ -745,3 +756,51 @@ def test_switching_the_distribution_shows_up_in_the_pin() -> None:
 
     assert prior["reference"] == "prior_derangement"
     assert box != prior
+
+
+def test_duplicate_truths_do_not_slip_past_the_derangement() -> None:
+    """The check is on reference VALUES, not on permutation indices.
+
+    An index derangement (``perm != arange``) leaves a gap when two
+    simulations share a truth, which a discrete, ordinal or otherwise
+    atom-carrying prior makes ordinary: ``perm[i] != i`` can still hand
+    simulation ``i`` a reference numerically equal to its own truth, so
+    ``d_truth = 0``, no draw is strictly closer, and ``f_i`` is pinned at 0 --
+    the silent downward bias the derangement exists to prevent.
+
+    Here every truth is duplicated exactly once, so a value collision is
+    likely under index-only rejection and impossible under value rejection.
+    """
+    rng = np.random.default_rng(SEED)
+    n_pairs, n_draws, n_params = 15, 20, 2
+    base = rng.uniform(-5.0, 5.0, size=(n_pairs, n_params))
+    truth = np.repeat(base, 2, axis=0)
+    draws = truth[:, None, :] + rng.normal(
+        0.0, 1e-6, size=(truth.shape[0], n_draws, n_params)
+    )
+
+    for seed in range(25):
+        out = compute_tarp_coverage(
+            draws, truth, reference="prior_derangement", seed=seed
+        )
+        assert not np.any(out["coverage_fractions"] == 0.0), seed
+
+
+def test_a_prior_of_too_few_atoms_raises_instead_of_biasing() -> None:
+    """When no collision-free assignment is found, say so rather than bias.
+
+    With every truth identical there is no valid reference at all. The old
+    index-only check would have accepted any permutation and silently
+    returned a curve built from ``f_i = 0`` everywhere.
+    """
+    truth = np.tile(np.array([[1.0, 2.0]]), (12, 1))
+    draws = truth[:, None, :] + np.zeros((12, 8, 2))
+
+    with pytest.raises(ValueError, match="references its own truth value"):
+        compute_tarp_coverage(
+            draws,
+            truth,
+            reference="prior_derangement",
+            standardize=False,
+            seed=REF_SEED,
+        )

@@ -69,11 +69,13 @@ _TARP_METRICS = frozenset({"euclidean", "manhattan"})
 #: what the statistic can detect. See the `reference` parameter.
 _TARP_REFERENCES = frozenset({"uniform_box", "prior_derangement"})
 
-# Retries before the derangement sampler gives up. A uniformly drawn
-# permutation is a derangement with probability -> 1/e ~ 0.368 for every
-# n_sims >= 2, so the expected number of draws is e ~ 2.7 and the chance of
-# exhausting this cap is (1 - 1/e)^64 ~ 1e-13. It exists so a bug cannot
-# spin forever, not because exhaustion is reachable.
+# Retries before the derangement sampler gives up. With DISTINCT truths a
+# uniformly drawn permutation is a derangement with probability -> 1/e ~
+# 0.368 for every n_sims >= 2, so the expected number of draws is e ~ 2.7 and
+# the chance of exhausting this cap is (1 - 1/e)^64 ~ 1e-13. Duplicated
+# truths lower that probability -- the sampler rejects on values, not indices
+# -- so exhaustion IS reachable for a prior with dense atoms, and the failure
+# raises with that explanation rather than being treated as a bug.
 _TARP_DERANGEMENT_RETRIES = 64
 
 
@@ -208,6 +210,18 @@ def compute_tarp_coverage(
         carry the old spelling. Renaming it would make every stored result
         read as a changed configuration on resume, which is exactly the
         signal the pin exists to give truthfully.
+
+        **This field is not the one a study pin carries under that name.**
+        ``make_tarp_joint_metric``'s ``joint_metric_settings`` also has a
+        ``reference_mode``, and it answers a different question: whether the
+        reference was *supplied* (``"provided"``) or drawn here
+        (``"random"``), never which distribution was drawn from. So a
+        ``prior_derangement`` run reports ``reference_mode="prior_derangement"``
+        here while its pin reads ``reference_mode="random"`` plus
+        ``reference="prior_derangement"``. Read the pin's ``reference`` key,
+        not its ``reference_mode``, to recover the distribution. The names
+        collide because the pin's spelling is frozen by studies already on
+        disk.
 
         ``reference_mode`` deliberately does not claim ``"data_dependent"``.
         The function cannot tell how a supplied array was built, and the
@@ -405,16 +419,33 @@ def compute_tarp_coverage(
                     "simulations: with one, the only reference available is "
                     "that simulation's own truth, which forces f_i = 0."
                 )
+            # Rejected on VALUES, not on indices. An index derangement
+            # (`perm != arange`) is not enough: if two simulations happen to
+            # share a truth -- which a discrete, ordinal or otherwise
+            # atom-carrying prior makes ordinary rather than exotic --
+            # then `perm[i] != i` can still land a reference numerically
+            # equal to truth i, and d_truth is 0 again. Checking the rows
+            # closes the gap the index check only appears to close.
             for _ in range(_TARP_DERANGEMENT_RETRIES):
                 perm = rng.permutation(n_sims)
-                if not np.any(perm == np.arange(n_sims)):
+                if not np.any(np.all(truth_z[perm] == truth_z, axis=1)):
                     break
-            else:  # pragma: no cover - probability ~1e-13
-                raise RuntimeError(
-                    "Could not draw a derangement of "
-                    f"{n_sims} simulations in "
-                    f"{_TARP_DERANGEMENT_RETRIES} attempts. This is not "
-                    "reachable by chance; treat it as a bug."
+            else:
+                # Not "treat it as a bug": with duplicated truths this is
+                # reachable, and for a prior concentrated on few atoms it is
+                # the normal outcome. Raising beats both a silent bias and a
+                # loop that cannot terminate.
+                n_dup = n_sims - len(np.unique(truth_z, axis=0))
+                raise ValueError(
+                    "Could not draw a reference assignment in which no "
+                    f"simulation references its own truth value, after "
+                    f"{_TARP_DERANGEMENT_RETRIES} attempts "
+                    f"({n_dup} of {n_sims} truths are duplicates of another "
+                    "simulation's). Any such collision makes d_truth = 0 and "
+                    "pins that simulation's f_i at 0, biasing the coverage "
+                    "curve downward. Use reference='uniform_box', or pass "
+                    "reference_points derived from the data, for a prior "
+                    "with atoms this dense."
                 )
             refs_z = truth_z[perm]
             reference_mode = "prior_derangement"
@@ -731,6 +762,13 @@ def make_tarp_joint_metric(
         "metric": str(metric),
         "standardize": bool(standardize),
         "seed": int(seed),
+        # NOT the same question as the `reference_mode` in the RESULT dict,
+        # despite the shared name: this one is supplied-vs-drawn, that one is
+        # which distribution was drawn from. A prior_derangement run pins
+        # "random" here and reports "prior_derangement" there. The pin's
+        # spelling is frozen by studies already on disk, so the collision is
+        # documented in `compute_tarp_coverage` rather than renamed away;
+        # `reference` below is the key that recovers the distribution.
         "reference_mode": "random" if reference_points is None else "provided",
         # None unless the caller labelled the reference. Recorded either
         # way, so a study that adds a label later reads as changed -- which
