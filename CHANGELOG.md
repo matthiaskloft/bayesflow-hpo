@@ -31,8 +31,9 @@
   key still turns on whether a reference was *supplied*. The assignment is
   rejected on reference *values* rather than permutation indices, so a
   duplicated truth cannot hand a simulation its own value and silently pin
-  that simulation's coverage fraction at 0; a prior with atoms too dense to
-  admit any such assignment raises instead. The setting is recorded in the
+  that simulation's coverage fraction at 0; when no valid assignment is
+  drawn within a bounded number of attempts — the expected outcome for a
+  prior concentrated on few atoms — it raises instead. The setting is recorded in the
   study's joint-metric pin only when it is not the default, because that pin
   is compared for equality and an unconditional new key would make every
   study pinned before this option raise on resume over a configuration that
