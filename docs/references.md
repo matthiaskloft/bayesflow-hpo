@@ -743,9 +743,49 @@ implementation) for the design in
   `theta* ~ U(-5, 5)` with `log sigma ~ U(-5, -1)`, which is what the test
   suite reproduces -- and the small sigma matters, since at a larger one the
   "correct case" stops being calibrated under the truncated prior.
+- **Sec. 4.1** states the paper's own reference choice outright: "To pick the
+  TARP reference points, we use the prior (`p~(theta_r|x) = p(theta_r)`)."
+  This is the backing for the opt-in `reference="prior_derangement"` mode in
+  `validation/tarp.py`. It does **not** contradict the Sec. 4 setup bullet
+  above, which reports reference points drawn "uniformly in the
+  D-dimensional hypercube": the same section normalizes parameters "to the
+  range [0, 1]", so in that experiment the prior *is* the unit hypercube and
+  the two descriptions coincide. They come apart for any prior that is not
+  uniform on a box -- which is the case the derangement mode exists for,
+  since permuting the truths samples `p(theta)` whatever its shape.
+  (Sec. 4.1 -- arXiv:2302.03026 / PMLR 202, verified 2026-09-16.)
+
+  BayesFlow follows the same choice by a different route. Its
+  `bayesflow.diagnostics.metrics.accuracy_random_points` defaults
+  `references=None` to "a derangement of the target parameters via a random
+  cyclic shift (a pure permutation with no fixed points)". Since the targets
+  are prior draws, that samples the prior. This package draws a
+  rejection-sampled permutation instead of one `np.roll` offset, because a
+  single shift determines the whole reference set from one integer; the
+  reasoning is at the draw site in `validation/tarp.py`.
+
+  That function first appears in BayesFlow v2.0.13 (absent in v2.0.12), so
+  it is not available at every version this package accepts:
+  `pyproject.toml` declares only `bayesflow>=2.0.0` and the repository
+  carries no lockfile, so the resolved version depends on when the
+  environment was built. Nothing here imports it -- the citation records
+  whose convention `prior_derangement` follows, not a dependency -- so the
+  floor is deliberately left alone. (BayesFlow
+  `bayesflow/diagnostics/metrics/accuracy_random_points.py` at tag
+  `v2.0.13`, verified 2026-09-16.)
 - **Sec. 4.2** explores "the dependence on the reference point distribution
   and the distance metric", which is the basis for treating the metric
-  choice as not changing the verdict.
+  choice as not changing the verdict. The same section is the backing for
+  the claim that the *reference* choice does not move a verdict either: the
+  authors re-ran all four toy cases drawing `theta_r` from `U(0, 1)`,
+  `U(0, 0.5)`, `N(0.5, sigma)` for sigma between 0.01 and 0.1, and from two
+  fixed points, and concluded "the proposed method is robust to different
+  distributions for `theta_r`, and choices of distance metric". The one
+  qualification is the biased case, where "the different `theta_r`
+  distributions led to different curves, but all of them clearly showed
+  there was a bias" -- so the robustness is of the verdict, not of the
+  number, which is why switching `reference=` changes the settings pin.
+  (Sec. 4.2 -- arXiv:2302.03026 / PMLR 202, verified 2026-09-16.)
 - **Sec. 4.3** is the section behind the two-key split: TARP with an
   `x`-*independent* reference point shares HPD coverage's blindness to
   `p_hat(theta|x) = p(theta)`. This is why `tarp_error_random` is registered

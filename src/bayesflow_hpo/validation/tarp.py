@@ -63,12 +63,28 @@ _TARP_REFERENCE_STREAM = 0x7A89
 #: factory can reject a bad one before any data is touched.
 _TARP_METRICS = frozenset({"euclidean", "manhattan"})
 
+#: Reference distributions `compute_tarp_coverage` can draw from when the
+#: caller supplies none. Both are ``x``-independent and so share the blind
+#: spot of Lemos et al. (2023) Sec. 4.3; the choice is one of power, not of
+#: what the statistic can detect. See the `reference` parameter.
+_TARP_REFERENCES = frozenset({"uniform_box", "prior_derangement"})
+
+# Retries before the derangement sampler gives up. With DISTINCT truths a
+# uniformly drawn permutation is a derangement with probability -> 1/e ~
+# 0.368 for every n_sims >= 2, so the expected number of draws is e ~ 2.7 and
+# the chance of exhausting this cap is (1 - 1/e)^64 ~ 1e-13. Duplicated
+# truths lower that probability -- the sampler rejects on values, not indices
+# -- so exhaustion IS reachable for a prior with dense atoms, and the failure
+# raises with that explanation rather than being treated as a bug.
+_TARP_DERANGEMENT_RETRIES = 64
+
 
 def compute_tarp_coverage(
     posterior_draws: np.ndarray,
     true_values: np.ndarray,
     *,
     reference_points: np.ndarray | None = None,
+    reference: str = "uniform_box",
     resolution: int = 20,
     metric: str = "euclidean",
     standardize: bool = True,
@@ -123,9 +139,35 @@ def compute_tarp_coverage(
     reference_points : np.ndarray, optional
         One reference point per simulation, shape
         ``(n_simulations, n_parameters)``, in the same units as
-        ``true_values``. When ``None``, points are drawn uniformly over the
-        hypercube spanned by the standardized truths, reproducing the paper's
-        default -- which carries the blind spot described above.
+        ``true_values``. When ``None``, points are drawn according to
+        *reference*, which carries the blind spot described above.
+    reference : {"uniform_box", "prior_derangement"}
+        Which reference distribution to draw from when *reference_points* is
+        ``None``. Ignored -- and rejected if set to anything but the default
+        -- when *reference_points* is given, since a supplied array is the
+        reference.
+
+        ``"uniform_box"`` (default) draws uniformly over the box spanned by
+        the 1st and 99th percentiles of the standardized truths.
+
+        ``"prior_derangement"`` gives each simulation a reference point taken
+        from another simulation's truth, under a uniformly drawn permutation
+        with no fixed points. Because the truths are themselves prior draws,
+        this samples ``theta_r ~ p(theta)`` -- the choice Lemos et al. (2023)
+        make in Sec. 4.1 ("To pick the TARP reference points, we use the
+        prior"), and the convention BayesFlow's own
+        ``accuracy_random_points`` follows. Prefer it when the prior is
+        correlated or far from box-shaped, where the box puts reference mass
+        in corners no truth or draw ever occupies and the distance
+        comparison loses its edge. The derangement is what keeps a
+        simulation from referencing itself, which would make ``d_truth = 0``
+        and pin ``f_i`` at 0.
+
+        Both are ``x``-independent, so neither detects a posterior that
+        ignores its data. Sec. 4.2 finds the coverage curve robust to this
+        choice across uniform, normal and fixed reference distributions, so
+        switching is not expected to move a verdict -- only the precision it
+        is reached with. Recorded in the result as ``reference_mode``.
     resolution : int
         Number of credibility levels at which the curve is evaluated.
     metric : {"euclidean", "manhattan"}
@@ -158,8 +200,28 @@ def compute_tarp_coverage(
         ``|ECP - level|``, the same *aggregation* as
         :func:`compute_calibration_error` though on a different level grid, so
         the two read side by side but are not the same statistic),
-        ``max_deviation`` and ``reference_mode`` (``"provided"`` when
-        ``reference_points`` was passed, ``"random"`` when drawn here).
+        ``max_deviation`` and ``reference_mode``: ``"provided"`` when
+        ``reference_points`` was passed, otherwise ``"random"`` for
+        ``reference="uniform_box"`` and ``"prior_derangement"`` for
+        ``reference="prior_derangement"``.
+
+        The box mode reports ``"random"`` rather than ``"uniform_box"``
+        because it predates the choice and persisted results and study pins
+        carry the old spelling. Renaming it would make every stored result
+        read as a changed configuration on resume, which is exactly the
+        signal the pin exists to give truthfully.
+
+        **This field is not the one a study pin carries under that name.**
+        ``make_tarp_joint_metric``'s ``joint_metric_settings`` also has a
+        ``reference_mode``, and it answers a different question: whether the
+        reference was *supplied* (``"provided"``) or drawn here
+        (``"random"``), never which distribution was drawn from. So a
+        ``prior_derangement`` run reports ``reference_mode="prior_derangement"``
+        here while its pin reads ``reference_mode="random"`` plus
+        ``reference="prior_derangement"``. Read the pin's ``reference`` key,
+        not its ``reference_mode``, to recover the distribution. The names
+        collide because the pin's spelling is frozen by studies already on
+        disk.
 
         ``reference_mode`` deliberately does not claim ``"data_dependent"``.
         The function cannot tell how a supplied array was built, and the
@@ -204,6 +266,21 @@ def compute_tarp_coverage(
         raise ValueError("metric must be 'euclidean' or 'manhattan'.")
     if resolution < 1:
         raise ValueError("resolution must be >= 1.")
+    if reference not in _TARP_REFERENCES:
+        raise ValueError(
+            f"reference must be one of {sorted(_TARP_REFERENCES)}, got "
+            f"{reference!r}."
+        )
+    # Rejected rather than ignored. Both arguments name the reference, so a
+    # call supplying each says two different things; honouring the array
+    # silently would run a different statistic than the one the caller spelled
+    # out, under the key that claims the other.
+    if reference_points is not None and reference != "uniform_box":
+        raise ValueError(
+            "reference_points and reference= both specify the reference, and "
+            f"{reference!r} cannot apply to a supplied array. Pass "
+            "reference_points alone, or reference= alone to draw them here."
+        )
 
     # Non-finite values do not raise here by accident: `d_draws < d_truth` is
     # False for NaN, so NaN draws would be silently counted as "not closer",
@@ -307,15 +384,71 @@ def compute_tarp_coverage(
             if seed is not None
             else None
         )
-        # Percentiles, not min/max: the extremes of n_simulations draws grow
-        # like sqrt(2 log n_simulations), so a min/max box would silently
-        # widen with sample size and make tarp_error magnitudes incomparable
-        # between runs of different length.
-        lo = np.percentile(truth_z, 1.0, axis=0)
-        hi = np.percentile(truth_z, 99.0, axis=0)
-        hi = np.where(hi > lo, hi, lo + 1.0)
-        refs_z = rng.uniform(lo, hi, size=(n_sims, n_kept))
-        reference_mode = "random"
+        if reference == "uniform_box":
+            # Percentiles, not min/max: the extremes of n_simulations draws
+            # grow like sqrt(2 log n_simulations), so a min/max box would
+            # silently widen with sample size and make tarp_error magnitudes
+            # incomparable between runs of different length.
+            lo = np.percentile(truth_z, 1.0, axis=0)
+            hi = np.percentile(truth_z, 99.0, axis=0)
+            hi = np.where(hi > lo, hi, lo + 1.0)
+            refs_z = rng.uniform(lo, hi, size=(n_sims, n_kept))
+            reference_mode = "random"
+        else:
+            # The truths are prior draws, so permuting them samples the prior
+            # exactly -- no density, no bounds, no box to guess.
+            #
+            # A *derangement*, not any permutation: a fixed point would make
+            # simulation i its own reference, so d_truth = 0, no draw is
+            # strictly closer, and f_i = 0 regardless of how good the
+            # posterior is. One fixed point in n_sims is a small bias; the
+            # point is that it is a silent one, biasing f_i downward exactly
+            # like the seed collision this module already guards against.
+            #
+            # Rejection-sampled rather than BayesFlow's single `np.roll`
+            # shift. One shift offset determines the entire reference set, so
+            # the whole set carries log2(n_sims) bits -- about 9 at 500
+            # simulations -- and the references are perfectly dependent on one
+            # another. Marginally each is still a prior draw, so the curve
+            # stays valid either way, but an HPO objective is compared across
+            # trials and wants its Monte Carlo error small rather than
+            # concentrated in one integer.
+            if n_sims < 2:
+                raise ValueError(
+                    "reference='prior_derangement' needs at least 2 "
+                    "simulations: with one, the only reference available is "
+                    "that simulation's own truth, which forces f_i = 0."
+                )
+            # Rejected on VALUES, not on indices. An index derangement
+            # (`perm != arange`) is not enough: if two simulations happen to
+            # share a truth -- which a discrete, ordinal or otherwise
+            # atom-carrying prior makes ordinary rather than exotic --
+            # then `perm[i] != i` can still land a reference numerically
+            # equal to truth i, and d_truth is 0 again. Checking the rows
+            # closes the gap the index check only appears to close.
+            for _ in range(_TARP_DERANGEMENT_RETRIES):
+                perm = rng.permutation(n_sims)
+                if not np.any(np.all(truth_z[perm] == truth_z, axis=1)):
+                    break
+            else:
+                # Not "treat it as a bug": with duplicated truths this is
+                # reachable, and for a prior concentrated on few atoms it is
+                # the normal outcome. Raising beats both a silent bias and a
+                # loop that cannot terminate.
+                n_dup = n_sims - len(np.unique(truth_z, axis=0))
+                raise ValueError(
+                    "Could not draw a reference assignment in which no "
+                    f"simulation references its own truth value, after "
+                    f"{_TARP_DERANGEMENT_RETRIES} attempts "
+                    f"({n_dup} of {n_sims} truths are duplicates of another "
+                    "simulation's). Any such collision makes d_truth = 0 and "
+                    "pins that simulation's f_i at 0, biasing the coverage "
+                    "curve downward. Use reference='uniform_box', or pass "
+                    "reference_points derived from the data, for a prior "
+                    "with atoms this dense."
+                )
+            refs_z = truth_z[perm]
+            reference_mode = "prior_derangement"
     else:
         reference_points = np.asarray(reference_points, dtype=float)
         if reference_points.shape != (n_sims, n_params):
@@ -470,6 +603,7 @@ def _references_for_condition(
 def make_tarp_joint_metric(
     reference_points: Any = None,
     *,
+    reference: str = "uniform_box",
     resolution: int = 20,
     metric: str = "euclidean",
     standardize: bool = True,
@@ -502,6 +636,16 @@ def make_tarp_joint_metric(
         ``(n_sims, n_params)`` for that condition, or a sequence of such
         arrays indexed by ``cond_id``. A single array reused across
         conditions is rejected; see :func:`_references_for_condition`.
+    reference
+        Which reference distribution to draw from when *reference_points* is
+        ``None``: ``"uniform_box"`` (default) or ``"prior_derangement"``.
+        See :func:`compute_tarp_coverage`. Both are ``x``-independent, so
+        both emit ``tarp_error_random`` -- the key is decided by whether a
+        reference was *supplied*, not by which distribution was drawn from,
+        because that is what decides whether the metric can see a posterior
+        ignoring its data. The choice is recorded in the settings pin, so
+        two studies drawing from different distributions read as different
+        configurations rather than as comparable numbers.
     resolution
         Number of credibility levels the coverage curve is evaluated at.
     metric
@@ -574,6 +718,17 @@ def make_tarp_joint_metric(
         )
     if resolution < 1:
         raise ValueError(f"resolution must be at least 1, got {resolution}.")
+    if reference not in _TARP_REFERENCES:
+        raise ValueError(
+            f"reference must be one of {sorted(_TARP_REFERENCES)}, got "
+            f"{reference!r}."
+        )
+    if reference_points is not None and reference != "uniform_box":
+        raise ValueError(
+            "reference_points and reference= both specify the reference, and "
+            f"{reference!r} cannot apply to supplied points. Pass "
+            "reference_points alone, or reference= alone to draw them here."
+        )
 
     key = "tarp_error_random" if reference_points is None else "tarp_error"
 
@@ -587,6 +742,7 @@ def make_tarp_joint_metric(
             inputs.draws,
             inputs.true_values,
             reference_points=refs,
+            reference=reference,
             resolution=resolution,
             metric=metric,
             standardize=standardize,
@@ -606,12 +762,31 @@ def make_tarp_joint_metric(
         "metric": str(metric),
         "standardize": bool(standardize),
         "seed": int(seed),
+        # NOT the same question as the `reference_mode` in the RESULT dict,
+        # despite the shared name: this one is supplied-vs-drawn, that one is
+        # which distribution was drawn from. A prior_derangement run pins
+        # "random" here and reports "prior_derangement" there. The pin's
+        # spelling is frozen by studies already on disk, so the collision is
+        # documented in `compute_tarp_coverage` rather than renamed away;
+        # `reference` below is the key that recovers the distribution.
         "reference_mode": "random" if reference_points is None else "provided",
         # None unless the caller labelled the reference. Recorded either
         # way, so a study that adds a label later reads as changed -- which
         # it is, in the only sense the pin can check.
         "reference_id": reference_id,
     }
+    # Recorded only when it is not the default, and deliberately so.
+    # `check_or_stamp_joint_metric_settings` compares the settings dicts for
+    # EQUALITY, so an unconditional new key would make every study pinned
+    # before this option existed raise on resume -- reporting a configuration
+    # change to studies whose configuration did not change. Absence already
+    # means "the default", which is what those pins meant when they were
+    # written. A study that switches distributions still gets the signal,
+    # because adding or removing the key changes the dict either way.
+    if reference != "uniform_box":
+        _tarp_metric.joint_metric_settings["reference"] = str(  # type: ignore[attr-defined]
+            reference
+        )
     return _tarp_metric
 
 

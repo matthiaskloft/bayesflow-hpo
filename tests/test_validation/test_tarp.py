@@ -521,3 +521,286 @@ def test_both_keys_have_a_bounded_penalty() -> None:
 
     assert worst_objective_value("tarp_error") == 1.0
     assert worst_objective_value("tarp_error_random") == 1.0
+
+
+# ---------------------------------------------------------------------------
+# reference=: the opt-in prior-derangement reference
+# ---------------------------------------------------------------------------
+
+
+def test_the_prior_derangement_reference_gives_the_diagonal_too() -> None:
+    """Validity does not depend on which reference distribution is used.
+
+    For an exact posterior the ``f_i`` are uniform under ANY reference
+    distribution, so switching the draw must not move the verdict. Lemos et
+    al. (2023) Sec. 4.2 reports the same robustness empirically across
+    uniform, normal and fixed reference distributions.
+    """
+    draws, truth = _gaussian_case(correct=True)
+    out = compute_tarp_coverage(
+        draws, truth, reference="prior_derangement", seed=REF_SEED
+    )
+
+    assert out["reference_mode"] == "prior_derangement"
+    assert out["tarp_error"] < 0.04, out["tarp_error"]
+    np.testing.assert_allclose(
+        out["expected_coverage"], out["credibility_levels"], atol=0.06
+    )
+
+
+def test_the_derangement_is_still_beaten_by_a_data_dependent_reference() -> None:
+    """The derangement samples the prior, which is still independent of x.
+
+    Framed as a CONTRAST, like
+    `test_a_data_ignoring_posterior_is_caught_by_a_data_dependent_reference`,
+    and for the same reason: `_gaussian_case(correct=False)` is a tight blob
+    at a random location, which is a harsher estimator than the paper's
+    `p_hat(theta|x) = p(theta)`, so neither x-independent reference scores it
+    clean. What Sec. 4.3 supports is the ORDERING -- an x-dependent reference
+    sees more -- and that is what is asserted. A bare threshold on the
+    derangement's own number would be a claim about this helper, not about
+    TARP.
+    """
+    draws, truth = _gaussian_case(correct=False)
+
+    prior_ref = compute_tarp_coverage(
+        draws, truth, reference="prior_derangement", seed=REF_SEED
+    )
+    rng = np.random.default_rng(SEED)
+    data_ref = compute_tarp_coverage(
+        draws,
+        truth,
+        reference_points=truth + rng.normal(0.0, 0.1, size=truth.shape),
+    )
+
+    assert data_ref["tarp_error"] > prior_ref["tarp_error"]
+    assert prior_ref["reference_mode"] == "prior_derangement"
+
+
+def test_no_simulation_references_itself() -> None:
+    """A fixed point would force ``f_i = 0`` however good the posterior is.
+
+    The derangement is the whole reason this mode can use the truths
+    directly, so it is checked head-on and over many seeds -- one
+    fixed-point-free permutation is not evidence that fixed points are
+    excluded.
+
+    The construction makes self-reference the ONLY way to score exactly 0:
+    draws sit within 1e-6 of their truth while the truths are spread over
+    (-5, 5), so against any OTHER simulation's truth roughly half the draws
+    land nearer the reference and ``f_i ~ 0.5``. Against its own truth
+    ``d_truth = 0``, no draw is strictly closer, and ``f_i`` is exactly 0.
+    Testing ``f_i == 0`` on the ordinary helper does not work: there, a
+    legitimately distant reference reaches 0 by chance.
+    """
+    rng = np.random.default_rng(SEED)
+    n_sims, n_draws, n_params = 40, 20, 2
+    truth = rng.uniform(-5.0, 5.0, size=(n_sims, n_params))
+    draws = truth[:, None, :] + rng.normal(
+        0.0, 1e-6, size=(n_sims, n_draws, n_params)
+    )
+
+    for seed in range(60):
+        out = compute_tarp_coverage(
+            draws, truth, reference="prior_derangement", seed=seed
+        )
+        assert not np.any(out["coverage_fractions"] == 0.0), seed
+
+
+def test_the_reference_draw_is_reproducible_and_seed_dependent() -> None:
+    """Same seed, same references; different seed, different references.
+
+    Reproducibility is what makes the mode usable as an HPO objective at
+    all. Seed-dependence is the other half: a permutation drawn afresh per
+    seed is what distinguishes this from a fixed assignment.
+
+    This does NOT assert the rejection-sampled permutation over BayesFlow's
+    single cyclic shift -- the permutation is internal and a shift would
+    pass this too. That choice is argued in the comment at the draw site and
+    is not observable from the return value.
+    """
+    draws, truth = _gaussian_case(n_sims=50, n_draws=20, correct=True)
+
+    a = compute_tarp_coverage(
+        draws, truth, reference="prior_derangement", seed=REF_SEED
+    )
+    b = compute_tarp_coverage(
+        draws, truth, reference="prior_derangement", seed=REF_SEED
+    )
+    c = compute_tarp_coverage(
+        draws, truth, reference="prior_derangement", seed=REF_SEED + 1
+    )
+
+    np.testing.assert_array_equal(
+        a["coverage_fractions"], b["coverage_fractions"]
+    )
+    assert not np.array_equal(
+        a["coverage_fractions"], c["coverage_fractions"]
+    )
+
+
+def test_a_single_simulation_cannot_be_deranged() -> None:
+    """With one simulation the only reference is its own truth."""
+    draws, truth = _gaussian_case(n_sims=1, n_draws=20, correct=True)
+
+    # standardize=False because a single simulation makes every dimension
+    # constant, and that check fires first -- a real guard, but not this one.
+    with pytest.raises(ValueError, match="at least 2 simulations"):
+        compute_tarp_coverage(
+            draws, truth, reference="prior_derangement", standardize=False
+        )
+
+
+def test_an_unknown_reference_is_rejected() -> None:
+    """Only the two reference distributions the module implements are valid.
+
+    ``reference`` is closed rather than open because each value names a
+    specific draw with its own statistical standing: ``"uniform_box"`` and
+    ``"prior_derangement"`` are both ``x``-independent and so both share the
+    blind spot of Lemos et al. (2023) Sec. 4.3, which is what lets them share
+    the ``tarp_error_random`` key. A silently accepted third name would have
+    no such analysis behind it, and a typo would otherwise fall through to
+    the ``else`` branch and be computed as a derangement under whatever name
+    the caller typed.
+    """
+    draws, truth = _gaussian_case(n_sims=20, n_draws=10, correct=True)
+
+    with pytest.raises(ValueError, match="reference must be one of"):
+        compute_tarp_coverage(draws, truth, reference="prior")
+
+
+def test_supplying_both_a_reference_and_points_is_rejected() -> None:
+    """Two arguments naming the reference must not silently pick one."""
+    draws, truth = _gaussian_case(n_sims=20, n_draws=10, correct=True)
+    refs = truth[::-1].copy()
+
+    with pytest.raises(ValueError, match="both specify the reference"):
+        compute_tarp_coverage(
+            draws, truth, reference_points=refs, reference="prior_derangement"
+        )
+
+
+def test_the_box_default_is_unchanged_by_the_new_option() -> None:
+    """The opt-in must not move the default's numbers.
+
+    Existing studies pin ``tarp_error_random`` values computed with the box,
+    so an accidental change of default would silently rescale them.
+    """
+    draws, truth = _gaussian_case(n_sims=60, n_draws=40, correct=True)
+
+    explicit = compute_tarp_coverage(
+        draws, truth, reference="uniform_box", seed=REF_SEED
+    )
+    implicit = compute_tarp_coverage(draws, truth, seed=REF_SEED)
+
+    assert implicit["reference_mode"] == "random"
+    assert explicit["tarp_error"] == implicit["tarp_error"]
+
+
+def test_the_derangement_mode_still_emits_the_diagnostic_key() -> None:
+    """The key tracks x-dependence, not the distribution drawn from."""
+    from bayesflow_hpo.validation.tarp import make_tarp_joint_metric
+
+    out = make_tarp_joint_metric(reference="prior_derangement")(_joint_inputs())
+
+    assert set(out) == {"tarp_error_random"}
+
+
+def test_the_factory_rejects_a_bad_reference_before_any_data() -> None:
+    """At construction, like ``metric``: a typo must not cost a full study."""
+    from bayesflow_hpo.validation.tarp import make_tarp_joint_metric
+
+    with pytest.raises(ValueError, match="reference must be one of"):
+        make_tarp_joint_metric(reference="prior")
+
+    with pytest.raises(ValueError, match="both specify the reference"):
+        make_tarp_joint_metric(
+            reference_points=lambda i: np.zeros(
+                (i.draws.shape[0], i.draws.shape[2])
+            ),
+            reference="prior_derangement",
+        )
+
+
+def test_the_default_pin_is_byte_identical_to_before_the_option() -> None:
+    """Adding the option must not invalidate studies pinned without it.
+
+    ``check_or_stamp_joint_metric_settings`` compares settings dicts for
+    equality, so a new key recorded unconditionally would make every
+    existing study raise on resume over a configuration that did not
+    change.
+    """
+    from bayesflow_hpo.validation.tarp import make_tarp_joint_metric
+
+    settings = make_tarp_joint_metric().joint_metric_settings
+
+    assert "reference" not in settings
+    assert settings == {
+        "resolution": 20,
+        "metric": "euclidean",
+        "standardize": True,
+        "seed": 42,
+        "reference_mode": "random",
+        "reference_id": None,
+    }
+
+
+def test_switching_the_distribution_shows_up_in_the_pin() -> None:
+    """Two x-independent runs share a key, so the pin must separate them."""
+    from bayesflow_hpo.validation.tarp import make_tarp_joint_metric
+
+    box = make_tarp_joint_metric().joint_metric_settings
+    prior = make_tarp_joint_metric(
+        reference="prior_derangement"
+    ).joint_metric_settings
+
+    assert prior["reference"] == "prior_derangement"
+    assert box != prior
+
+
+def test_duplicate_truths_do_not_slip_past_the_derangement() -> None:
+    """The check is on reference VALUES, not on permutation indices.
+
+    An index derangement (``perm != arange``) leaves a gap when two
+    simulations share a truth, which a discrete, ordinal or otherwise
+    atom-carrying prior makes ordinary: ``perm[i] != i`` can still hand
+    simulation ``i`` a reference numerically equal to its own truth, so
+    ``d_truth = 0``, no draw is strictly closer, and ``f_i`` is pinned at 0 --
+    the silent downward bias the derangement exists to prevent.
+
+    Here every truth is duplicated exactly once, so a value collision is
+    likely under index-only rejection and impossible under value rejection.
+    """
+    rng = np.random.default_rng(SEED)
+    n_pairs, n_draws, n_params = 15, 20, 2
+    base = rng.uniform(-5.0, 5.0, size=(n_pairs, n_params))
+    truth = np.repeat(base, 2, axis=0)
+    draws = truth[:, None, :] + rng.normal(
+        0.0, 1e-6, size=(truth.shape[0], n_draws, n_params)
+    )
+
+    for seed in range(25):
+        out = compute_tarp_coverage(
+            draws, truth, reference="prior_derangement", seed=seed
+        )
+        assert not np.any(out["coverage_fractions"] == 0.0), seed
+
+
+def test_a_prior_of_too_few_atoms_raises_instead_of_biasing() -> None:
+    """When no collision-free assignment is found, say so rather than bias.
+
+    With every truth identical there is no valid reference at all. The old
+    index-only check would have accepted any permutation and silently
+    returned a curve built from ``f_i = 0`` everywhere.
+    """
+    truth = np.tile(np.array([[1.0, 2.0]]), (12, 1))
+    draws = truth[:, None, :] + np.zeros((12, 8, 2))
+
+    with pytest.raises(ValueError, match="references its own truth value"):
+        compute_tarp_coverage(
+            draws,
+            truth,
+            reference="prior_derangement",
+            standardize=False,
+            seed=REF_SEED,
+        )
