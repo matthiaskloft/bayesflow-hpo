@@ -16,6 +16,29 @@
 
 ### Added
 
+- `reference=` on `compute_tarp_coverage()` and `make_tarp_joint_metric()`
+  selects the distribution TARP draws reference points from when none are
+  supplied. `"uniform_box"` remains the default and is unchanged, so no
+  stored `tarp_error_random` value moves. `"prior_derangement"` gives each
+  simulation a reference taken from another simulation's truth, sampling
+  `theta_r ~ p(theta)` whatever the prior's shape — the choice Lemos et al.
+  (2023) make in Sec. 4.1, and the convention BayesFlow's own
+  `accuracy_random_points` follows. Prefer it for a correlated or
+  non-box-shaped prior, where the box puts reference mass in corners no
+  truth or draw ever occupies. Both draws are `x`-independent, so both still
+  emit `tarp_error_random` as a diagnostic: Sec. 4.3 ties the blind spot to
+  `x`-dependence, not to which `x`-independent distribution is used, so the
+  key still turns on whether a reference was *supplied*. The assignment is
+  rejected on reference *values* rather than permutation indices, so a
+  duplicated truth cannot hand a simulation its own value and silently pin
+  that simulation's coverage fraction at 0; when no valid assignment is
+  drawn within a bounded number of attempts — the expected outcome for a
+  prior concentrated on few atoms — it raises instead. The setting is recorded in the
+  study's joint-metric pin only when it is not the default, because that pin
+  is compared for equality and an unconditional new key would make every
+  study pinned before this option raise on resume over a configuration that
+  did not change.
+
 - `scripts/check_docstrings.py` asserts that every docstring in `src/`
   agrees with the code it documents: no documented parameter that is not in
   the signature, no undocumented parameter on a function that already has a
@@ -26,7 +49,7 @@
   parses the source tree rather than importing it, so it needs no backend
   and no install, and runs as its own CI job beside `check_citations.py`.
   Like that check, it verifies consistency, not truth. It currently covers
-  482 parameter entries and 43 cross-references, and enforces vacuity floors
+  484 parameter entries and 43 cross-references, and enforces vacuity floors
   so that a parser which silently inspects nothing fails instead of
   reporting success. An independent review found four holes in the first
   version, all now closed with regression tests: a quoted string default was

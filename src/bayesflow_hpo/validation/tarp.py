@@ -166,8 +166,12 @@ def compute_tarp_coverage(
         Both are ``x``-independent, so neither detects a posterior that
         ignores its data. Sec. 4.2 finds the coverage curve robust to this
         choice across uniform, normal and fixed reference distributions, so
-        switching is not expected to move a verdict -- only the precision it
-        is reached with. Recorded in the result as ``reference_mode``.
+        switching can move the number without moving the verdict -- the
+        paper's biased case gives different curves per reference
+        distribution, all of them showing the bias. Values from the two
+        modes are therefore not interchangeable even where they agree on
+        whether a posterior is calibrated. Recorded in the result as
+        ``reference_mode``.
     resolution : int
         Number of credibility levels at which the curve is evaluated.
     metric : {"euclidean", "manhattan"}
@@ -643,9 +647,13 @@ def make_tarp_joint_metric(
         both emit ``tarp_error_random`` -- the key is decided by whether a
         reference was *supplied*, not by which distribution was drawn from,
         because that is what decides whether the metric can see a posterior
-        ignoring its data. The choice is recorded in the settings pin, so
-        two studies drawing from different distributions read as different
-        configurations rather than as comparable numbers.
+        ignoring its data. The choice is recorded in the settings pin only
+        when it is not the default -- absence of the key means
+        ``"uniform_box"``, which is what pins written before this option
+        existed meant, so those studies still resume. Either way, two
+        studies drawing from different distributions read as different
+        configurations rather than as comparable numbers, since adding or
+        removing the key changes the dict.
     resolution
         Number of credibility levels the coverage curve is evaluated at.
     metric

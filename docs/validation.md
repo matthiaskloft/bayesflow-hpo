@@ -140,7 +140,7 @@ them — rather than one parameter's marginal, so they are registered through
 | Name | Kind | Description |
 |------|------|-------------|
 | `tarp_error` | objective | TARP expected-coverage error against **supplied** reference points. Cannot run at its registered default — build it with `make_tarp_joint_metric(reference_points=...)`. |
-| `tarp_error_random` | diagnostic | TARP with random reference points. Diagnostic because Lemos et al. (2023, Sec. 4.3) show it cannot detect a posterior that ignores its data, so it is rejected in `objective_metrics`. |
+| `tarp_error_random` | diagnostic | TARP with reference points drawn here rather than supplied — see `reference=` below for the two distributions. Diagnostic because Lemos et al. (2023, Sec. 4.3) show an `x`-independent reference cannot detect a posterior that ignores its data, so it is rejected in `objective_metrics`. |
 | `lc2st` | objective | L-C2ST on the full joint posterior. Requires the `sklearn` extra, and costs roughly 700x a TARP evaluation. |
 
 ```python
@@ -159,6 +159,59 @@ Joint metrics are excluded from *intermediate* validation unless
 
 Call `describe_metrics()` for the live registry, with each metric's kind,
 aliases, description, and extra dependency.
+
+#### Choosing TARP reference points
+
+Which key a TARP metric emits is decided by whether *you* supply the
+reference points, not by how they are distributed:
+
+- **`reference_points=...`** — a callable on `JointMetricInputs`, or one
+  array per condition, emitting `tarp_error` (objective). Derive these from
+  the conditioning data. Only an `x`-dependent reference detects a posterior
+  that ignores its data, and that is the whole reason this key is an
+  objective. Deriving them from the posterior under test looks
+  data-dependent, is not, and nothing can detect the difference. Passing
+  `reference_points=` together with a non-default `reference=` is rejected
+  rather than silently resolved, since both name the reference.
+- **`reference_points=None`** — drawn for you, emitting `tarp_error_random`
+  (diagnostic). `reference=` picks the distribution:
+
+| `reference` | Draw | When |
+|-------------|------|------|
+| `"uniform_box"` (default) | Uniform over the box spanned by the 1st/99th percentiles of the standardized truths. | The default; keeps existing studies' numbers comparable. |
+| `"prior_derangement"` | Each simulation references another simulation's truth, so each reference is marginally a draw from `p(theta)`. Lemos et al. (2023, Sec. 4.1) make this choice, and BayesFlow's `accuracy_random_points` follows it. | A correlated or non-box-shaped prior, where the box puts reference mass in corners no truth or draw occupies. |
+
+Both are `x`-independent, so switching does not turn the diagnostic into an
+objective. Sec. 4.2 finds the coverage curve robust across reference
+distributions: the choice can move the number without moving the verdict, so
+values from the two modes are not interchangeable even though they agree on
+whether a posterior is calibrated.
+
+Because the references are a permutation of the truths, they are drawn
+without replacement and so are jointly dependent; only the marginal is the
+prior. The permutation is redrawn rather than taken as one cyclic shift
+precisely to keep that dependence from concentrating in a single offset.
+
+The setting is recorded in the study's joint-metric pin **when it is not the
+default** — absence of the key means `"uniform_box"`, which is what pins
+written before this option existed meant, so those studies still resume.
+Either way, switching distributions changes the pin, so a resume reports it.
+Read the pin's `reference` key, not its `reference_mode`: the latter records
+only supplied-versus-drawn, so a `prior_derangement` run pins
+`reference_mode="random"` while the *result* reports
+`reference_mode="prior_derangement"`.
+
+`"prior_derangement"` needs the truths to be distinct: it rejects any
+assignment that would hand a simulation a reference equal to its own truth
+(which would pin that simulation's coverage fraction at 0), and raises if it
+cannot draw a valid one within a bounded number of attempts — the expected
+outcome for a prior concentrated on few atoms. It also requires at least two
+simulations, since with one the only available reference is that
+simulation's own truth.
+
+```python
+make_tarp_joint_metric(reference="prior_derangement")
+```
 
 ### `calibration_error` vs `mean_calibration_error`
 
