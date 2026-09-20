@@ -46,6 +46,7 @@ class ObjectiveConfig:
     build_approximator_fn: BuildApproximatorFn | None = None
     train_fn: TrainFn | None = None
     validate_fn: ValidateFn | None = None
+    aggregate: Aggregate = 'mean'
 ```
 <!-- END GENERATED: objectiveconfig-dataclass -->
 

@@ -73,6 +73,11 @@ from bayesflow_hpo.validation.inference import (
     condition_batch_size,
     validate_max_samples_per_call,
 )
+from bayesflow_hpo.validation.metrics import (
+    Aggregate,
+    AggregationError,
+    normalize_aggregate,
+)
 from bayesflow_hpo.validation.registry import (
     CanonicalMetricName,
     JointMetricConfigurationError,
@@ -219,6 +224,7 @@ def default_validate_fn(
     objective_metrics: list[str] | None = None,
     joint_metrics: dict[str, Any] | None = None,
     max_samples_per_call: int | None = DEFAULT_MAX_SAMPLES_PER_CALL,
+    aggregate: Aggregate = "mean",
 ) -> dict[str, float]:
     """Run the built-in validation pipeline and return metric dict.
 
@@ -249,6 +255,14 @@ def default_validate_fn(
         to ``run_validation_pipeline``.  ``None`` samples each condition in
         a single call.
 
+    aggregate
+        Scalar ``"mean"`` (default), ``"worst"``, or ``"geometric"``, or
+        a metric-output-to-reduction mapping. Scalars reduce conditions per
+        parameter, then average parameters. Explicit mapping entries reduce
+        the full parameter-by-condition grid; omitted metrics retain means.
+        Geometric requires positive values. See
+        :func:`~bayesflow_hpo.validation.pipeline.run_validation_pipeline`.
+
     Returns
     -------
     dict[str, float]
@@ -263,6 +277,7 @@ def default_validate_fn(
         metrics=_pipeline_metrics(objective_metrics or []),
         joint_metrics=joint_metrics,
         max_samples_per_call=max_samples_per_call,
+        aggregate=aggregate,
     )
     return dict(result.summary)
 
@@ -654,6 +669,14 @@ class ObjectiveConfig:
         **Intermediate pruning:** also called during training at the
         configured interval with reduced ``n_posterior_samples`` for
         median-based multi-objective pruning.
+
+    aggregate
+        Scalar ``"mean"`` (default), ``"worst"``, or ``"geometric"``, or
+        a metric-output-to-reduction mapping. Scalars reduce conditions per
+        parameter, then average parameters. Explicit mapping entries reduce
+        the full parameter-by-condition grid; omitted metrics retain means.
+        Geometric requires positive values. See
+        :func:`~bayesflow_hpo.validation.pipeline.run_validation_pipeline`.
     """
 
     simulator: bf.simulators.Simulator
@@ -715,9 +738,13 @@ class ObjectiveConfig:
     build_approximator_fn: BuildApproximatorFn | None = None
     train_fn: TrainFn | None = None
     validate_fn: ValidateFn | None = None
+    aggregate: Aggregate = "mean"
 
     def __post_init__(self) -> None:
         validate_objective_metric_kinds(self.objective_metrics)
+        self.aggregate = normalize_aggregate(self.aggregate)
+        if self.validate_fn is not None and self.aggregate not in ("mean", {}):
+            raise ValueError("aggregate requires the built-in validation pipeline.")
         # Checked at THIS boundary too, not only in `optimize()`. Building a
         # config directly skips that check, and the memory estimator clamps
         # a sub-1 cap to 1 -- so an invalid value would reach training and
@@ -1699,6 +1726,7 @@ class GenericObjective:
                     early_stopping_patience=config.early_stopping_patience,
                     early_stopping_window=config.early_stopping_window,
                     early_stopping_monitor=config.early_stopping_monitor,
+                    aggregate=config.aggregate,
                 )
             )
 
@@ -1727,7 +1755,7 @@ class GenericObjective:
                 config.train_fn(approximator, config.simulator, params, callbacks)
             else:
                 default_train_fn(approximator, config.simulator, params, callbacks)
-        except JointMetricConfigurationError:
+        except (JointMetricConfigurationError, AggregationError):
             # Reaches here from `PeriodicValidationCallback`, which runs
             # DURING training. The catch-all below would record it as a
             # `training_error` and return `_penalty()`, so the study would
@@ -1798,6 +1826,7 @@ class GenericObjective:
                         _constraint_metric_names(config),
                     ),
                     joint_metrics=config.joint_metrics,
+                    aggregate=config.aggregate,
                 )
                 inference_time = result.timing.get("inference", 0.0)
                 # Checked HERE rather than at study creation, because this
@@ -1861,7 +1890,7 @@ class GenericObjective:
             # Wrap for extract_multi_objective_values compatibility.
             metrics = {"summary": metrics_summary}
 
-        except JointMetricConfigurationError:
+        except (JointMetricConfigurationError, AggregationError):
             # NOT a trial failure, so it must not reach the catch-all below,
             # which converts anything it catches into a training-loss
             # fallback. This condition is a property of the STUDY -- changed

@@ -12,6 +12,11 @@ from typing import Any
 
 from bayesflow_hpo.validation.data import ValidationDataset
 from bayesflow_hpo.validation.inference import DEFAULT_MAX_SAMPLES_PER_CALL
+from bayesflow_hpo.validation.metrics import (
+    Aggregate,
+    AggregationError,
+    normalize_aggregate,
+)
 from bayesflow_hpo.validation.pipeline import run_validation_pipeline
 from bayesflow_hpo.validation.registry import JointMetricConfigurationError
 from bayesflow_hpo.validation.result import ValidationResult
@@ -25,6 +30,7 @@ def validate_once(
     metrics: Sequence[str] | None = None,
     joint_metrics: dict[str, Any] | None = None,
     max_samples_per_call: int | None = DEFAULT_MAX_SAMPLES_PER_CALL,
+    aggregate: Aggregate = "mean",
 ) -> ValidationResult:
     """Run a lightweight validation pass to verify data compatibility.
 
@@ -55,8 +61,18 @@ def validate_once(
         (default
         :data:`~bayesflow_hpo.validation.inference.DEFAULT_MAX_SAMPLES_PER_CALL`).
         ``None`` samples the condition in a single call.
+
+    aggregate
+        Scalar ``"mean"`` (default), ``"worst"``, or ``"geometric"``, or
+        a metric-output-to-reduction mapping. Scalars reduce conditions per
+        parameter, then average parameters. Explicit mapping entries reduce
+        the full parameter-by-condition grid; omitted metrics retain means.
+        Geometric requires positive values. See
+        :func:`~bayesflow_hpo.validation.pipeline.run_validation_pipeline`.
     """
     import numpy as np
+
+    aggregate = normalize_aggregate(aggregate)
 
     if not validation_data.simulations:
         raise ValueError("ValidationDataset has no simulations.")
@@ -85,8 +101,9 @@ def validate_once(
             metrics=metrics,
             joint_metrics=joint_metrics,
             max_samples_per_call=max_samples_per_call,
+            aggregate=aggregate,
         )
-    except JointMetricConfigurationError:
+    except (JointMetricConfigurationError, AggregationError):
         # A configuration problem, with its own message naming the fix.
         # Rewriting it as "check that param_keys/data_keys match" sends the
         # reader to the wrong place entirely.

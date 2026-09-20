@@ -18,8 +18,11 @@ from bayesflow_hpo.validation.inference import (
     make_bayesflow_infer_fn,
 )
 from bayesflow_hpo.validation.metrics import (
+    Aggregate,
     aggregate_condition_rows,
     compute_condition_metrics,
+    normalize_aggregate,
+    reduce_metric,
 )
 from bayesflow_hpo.validation.registry import (
     _JOINT,
@@ -270,8 +273,9 @@ def _aggregate_joint_rows(
     joint_condition_rows: list[dict[str, float]],
     failed_joint: dict[str, str],
     emitted_keys: dict[str, set[str]],
+    aggregate: Aggregate = "mean",
 ) -> dict[str, float]:
-    """Mean each joint key across conditions, dropping invalidated metrics.
+    """Reduce each joint key across conditions, dropping invalidated metrics.
 
     Keys belonging to a metric in *failed_joint* are removed outright rather
     than averaged over its surviving conditions: a partially computed joint
@@ -302,7 +306,10 @@ def _aggregate_joint_rows(
     for key in keys:
         vals = [row[key] for row in joint_condition_rows if key in row]
         if vals:
-            summary[key] = float(np.nanmean(vals))
+            reduction = (
+                aggregate if isinstance(aggregate, str) else aggregate.get(key, "mean")
+            )
+            summary[key] = reduce_metric(vals, key, reduction)
     return summary
 
 
@@ -313,6 +320,7 @@ def run_validation_pipeline(
     metrics: Sequence[str] | None = None,
     joint_metrics: Mapping[str, JointMetricFn] | None = None,
     max_samples_per_call: int | None = DEFAULT_MAX_SAMPLES_PER_CALL,
+    aggregate: Aggregate = "mean",
 ) -> ValidationResult:
     """Run metric evaluation on a fixed dataset reused across trials.
 
@@ -350,11 +358,24 @@ def run_validation_pipeline(
         :func:`~bayesflow_hpo.validation.inference.make_bayesflow_infer_fn`.
         ``None`` samples each condition in a single call.
 
+    aggregate
+        Reduction: ``"mean"`` (default), ``"worst"``, ``"geometric"``, or
+        a mapping from metric output name to reduction (aliases accepted).
+        A scalar reduces conditions within each parameter, then averages
+        parameter summaries. Explicit mapping entries reduce the full
+        parameter-by-condition grid with equal cell weights; omitted keys
+        retain the default mean behavior. Joint metrics reduce conditions
+        only. Worst respects the registered metric direction. Geometric
+        requires strictly positive values and raises ``ValueError`` for
+        zero or negative values; NaNs are omitted for every reduction.
+        See :func:`~bayesflow_hpo.validation.metrics.reduce_metric`.
+
     Returns
     -------
     ValidationResult
         Structured result with per-condition and summary tables.
     """
+    aggregate = normalize_aggregate(aggregate)
     if metrics is None:
         metrics = list(DEFAULT_METRICS)
     metric_fns = resolve_metrics(list(metrics))
@@ -488,7 +509,7 @@ def run_validation_pipeline(
         all_condition_rows: list[dict[str, Any]] = []
 
         for param_key, cond_rows in param_condition_rows.items():
-            param_summary = aggregate_condition_rows(cond_rows)
+            param_summary = aggregate_condition_rows(cond_rows, aggregate)
             param_cond_df = pd.DataFrame(cond_rows)
             per_parameter[param_key] = ValidationResult(
                 condition_metrics=param_cond_df,
@@ -508,6 +529,14 @@ def run_validation_pipeline(
             vals = [pr.summary.get(key, float("nan")) for pr in per_parameter.values()]
             per_parameter_mean_summary[key] = float(np.nanmean(vals))
 
+        if isinstance(aggregate, Mapping):
+            # Explicit settings retain the parameter axis until the final
+            # reduction; otherwise an average can hide a failing parameter.
+            grid_summary = aggregate_condition_rows(all_condition_rows, aggregate)
+            for key in aggregate:
+                if key in grid_summary:
+                    per_parameter_mean_summary[key] = grid_summary[key]
+
         # Joint keys are merged in AFTER that loop, not routed through it.
         # The loop takes its key set from the first parameter's summary, so a
         # joint key -- which has no per-parameter value by construction --
@@ -517,8 +546,8 @@ def run_validation_pipeline(
         overall_summary = {
             **per_parameter_mean_summary,
             **_aggregate_joint_rows(
-            joint_condition_rows, failed_joint, emitted_keys
-        ),
+                joint_condition_rows, failed_joint, emitted_keys, aggregate
+            ),
         }
 
         return ValidationResult(
@@ -540,9 +569,9 @@ def run_validation_pipeline(
     cond_rows = param_condition_rows[param_key]
     condition_df = pd.DataFrame(cond_rows)
     summary = {
-        **aggregate_condition_rows(cond_rows),
+        **aggregate_condition_rows(cond_rows, aggregate),
         **_aggregate_joint_rows(
-            joint_condition_rows, failed_joint, emitted_keys
+            joint_condition_rows, failed_joint, emitted_keys, aggregate
         ),
     }
 

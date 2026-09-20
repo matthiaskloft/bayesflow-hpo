@@ -23,6 +23,7 @@ from bayesflow_hpo.optimization.objective import default_train_fn, default_valid
 from bayesflow_hpo.search_spaces.composite import CompositeSearchSpace
 from bayesflow_hpo.types import BuildApproximatorFn, TrainFn, ValidateFn
 from bayesflow_hpo.validation.data import generate_validation_dataset
+from bayesflow_hpo.validation.metrics import Aggregate, normalize_aggregate
 from bayesflow_hpo.validation.registry import (
     canonical_metric_name,
     is_joint_metric,
@@ -207,6 +208,7 @@ def check_pipeline(
     validation_conditions: dict[str, list[Any]] | None = None,
     epochs: int = 1,
     num_batches: int = 1,
+    aggregate: Aggregate = "mean",
 ) -> None:
     """Dry-run the full pipeline to catch interface errors early.
 
@@ -255,6 +257,14 @@ def check_pipeline(
     num_batches
         Batches per epoch for dry run (default 1).
 
+    aggregate
+        Scalar ``"mean"`` (default), ``"worst"``, or ``"geometric"``, or
+        a metric-output-to-reduction mapping. Scalars reduce conditions per
+        parameter, then average parameters. Explicit mapping entries reduce
+        the full parameter-by-condition grid; omitted metrics retain means.
+        Geometric requires positive values. See
+        :func:`~bayesflow_hpo.validation.pipeline.run_validation_pipeline`.
+
     Raises
     ------
     PipelineError
@@ -268,6 +278,9 @@ def check_pipeline(
     # us canonical names, but a direct caller may not.
     objective_metrics = [canonical_metric_name(m) for m in objective_metrics]
     validate_objective_metric_kinds(objective_metrics)
+    aggregate = normalize_aggregate(aggregate)
+    if validate_fn is not None and aggregate not in ("mean", {}):
+        raise ValueError("aggregate requires the built-in validation pipeline.")
 
     # --- Step 0: Validate hook signatures ---
     if build_approximator_fn is not None:
@@ -434,6 +447,7 @@ def check_pipeline(
                 validation_data,
                 n_posterior_samples,
                 objective_metrics=marginal_metrics,
+                aggregate=aggregate,
             )
     except Exception as exc:
         raise PipelineError(f"Validation step failed: {exc}") from exc

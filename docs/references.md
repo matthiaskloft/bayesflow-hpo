@@ -1118,3 +1118,24 @@ flow-matching sampler keeps allocated at once, which is what
 That this pair is the default is read from BayesFlow itself
 (`bayesflow/networks/defaults.py`: `FLOW_MATCHING_INTEGRATE_DEFAULTS =
 {"method": "tsit5", "steps": "adaptive"}`, bayesflow 2.0.12), not assumed.
+
+
+**SciPy community. (n.d.). `scipy.stats.gmean`.** *SciPy API reference*.
+Retrieved September 21, 2026, from
+https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.gmean.html
+
+Defines the geometric mean as the exponential of the arithmetic mean of
+natural logarithms. Backs `validation.metrics.reduce_metric`; this package
+requires strictly positive inputs explicitly, without a scale-dependent
+pseudocount. The official documentation was read directly. An OpenAlex API
+search for `scipy.stats.gmean` returned no indexed works; this documentation
+reference has no DOI to verify there.
+
+**NumPy developers. (n.d.). `numpy.nanmean`.** *NumPy API reference*.
+Retrieved September 21, 2026, from
+https://numpy.org/doc/stable/reference/generated/numpy.nanmean.html
+
+Documents arithmetic averaging with NaN omission and NaN for all-NaN
+slices. Backs the aggregation missing-value convention; official package
+documentation is the primary source rather than an academic-method claim.
+An OpenAlex API search for `numpy.nanmean` returned no indexed works.

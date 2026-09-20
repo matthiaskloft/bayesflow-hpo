@@ -1024,3 +1024,16 @@ class TestSamplerNStartupTrialsSignature:
 
         survivor = optuna.load_study(study_name="keepme", storage=storage)
         assert [t.values for t in survivor.trials] == [[1.0, 2.0]]
+
+
+def test_aggregate_mapping_reaches_objective_config():
+    with patch("bayesflow_hpo.api.check_aggregation_settings"):
+        config = _patched_optimize(aggregate={"cal_error": "worst"})
+    assert config.aggregate == {"calibration_error": "worst"}
+
+
+def test_custom_validation_rejects_aggregation_before_preflight():
+    with patch("bayesflow_hpo.api.check_pipeline") as preflight:
+        with pytest.raises(ValueError, match="built-in validation"):
+            _patched_optimize(validate_fn=lambda *args: {}, aggregate="worst")
+        preflight.assert_not_called()

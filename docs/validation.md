@@ -84,6 +84,51 @@ val_data = load_validation_dataset("val_data/")
 
 Saves `metadata.json` (keys, seed, condition labels) and `arrays.npz` (all simulation arrays).
 
+## Reducing the validation grid
+
+`optimize()`, `validate_once()`, and `run_validation_pipeline()` accept
+`aggregate`. The default, `"mean"`, preserves the arithmetic mean across
+conditions followed by the arithmetic mean across parameter types.
+A scalar `"worst"` or `"geometric"` changes the condition reduction within
+each parameter, while retaining the mean across parameter types.
+
+Use a mapping to retain both axes for selected metrics:
+
+```python
+result = run_validation_pipeline(
+    approximator,
+    val_data,
+    aggregate={"nrmse": "geometric", "calibration_error": "worst"},
+)
+```
+
+Each named metric is reduced over all parameter-type × condition cells,
+with equal weight per cell. Unspecified metrics retain the default mean.
+Keys name metric outputs (or their registered aliases), such as `nrmse`,
+not metric groups such as `coverage`. Joint metrics have one value per
+condition and are reduced over conditions only, without parameter duplication.
+The per-parameter and per-condition tables remain available for inspection.
+
+`"worst"` takes the maximum for lower-is-better metrics and the minimum for
+registered higher-is-better metrics. `"geometric"` computes
+`exp(mean(log(values)))`, following [SciPy's geometric mean definition](https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.gmean.html).
+It requires **strictly positive** values: zero or negative values raise
+`ValueError`; no clipping or epsilon is applied. Prefer a per-metric mapping
+because signed diagnostics and metrics that can be zero do not satisfy this
+domain. All reductions omit NaNs; all-NaN cells yield NaN, following the
+[NumPy `nanmean` convention](https://numpy.org/doc/stable/reference/generated/numpy.nanmean.html).
+A failed joint metric remains absent rather than being averaged over its
+successful conditions.
+
+The chosen reduction also applies to built-in intermediate validation used
+for pruning and early stopping. Custom `validate_fn` hooks return already
+reduced scores and must implement their own aggregation; non-default
+`aggregate` settings cannot be combined with them.
+
+The study records its aggregation settings. Resuming or warm-starting through
+`optimize()` with different settings raises an error before trial training.
+Studies without this metadata are treated as using the historical mean.
+
 ## Metric Registry
 
 The validation pipeline uses a registry to map string names to metric functions. All metrics share one signature:

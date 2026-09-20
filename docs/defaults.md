@@ -59,6 +59,7 @@ objects (e.g. `ObjectiveConfig`, `create_study`) directly.
 | `sampler_n_startup_trials` | `None` | Override how many trials a string sampler preset draws before its model takes over. `None` (default) keeps the preset value -- 25 for `"tpe"`. Ignored when *sampler* is a sampler instance. |
 | `joint_metrics` | `None` | Configured joint metrics as `{name: fn}`, forwarded to the validation pipeline. Build one with `make_tarp_joint_metric`. |
 | `include_joint_metrics` | `False` | Whether joint metrics also run at every *intermediate* validation, under `PeriodicValidationCallback`. `False` by default, because the cost changes what pruning is for. |
+| `aggregate` | `'mean'` | Scalar `"mean"` (default), `"worst"`, or `"geometric"`, or a metric-output-to-reduction mapping. Scalars reduce conditions per parameter, then average parameters. Explicit mapping entries reduce the full parameter-by-condition grid; omitted metrics retain means. Geometric requires positive values. See `run_validation_pipeline`. |
 <!-- END GENERATED: optimize-defaults -->
 
 ---
