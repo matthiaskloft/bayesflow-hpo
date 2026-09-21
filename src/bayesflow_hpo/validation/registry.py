@@ -349,12 +349,13 @@ def register_joint_metric(
 
     Notes
     -----
-    Joint values appear in a result's ``summary`` only. They are absent from
-    ``per_parameter`` -- a joint metric has no per-parameter value, and
-    writing one would be a number someone later averages -- and absent from
-    ``condition_metrics``, whose multi-parameter form is one row per
-    (condition, parameter) and would have to duplicate the value across a
-    condition's rows.
+    Joint values appear in a result's ``summary``, reduced across
+    conditions, and unreduced in ``joint_condition_metrics``. They are
+    absent from ``per_parameter`` -- a joint metric has no per-parameter
+    value, and writing one would be a number someone later averages -- and
+    absent from ``condition_metrics``, whose multi-parameter form is one row
+    per (condition, parameter) and would have to duplicate the value across
+    a condition's rows.
     """
     register_metric(
         name,

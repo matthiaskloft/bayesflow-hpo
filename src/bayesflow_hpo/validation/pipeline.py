@@ -335,7 +335,17 @@ def _joint_condition_frame(
         [
             {
                 "id_cond": cond_id,
-                **{k: v for k, v in row.items() if k not in dropped},
+                # `id_cond` is excluded from the spread, not merely written
+                # first. A joint metric emitting a key of that name would
+                # otherwise overwrite the condition index -- the one column
+                # this frame exists to provide -- and every row would carry
+                # the metric's value instead, silently. Dropping the
+                # metric's key is the lesser loss: the index is what makes
+                # the other columns attributable.
+                **{
+                    k: v for k, v in row.items()
+                    if k not in dropped and k != "id_cond"
+                },
             }
             for cond_id, row in enumerate(joint_condition_rows)
         ]

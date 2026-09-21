@@ -433,7 +433,17 @@ across conditions and have no parameter axis, so they are not in
 The frame is empty whenever no joint value survived — because none ran, or
 because every one of them was invalidated — so `if not
 result.joint_condition_metrics.empty:` is a safe guard before reading a
-column.
+column. `id_cond` is the pipeline's, not the metric's: a joint metric
+emitting a key of that name has it dropped rather than overwriting the
+condition index.
+
+Only the top-level result carries the frame. A `per_parameter` entry's is
+always empty, since a joint value has no parameter to belong to.
+
+This is a `run_validation_pipeline` return value, so it reaches a caller who
+invokes the pipeline directly or writes their own `validate_fn`. The
+`optimize()` path reduces to `dict(result.summary)` at the trial boundary,
+so a study's stored trials keep the summary numbers and not these rows.
 
 Keeping the rows matters because a joint metric's *validity*, not only its
 value, can differ by condition: Lemos et al. (2023, Sec. 4.3) show that TARP

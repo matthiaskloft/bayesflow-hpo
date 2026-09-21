@@ -176,6 +176,98 @@ def test_invalidated_metric_leaves_no_column(registered) -> None:
     assert list(frame["joint_probe"]) == pytest.approx([0.0, 0.1, 0.2])
 
 
+def test_declared_outputs_are_dropped_when_nothing_was_emitted(
+    registered,
+) -> None:
+    """The declared half of the drop-set union, isolated.
+
+    Every other metric here emits a key equal to its own name, so
+    ``emitted_keys`` alone would pass. A metric that fails on the FIRST
+    condition emits nothing, so only ``output_keys_for`` knows its columns
+    -- which is what ``_dropped_joint_keys`` consults both sources for.
+    """
+
+    def fails_first(inputs: JointMetricInputs) -> dict[str, float]:
+        if inputs.cond_id == 0:
+            raise RuntimeError("boom")
+        return {"declared_a": 1.0, "declared_b": 2.0}
+
+    registered("joint_probe", _probe)
+    registered(
+        "joint_declared", fails_first, outputs=("declared_a", "declared_b")
+    )
+    result = _run(
+        ["a", "b"],
+        joint_metrics={"joint_probe": _probe, "joint_declared": fails_first},
+    )
+
+    frame = result.joint_condition_metrics
+    assert "declared_a" not in frame.columns
+    assert "declared_b" not in frame.columns
+    # Frame and summary agree on exactly which metrics survived.
+    assert set(frame.columns) - {"id_cond"} == set(result.summary) - {
+        "mae", "n_sims",
+    }
+
+
+def test_id_cond_is_the_pipelines_not_the_metrics(registered) -> None:
+    """A metric emitting ``id_cond`` must not overwrite the condition index.
+
+    The index is what makes every other column attributable to a condition,
+    so a collision drops the metric's key rather than the pipeline's value.
+    """
+
+    def collide(inputs: JointMetricInputs) -> dict[str, float]:
+        return {"id_cond": 99.0, "joint_probe": float(inputs.cond_id) / 10.0}
+
+    registered("joint_collide", collide, outputs=("joint_probe",))
+    result = _run(["a", "b"], joint_metrics={"joint_collide": collide})
+
+    frame = result.joint_condition_metrics
+    assert list(frame["id_cond"]) == [0, 1, 2]
+    assert list(frame["joint_probe"]) == pytest.approx([0.0, 0.1, 0.2])
+
+
+def test_worst_recovers_the_min_for_a_higher_is_better_joint_metric(
+    registered,
+) -> None:
+    """``worst`` is direction-aware jointly, not a blanket maximum.
+
+    The companion test above recovers ``worst`` as ``rows.max()``, which
+    holds only for a lower-is-better metric. Registering a direction has to
+    flip that, or a higher-is-better metric reports its BEST condition.
+    """
+    from bayesflow_hpo.objectives import (
+        HIGHER_IS_BETTER,
+        METRIC_DIRECTIONS,
+        register_metric_direction,
+    )
+
+    name = "joint_higher"
+
+    def higher(inputs: JointMetricInputs) -> dict[str, float]:
+        return {name: float(inputs.cond_id) / 10.0}
+
+    registered(name, higher)
+    # Through the public API, not by writing METRIC_DIRECTIONS:
+    # `_direction_for` honours a removal from the legacy HIGHER_IS_BETTER
+    # set, so a direct write leaves `worst_reducer` on its np.max fallback
+    # and the metric would report its BEST condition.
+    register_metric_direction(name, higher_is_better=True, worst_raw=0.0)
+    try:
+        result = _run(
+            ["a", "b"],
+            joint_metrics={name: higher},
+            aggregate={name: "worst"},
+        )
+        rows = result.joint_condition_metrics[name]
+        assert result.summary[name] == pytest.approx(float(rows.min()))
+        assert result.summary[name] == pytest.approx(0.0)
+    finally:
+        METRIC_DIRECTIONS.pop(name, None)
+        HIGHER_IS_BETTER.discard(name)
+
+
 def test_joint_condition_table_filters_by_metric(registered) -> None:
     def two(inputs: JointMetricInputs) -> dict[str, float]:
         return {"joint_probe": 1.0, "other_key": 2.0}

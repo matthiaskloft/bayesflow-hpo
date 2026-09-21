@@ -59,6 +59,9 @@ class ValidationResult:
         another, and the reduction in *summary* cannot show which, so the
         values behind it are kept. Columns of a metric listed in
         *failed_joint_metrics* are absent here as they are from *summary*.
+        Populated on the top-level result only: a *per_parameter* entry
+        always carries an empty frame, because a joint value has no
+        parameter to belong to.
     """
 
     condition_metrics: pd.DataFrame
