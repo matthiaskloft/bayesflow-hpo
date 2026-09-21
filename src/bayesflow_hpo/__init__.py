@@ -120,7 +120,11 @@ from bayesflow_hpo.types import BuildApproximatorFn, TrainFn, ValidateFn
 from bayesflow_hpo.utils import loguniform_float, loguniform_int
 from bayesflow_hpo.validation import (
     DEFAULT_METRICS,
+    AggregationConfigError,
+    AggregationDomainError,
+    AggregationError,
     GlobalC2STResult,
+    JointMetricConfigurationError,
     JointMetricInputs,
     LC2STResult,
     ValidationDataset,
@@ -155,6 +159,11 @@ __all__ = [
     "ValidateFn",
     # Pipeline
     "PipelineError",
+    # Validation errors
+    "AggregationConfigError",
+    "AggregationDomainError",
+    "AggregationError",
+    "JointMetricConfigurationError",
     # Builders
     "build_continuous_approximator",
     # Default wrappers

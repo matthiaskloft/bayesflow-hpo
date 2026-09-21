@@ -481,8 +481,37 @@ receives.
 
 ```python
 compute_condition_metrics(draws, true_values, cond_id, metric_fns) -> dict[str, Any]
-aggregate_condition_rows(condition_rows: list[dict]) -> dict[str, float]
+aggregate_condition_rows(condition_rows: list[dict], aggregate: Aggregate = "mean") -> dict[str, float]
 ```
+
+### Errors
+
+All four are top-level exports and are also importable from
+`bayesflow_hpo.validation`.
+
+```python
+from bayesflow_hpo import (
+    AggregationError,
+    AggregationConfigError,
+    AggregationDomainError,
+    JointMetricConfigurationError,
+)
+```
+
+| Exception | Base | Meaning |
+|---|---|---|
+| `AggregationError` | `ValueError` | A reduction cannot score its inputs. Catch this in a one-shot caller (`validate_once`, `check_pipeline`) that only wants the message preserved. |
+| `AggregationConfigError` | `AggregationError` | The requested reduction is invalid for the configured metrics. Every trial would hit it identically. |
+| `AggregationDomainError` | `AggregationError` | A trial's own values fall outside the reduction's domain (e.g. `geometric` on a negative `correlation`). A property of the trial, not the study. |
+| `JointMetricConfigurationError` | `ValueError` | A joint metric is misconfigured for the study. |
+
+`GenericObjective` and `PeriodicValidationCallback` **re-raise**
+`AggregationConfigError` and `JointMetricConfigurationError`, stopping the
+study; every other exception from validation becomes a failed trial scored on
+the training-loss fallback. A custom `validate_fn` that raises
+`AggregationConfigError` therefore halts the search instead of letting the
+whole budget be scored on a fabricated number. `AggregationDomainError` is
+deliberately *not* re-raised.
 
 ### C2ST Metrics
 

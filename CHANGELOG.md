@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.5.0 -- 2026-09-21
+
+A feature release. Every stored objective value keeps its meaning: nothing
+here changes what a metric measures or its scale, so 0.4.0 studies resume and
+compare side by side. The new aggregation settings are opt-in and default to
+the 0.4.0 behaviour (`aggregate="mean"`, `reference="uniform_box"`).
+
+Downstreams that need to stop a study on a study-wide misconfiguration should
+pin `bayesflow-hpo>=0.5.0`: `AggregationConfigError` does not exist in 0.4.0,
+and a guarded import that falls back to `ValueError` is caught by the
+objective's per-trial handler and converted into a training-loss fallback --
+the silent failure the guard was written to prevent.
+
 ### Fixed
 
 - `docs/validation.md` marked four of the eight `kind="diagnostic"` metrics.
@@ -15,6 +28,48 @@
   their lead paragraph was reshaped for the generated tables.
 
 ### Added
+
+- **Per-metric grid aggregation.** `aggregate=` on `optimize()`,
+  `run_validation_pipeline()`, `validate_once()` and `check_pipeline()` now
+  accepts a mapping from summary column to reduction as well as the scalar
+  `"mean"`, `"worst"` or `"geometric"`, so one metric can be reduced across
+  the condition grid by its worst case while the rest stay on the mean. The
+  reduction is validated up front: a mapping key that names no emitted
+  column, a registered alias that resolves to a metric *group* rather than a
+  column, and a `"worst"` on a metric with no worst case are all refused
+  before the study is built rather than from inside the first trial. Which
+  end is "worst" is resolved from `METRIC_DIRECTIONS` first and the
+  producing metric's registered kind second; previously a summary key
+  missing from the table silently returned the *best* value. The setting is
+  recorded on the study and compared on resume. The same `aggregate=` routes
+  into joint-metric aggregation with the registered direction.
+- **`AggregationConfigError` is a public, catchable exception**, importable
+  as `from bayesflow_hpo import AggregationConfigError` or from
+  `bayesflow_hpo.validation.metrics`. It is one of the two types
+  `GenericObjective` and `PeriodicValidationCallback` **re-raise** instead of
+  falling back to a training-loss score -- the other being
+  `JointMetricConfigurationError`, also now exported -- so a custom
+  `validate_fn` that raises it stops the study rather than having every
+  trial scored on a fabricated number. `AggregationError` (the base, for a
+  one-shot caller that only wants the message) and `AggregationDomainError`
+  are exported beside them. The domain error is deliberately *not* re-raised:
+  `geometric` rejects values `<= 0`, and `correlation` and `contraction` are
+  legitimately non-positive for an undertrained approximator, so it stays a
+  per-trial failure. The four names are in the top-level `__all__` and in
+  `bayesflow_hpo.validation.__all__`.
+- `ValidationResult.joint_condition_metrics` carries joint metrics'
+  per-condition rows, keyed by `id_cond`, with `joint_condition_table()`
+  beside `condition_table()`. The pipeline already computed those values and
+  then discarded them in the reduction. A joint metric's *validity* can vary
+  by condition -- Lemos et al. (2023, Sec. 4.3) show TARP scores a
+  data-ignoring posterior as perfectly covered -- so reducing over a
+  condition that detects a miscalibration and one that cannot returns an
+  unremarkable number from which neither contribution is recoverable. The
+  field is appended last with an empty-frame default, so existing
+  construction is unaffected; it is empty when no joint value survived, and
+  a metric emitting the pipeline-owned `id_cond` key has its own dropped
+  rather than overwriting the condition index. Columns of a metric in
+  `failed_joint_metrics` are absent, as they are from `summary`.
 
 - `reference=` on `compute_tarp_coverage()` and `make_tarp_joint_metric()`
   selects the distribution TARP draws reference points from when none are
