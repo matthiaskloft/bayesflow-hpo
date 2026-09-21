@@ -62,6 +62,28 @@ class ValidationResult:
         Populated on the top-level result only: a *per_parameter* entry
         always carries an empty frame, because a joint value has no
         parameter to belong to.
+
+    References
+    ----------
+    Keeping *joint_condition_metrics* unreduced rests on two results, both
+    recorded in ``docs/references.md``. Modrak et al. (2025) describe the
+    cancellation an unconditional pooling produces, where over- and
+    under-coverage at different corners average to an acceptable number;
+    the reference entry records that claim without a section locator, so
+    none is asserted here. Lemos et al. (2023), Sec. 4.3 give the joint
+    counterpart: an
+    estimator returning the prior scores perfect expected coverage under
+    TARP with x-independent references, so whether a condition is one the
+    metric can see is a property of that condition, not of the metric.
+
+    Lemos, P., Coogan, A., Hezaveh, Y., & Perreault-Levasseur, L. (2023).
+    Sampling-based accuracy testing of posterior estimators for general
+    inference. *PMLR, 202*, 19256--19273.
+
+    Modrak, M., Moon, A. H., Kim, S., Burkner, P., Huurre, N., Faltejskova,
+    K., Gelman, A., & Vehtari, A. (2025). Simulation-based calibration
+    checking for Bayesian computation: The choice of test quantities shapes
+    sensitivity. *Bayesian Analysis, 20*(2), 461--488.
     """
 
     condition_metrics: pd.DataFrame
@@ -102,8 +124,22 @@ class ValidationResult:
     ) -> DisplayDataFrame:
         """Per-condition joint DataFrame, optionally filtered to *metric*.
 
-        The joint counterpart of :meth:`condition_table`; empty when the run
-        computed no joint metrics.
+        The joint counterpart of :meth:`condition_table`.
+
+        Parameters
+        ----------
+        metric
+            Substring matched against column names; ``id_cond`` is retained
+            whatever it matches. ``None``, the default, returns every
+            column.
+
+        Returns
+        -------
+        DisplayDataFrame
+            One row per condition. Empty when no joint value survived --
+            see :attr:`joint_condition_metrics`. A *metric* matching no
+            column leaves only ``id_cond``, exactly as
+            :meth:`condition_table` does.
         """
         if metric is None:
             return DisplayDataFrame(self.joint_condition_metrics)

@@ -452,7 +452,7 @@ given condition is in that regime depends on how well the data identify the
 joint parameter vector there. A reduction over a condition where the metric
 detects a miscalibration and one where it cannot returns an unremarkable
 number, and the contribution of each is not recoverable from it — the
-cancellation Modrák et al. (2025, Sec. 4.1) describe for the marginal case.
+cancellation Modrák et al. (2025) describe for the marginal case.
 
 A metric listed in `failed_joint_metrics` has no column here, just as it has
 no key in `summary`. Reducing the conditions it survived would recover

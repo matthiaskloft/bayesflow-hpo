@@ -9,7 +9,7 @@ was indistinguishable from one where it works. See
 from __future__ import annotations
 
 from collections.abc import Iterator
-from typing import Any
+from typing import Any, Protocol
 
 import numpy as np
 import pytest
@@ -17,6 +17,7 @@ import pytest
 from bayesflow_hpo.validation.data import ValidationDataset
 from bayesflow_hpo.validation.pipeline import run_validation_pipeline
 from bayesflow_hpo.validation.registry import (
+    JointMetricFn,
     JointMetricInputs,
     register_joint_metric,
     unregister_metric,
@@ -74,11 +75,24 @@ def _run(
     )
 
 
+class RegisterJoint(Protocol):
+    """What the ``registered`` fixture hands a test.
+
+    A plain ``Callable[..., str]`` would not carry the keyword arguments
+    forwarded to ``register_joint_metric`` (``outputs=``, and so on), so a
+    test passing one would not type-check.
+    """
+
+    def __call__(
+        self, name: str, fn: JointMetricFn, **kwargs: Any
+    ) -> str: ...
+
+
 @pytest.fixture
-def registered() -> Iterator[Any]:
+def registered() -> Iterator[RegisterJoint]:
     names: list[str] = []
 
-    def _register(name: str, fn: Any, **kwargs: Any) -> str:
+    def _register(name: str, fn: JointMetricFn, **kwargs: Any) -> str:
         register_joint_metric(name, fn, overwrite=True, **kwargs)
         names.append(name)
         return name
@@ -95,7 +109,9 @@ def _probe(inputs: JointMetricInputs) -> dict[str, float]:
 
 
 @pytest.mark.parametrize("param_keys", [["theta"], ["a", "b"]])
-def test_joint_per_condition_values_survive(registered, param_keys) -> None:
+def test_joint_per_condition_values_survive(
+    registered: RegisterJoint, param_keys: list[str],
+) -> None:
     registered("joint_probe", _probe)
     result = _run(param_keys, joint_metrics={"joint_probe": _probe})
 
@@ -106,7 +122,7 @@ def test_joint_per_condition_values_survive(registered, param_keys) -> None:
     assert result.summary["joint_probe"] == pytest.approx(0.1)
 
 
-def test_reduction_is_recoverable_from_the_rows(registered) -> None:
+def test_reduction_is_recoverable_from_the_rows(registered: RegisterJoint) -> None:
     """``worst`` over the exposed rows is the value the summary reports."""
     registered("joint_probe", _probe)
     result = _run(
@@ -126,7 +142,7 @@ def test_frame_is_empty_without_joint_metrics() -> None:
 
 
 def test_frame_is_empty_when_every_joint_metric_is_invalidated(
-    registered,
+    registered: RegisterJoint,
 ) -> None:
     """All-invalidated is absence, not a frame of bare condition ids.
 
@@ -148,7 +164,7 @@ def test_frame_is_empty_when_every_joint_metric_is_invalidated(
     assert "joint_doomed" not in result.summary
 
 
-def test_invalidated_metric_leaves_no_column(registered) -> None:
+def test_invalidated_metric_leaves_no_column(registered: RegisterJoint) -> None:
     """A metric dropped from the summary is dropped from the rows too.
 
     Keeping the conditions it survived would let a caller reduce them by
@@ -177,7 +193,7 @@ def test_invalidated_metric_leaves_no_column(registered) -> None:
 
 
 def test_declared_outputs_are_dropped_when_nothing_was_emitted(
-    registered,
+    registered: RegisterJoint,
 ) -> None:
     """The declared half of the drop-set union, isolated.
 
@@ -210,7 +226,7 @@ def test_declared_outputs_are_dropped_when_nothing_was_emitted(
     }
 
 
-def test_id_cond_is_the_pipelines_not_the_metrics(registered) -> None:
+def test_id_cond_is_the_pipelines_not_the_metrics(registered: RegisterJoint) -> None:
     """A metric emitting ``id_cond`` must not overwrite the condition index.
 
     The index is what makes every other column attributable to a condition,
@@ -229,7 +245,7 @@ def test_id_cond_is_the_pipelines_not_the_metrics(registered) -> None:
 
 
 def test_worst_recovers_the_min_for_a_higher_is_better_joint_metric(
-    registered,
+    registered: RegisterJoint,
 ) -> None:
     """``worst`` is direction-aware jointly, not a blanket maximum.
 
@@ -268,7 +284,7 @@ def test_worst_recovers_the_min_for_a_higher_is_better_joint_metric(
         HIGHER_IS_BETTER.discard(name)
 
 
-def test_joint_condition_table_filters_by_metric(registered) -> None:
+def test_joint_condition_table_filters_by_metric(registered: RegisterJoint) -> None:
     def two(inputs: JointMetricInputs) -> dict[str, float]:
         return {"joint_probe": 1.0, "other_key": 2.0}
 
