@@ -647,6 +647,41 @@ def worst_objective_value(key: CanonicalMetricName) -> MinimizeScore:
 JOINT_METRIC_SETTINGS_ATTR = "bayesflow_hpo_joint_metric_settings"
 
 
+def check_aggregation_settings(
+    study: Any,
+    aggregate: str | Mapping[str, str],
+    *,
+    record: bool = True,
+    current_trial_number: int | None = None,
+) -> None:
+    """Refuse mixing reductions in a populated study; record new settings.
+
+    Missing metadata denotes the historical arithmetic mean. Optuna user
+    attributes persist JSON-compatible values, as documented by
+    ``optuna.study.Study.set_user_attr``. A mapping also records the choice
+    to retain the parameter axis, so it is distinct from a scalar.
+    When called from an objective, exclude only ``current_trial_number``:
+    Optuna has already created that trial, but it has not produced a score
+    yet. Other trials, including concurrently running ones, still count.
+    """
+    from bayesflow_hpo.validation.metrics import normalize_aggregate
+
+    requested = normalize_aggregate(aggregate) or "mean"
+    stored = study.user_attrs.get("bayesflow_hpo_aggregate", "mean")
+    if not isinstance(stored, (str, Mapping)):
+        stored = "mean"
+    if stored != requested and any(
+        trial.number != current_trial_number
+        for trial in study.get_trials(deepcopy=False)
+    ):
+        raise ValueError(
+            f"Study aggregation is {stored!r}, but this run requests "
+            f"{requested!r}. Start a new study or restore aggregate."
+        )
+    if record:
+        study.set_user_attr("bayesflow_hpo_aggregate", requested)
+
+
 def check_or_stamp_joint_metric_settings(
     study: Any,
     settings: Mapping[str, Mapping[str, Any]],

@@ -13,6 +13,7 @@ from bayesflow_hpo.objectives import (
     ENCODING_CHANGED_AT_V2,
     ENCODING_UNCHANGED_AT_V2,
     OBJECTIVE_ENCODING_VERSION,
+    check_aggregation_settings,
     schema_matches,
 )
 from bayesflow_hpo.optimization.checkpoint_pool import CheckpointPool
@@ -37,6 +38,11 @@ from bayesflow_hpo.validation.data import (
 from bayesflow_hpo.validation.inference import (
     DEFAULT_MAX_SAMPLES_PER_CALL,
     validate_max_samples_per_call,
+)
+from bayesflow_hpo.validation.metrics import (
+    Aggregate,
+    normalize_aggregate,
+    require_pipeline_aggregate,
 )
 from bayesflow_hpo.validation.registry import (
     canonical_metric_name,
@@ -179,6 +185,7 @@ def optimize(
     sampler_n_startup_trials: int | None = None,
     joint_metrics: dict[str, Any] | None = None,
     include_joint_metrics: bool = False,
+    aggregate: Aggregate = "mean",
 ) -> optuna.Study:
     """Run HPO with a high-level convenience API.
 
@@ -519,6 +526,14 @@ def optimize(
     show_progress_bar
         Whether to show Optuna's progress bar (default ``True``).
 
+    aggregate
+        Scalar ``"mean"`` (default), ``"worst"``, or ``"geometric"``, or
+        a metric-output-to-reduction mapping. Scalars reduce conditions per
+        parameter, then average parameters. Explicit mapping entries reduce
+        the full parameter-by-condition grid; omitted metrics retain means.
+        Geometric requires positive values. See
+        :func:`~bayesflow_hpo.validation.pipeline.run_validation_pipeline`.
+
     Returns
     -------
     optuna.Study
@@ -552,6 +567,8 @@ def optimize(
     """
     if objective_metrics is None:
         objective_metrics = ["calibration_error", "nrmse"]
+    aggregate = normalize_aggregate(aggregate)
+    require_pipeline_aggregate(aggregate, has_validate_fn=validate_fn is not None)
     # Canonicalize at the PUBLIC boundary, before anything downstream sees the
     # names. Doing it inside ObjectiveConfig was too late: `check_pipeline`
     # already ran pre-flight against the caller's spelling, so
@@ -618,6 +635,7 @@ def optimize(
         validate_fn=validate_fn,
         objective_metrics=objective_metrics,
         validation_conditions=validation_conditions,
+        aggregate=aggregate,
     )
 
     # Resolve memory budget before building objective.
@@ -673,6 +691,7 @@ def optimize(
         train_fn=train_fn,
         validate_fn=validate_fn,
         checkpoint_pool=checkpoint_pool,
+        aggregate=aggregate,
     )
 
     # Step 5: Derive directions
@@ -702,6 +721,7 @@ def optimize(
         max_total_trials=max_total_trials,
         show_progress_bar=show_progress_bar,
         has_cost=cost_metric is not None,
+        aggregate=aggregate,
     )
 
 
@@ -805,6 +825,7 @@ def _build_objective(
     train_fn: TrainFn | None,
     validate_fn: ValidateFn | None,
     checkpoint_pool: CheckpointPool | None,
+    aggregate: Aggregate = "mean",
 ) -> GenericObjective:
     """Construct the :class:`GenericObjective` from configuration."""
     return GenericObjective(
@@ -839,6 +860,7 @@ def _build_objective(
             train_fn=train_fn,
             validate_fn=validate_fn,
             checkpoint_pool=checkpoint_pool,
+            aggregate=aggregate,
         )
     )
 
@@ -1162,8 +1184,14 @@ def _create_and_run_study(
     max_total_trials: int | None,
     show_progress_bar: bool,
     has_cost: bool = True,
+    aggregate: Aggregate = "mean",
 ) -> optuna.Study:
     """Create (or resume) an Optuna study and run optimization."""
+    if warm_start_from is not None and warm_start_top_k > 0 and any(
+        t.state == optuna.trial.TrialState.COMPLETE and t.values is not None
+        for t in warm_start_from.trials
+    ):
+        check_aggregation_settings(warm_start_from, aggregate, record=False)
     if not resume and storage is not None:
         try:
             optuna.delete_study(study_name=study_name, storage=storage)
@@ -1192,6 +1220,8 @@ def _create_and_run_study(
     _guard_resumed_study(
         study, objective.config.objective_metrics, metric_names
     )
+
+    check_aggregation_settings(study, aggregate)
 
     # Auto-detect n_startup_trials from sampler if not set explicitly.
     cfg = objective.config

@@ -25,7 +25,7 @@ class ValidationResult:
     condition_metrics
         DataFrame with one row per condition, columns are metric values.
     summary
-        Overall mean across conditions for each metric key.
+        Overall configured reduction for each metric key (mean by default).
     per_parameter
         Optional mapping from parameter name to per-parameter
         ``ValidationResult`` (for multi-parameter models).

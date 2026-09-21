@@ -38,7 +38,7 @@ def optimize(
     show_progress_bar=True, *,
     max_samples_per_call=DEFAULT_MAX_SAMPLES_PER_CALL,
     sampler_n_startup_trials=None, joint_metrics=None,
-    include_joint_metrics=False
+    include_joint_metrics=False, aggregate='mean'
 ) -> optuna.Study
 ```
 <!-- END GENERATED: optimize-signature -->
@@ -93,6 +93,7 @@ def optimize(
 | `sampler_n_startup_trials` | Override how many trials a string sampler preset draws before its model takes over. `None` (default) keeps the preset value -- 25 for `"tpe"`. Ignored when *sampler* is a sampler instance. |
 | `joint_metrics` | Configured joint metrics as `{name: fn}`, forwarded to the validation pipeline. Build one with `make_tarp_joint_metric`. |
 | `include_joint_metrics` | Whether joint metrics also run at every *intermediate* validation, under `PeriodicValidationCallback`. `False` by default, because the cost changes what pruning is for. |
+| `aggregate` | Scalar `"mean"` (default), `"worst"`, or `"geometric"`, or a metric-output-to-reduction mapping. Scalars reduce conditions per parameter, then average parameters. Explicit mapping entries reduce the full parameter-by-condition grid; omitted metrics retain means. Geometric requires positive values. See `run_validation_pipeline`. |
 <!-- END GENERATED: optimize-params -->
 
 `optimize()` takes no `pruner` argument: it drives multi-objective studies,
@@ -111,6 +112,7 @@ def check_pipeline(
     objective_metrics=None,
     sims_per_condition=5, n_posterior_samples=2,
     validation_conditions=None, epochs=1, num_batches=1,
+    aggregate="mean",
 ) -> None
 ```
 
@@ -266,6 +268,7 @@ Public default implementations used by `optimize()` when no custom hooks are pro
 | `build_approximator_fn` | `None` | Optional custom build function `(hparams) -> Approximator`. Must return an **uncompiled** approximator. |
 | `train_fn` | `None` | Optional custom training function `(approximator, simulator, hparams, callbacks) -> None`. |
 | `validate_fn` | `None` | Optional custom validation function `(approximator, validation_data, n_posterior_samples) -> dict[str, float]`. |
+| `aggregate` | `'mean'` | Scalar `"mean"` (default), `"worst"`, or `"geometric"`, or a metric-output-to-reduction mapping. Scalars reduce conditions per parameter, then average parameters. Explicit mapping entries reduce the full parameter-by-condition grid; omitted metrics retain means. Geometric requires positive values. See `run_validation_pipeline`. |
 <!-- END GENERATED: objectiveconfig-params -->
 
 ### GenericObjective
@@ -412,10 +415,12 @@ load_validation_dataset(path) -> ValidationDataset
 ```python
 run_validation_pipeline(approximator, validation_data, n_posterior_samples=1000,
                         metrics=None, joint_metrics=None,
-                        max_samples_per_call=20_000) -> ValidationResult
+                        max_samples_per_call=20_000,
+                        aggregate="mean") -> ValidationResult
 validate_once(approximator, validation_data, n_sims=2,
               n_posterior_samples=10, metrics=None, joint_metrics=None,
-              max_samples_per_call=20_000) -> ValidationResult
+              max_samples_per_call=20_000,
+              aggregate="mean") -> ValidationResult
 ```
 
 ### ValidationResult

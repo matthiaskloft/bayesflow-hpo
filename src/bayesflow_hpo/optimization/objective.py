@@ -45,6 +45,7 @@ from bayesflow_hpo.objectives import (
     MAX_PARAM_COUNT,
     _direction_for,
     canonical_summary,
+    check_aggregation_settings,
     check_or_stamp_joint_metric_settings,
     compute_inference_time_per_dataset,
     extract_multi_objective_values,
@@ -72,6 +73,12 @@ from bayesflow_hpo.validation.inference import (
     DEFAULT_MAX_SAMPLES_PER_CALL,
     condition_batch_size,
     validate_max_samples_per_call,
+)
+from bayesflow_hpo.validation.metrics import (
+    Aggregate,
+    AggregationConfigError,
+    normalize_aggregate,
+    require_pipeline_aggregate,
 )
 from bayesflow_hpo.validation.registry import (
     CanonicalMetricName,
@@ -219,6 +226,7 @@ def default_validate_fn(
     objective_metrics: list[str] | None = None,
     joint_metrics: dict[str, Any] | None = None,
     max_samples_per_call: int | None = DEFAULT_MAX_SAMPLES_PER_CALL,
+    aggregate: Aggregate = "mean",
 ) -> dict[str, float]:
     """Run the built-in validation pipeline and return metric dict.
 
@@ -249,6 +257,14 @@ def default_validate_fn(
         to ``run_validation_pipeline``.  ``None`` samples each condition in
         a single call.
 
+    aggregate
+        Scalar ``"mean"`` (default), ``"worst"``, or ``"geometric"``, or
+        a metric-output-to-reduction mapping. Scalars reduce conditions per
+        parameter, then average parameters. Explicit mapping entries reduce
+        the full parameter-by-condition grid; omitted metrics retain means.
+        Geometric requires positive values. See
+        :func:`~bayesflow_hpo.validation.pipeline.run_validation_pipeline`.
+
     Returns
     -------
     dict[str, float]
@@ -263,6 +279,7 @@ def default_validate_fn(
         metrics=_pipeline_metrics(objective_metrics or []),
         joint_metrics=joint_metrics,
         max_samples_per_call=max_samples_per_call,
+        aggregate=aggregate,
     )
     return dict(result.summary)
 
@@ -654,6 +671,14 @@ class ObjectiveConfig:
         **Intermediate pruning:** also called during training at the
         configured interval with reduced ``n_posterior_samples`` for
         median-based multi-objective pruning.
+
+    aggregate
+        Scalar ``"mean"`` (default), ``"worst"``, or ``"geometric"``, or
+        a metric-output-to-reduction mapping. Scalars reduce conditions per
+        parameter, then average parameters. Explicit mapping entries reduce
+        the full parameter-by-condition grid; omitted metrics retain means.
+        Geometric requires positive values. See
+        :func:`~bayesflow_hpo.validation.pipeline.run_validation_pipeline`.
     """
 
     simulator: bf.simulators.Simulator
@@ -715,9 +740,14 @@ class ObjectiveConfig:
     build_approximator_fn: BuildApproximatorFn | None = None
     train_fn: TrainFn | None = None
     validate_fn: ValidateFn | None = None
+    aggregate: Aggregate = "mean"
 
     def __post_init__(self) -> None:
         validate_objective_metric_kinds(self.objective_metrics)
+        self.aggregate = normalize_aggregate(self.aggregate)
+        require_pipeline_aggregate(
+            self.aggregate, has_validate_fn=self.validate_fn is not None
+        )
         # Checked at THIS boundary too, not only in `optimize()`. Building a
         # config directly skips that check, and the memory estimator clamps
         # a sub-1 cap to 1 -- so an invalid value would reach training and
@@ -1428,6 +1458,9 @@ class GenericObjective:
             Failed or budget-rejected trials return penalty values.
         """
         config = self.config
+        check_aggregation_settings(
+            trial.study, config.aggregate, current_trial_number=trial.number,
+        )
 
         # --- Step 1: Sample hparams ---
         params = config.search_space.sample(trial)
@@ -1699,6 +1732,7 @@ class GenericObjective:
                     early_stopping_patience=config.early_stopping_patience,
                     early_stopping_window=config.early_stopping_window,
                     early_stopping_monitor=config.early_stopping_monitor,
+                    aggregate=config.aggregate,
                 )
             )
 
@@ -1727,13 +1761,16 @@ class GenericObjective:
                 config.train_fn(approximator, config.simulator, params, callbacks)
             else:
                 default_train_fn(approximator, config.simulator, params, callbacks)
-        except JointMetricConfigurationError:
+        except (JointMetricConfigurationError, AggregationConfigError):
             # Reaches here from `PeriodicValidationCallback`, which runs
             # DURING training. The catch-all below would record it as a
             # `training_error` and return `_penalty()`, so the study would
             # spend its whole cap on a misconfiguration -- the same defect
             # already fixed for final validation, one layer out, and now
             # reachable because joint metrics no longer run in pre-flight.
+            # `AggregationDomainError` is deliberately absent: it reports
+            # THIS trial's values, not the study's settings, so it belongs
+            # on the failed-trial path below.
             cleanup_trial()
             raise
         except optuna.TrialPruned:
@@ -1798,6 +1835,7 @@ class GenericObjective:
                         _constraint_metric_names(config),
                     ),
                     joint_metrics=config.joint_metrics,
+                    aggregate=config.aggregate,
                 )
                 inference_time = result.timing.get("inference", 0.0)
                 # Checked HERE rather than at study creation, because this
@@ -1861,7 +1899,7 @@ class GenericObjective:
             # Wrap for extract_multi_objective_values compatibility.
             metrics = {"summary": metrics_summary}
 
-        except JointMetricConfigurationError:
+        except (JointMetricConfigurationError, AggregationConfigError):
             # NOT a trial failure, so it must not reach the catch-all below,
             # which converts anything it catches into a training-loss
             # fallback. This condition is a property of the STUDY -- changed
@@ -1872,6 +1910,14 @@ class GenericObjective:
             # not guarding at all: incomparable real numbers are at least
             # real. Raising stops on the first trial, the only useful moment
             # to tell the caller.
+            #
+            # `AggregationDomainError` is excluded on purpose. A geometric
+            # reduction rejects values <= 0, and `correlation` and
+            # `contraction` -- both in `DEFAULT_METRICS` -- are legitimately
+            # non-positive for an undertrained approximator. That is a
+            # property of one trial, not of the study, so it falls through
+            # to the catch-all and fails that trial instead of ending a
+            # healthy run on its first bad draw.
             cleanup_trial()
             raise
         except optuna.TrialPruned:

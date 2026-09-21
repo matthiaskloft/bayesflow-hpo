@@ -433,6 +433,31 @@ def is_joint_metric(name: str) -> bool:
     return _ALIASES.get(name, name) in _JOINT
 
 
+def is_diagnostic_metric(name: str) -> bool:
+    """Return whether *name* (or its alias) is registered diagnostic-only.
+
+    A diagnostic metric is reported but never scored, because it is not
+    monotone in quality: signed ``bias`` is optimal at zero and ``coverage``
+    at its nominal level, so neither has a worst extreme.
+    :func:`validate_objective_metric_kinds` refuses these as objectives for
+    the same reason.
+
+    Parameters
+    ----------
+    name
+        Canonical name or alias.
+
+    Returns
+    -------
+    bool
+        ``True`` only for a registered metric declared
+        ``kind="diagnostic"``. An unregistered name is not diagnostic:
+        a custom metric resolved by a caller's own hook is assumed scorable,
+        matching :func:`validate_objective_metric_kinds`.
+    """
+    return _KINDS.get(_ALIASES.get(name, name)) == "diagnostic"
+
+
 def get_metric(name: str) -> MetricFn:
     """Look up a metric by name or alias.
 

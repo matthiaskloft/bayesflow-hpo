@@ -50,6 +50,12 @@ from bayesflow_hpo.validation.inference import (
     DEFAULT_MAX_SAMPLES_PER_CALL,
     validate_max_samples_per_call,
 )
+from bayesflow_hpo.validation.metrics import (
+    Aggregate,
+    AggregationConfigError,
+    normalize_aggregate,
+    require_pipeline_aggregate,
+)
 from bayesflow_hpo.validation.registry import (
     CanonicalMetricName,
     JointMetricConfigurationError,
@@ -154,6 +160,14 @@ class PeriodicValidationCallback(Callback):
         ``early_stopping_monitor="objective_mean"`` the mid-training average
         is taken over the remaining metrics only, and is therefore not on
         the same scale as the final objective mean.
+
+    aggregate
+        Scalar ``"mean"`` (default), ``"worst"``, or ``"geometric"``, or
+        a metric-output-to-reduction mapping. Scalars reduce conditions per
+        parameter, then average parameters. Explicit mapping entries reduce
+        the full parameter-by-condition grid; omitted metrics retain means.
+        Geometric requires positive values. See
+        :func:`~bayesflow_hpo.validation.pipeline.run_validation_pipeline`.
     """
 
     def __init__(
@@ -174,6 +188,7 @@ class PeriodicValidationCallback(Callback):
         include_joint_metrics: bool = False,
         joint_metrics: dict[str, Any] | None = None,
         max_samples_per_call: int | None = DEFAULT_MAX_SAMPLES_PER_CALL,
+        aggregate: Aggregate = "mean",
     ):
         super().__init__()
         self.trial = trial
@@ -188,6 +203,10 @@ class PeriodicValidationCallback(Callback):
         # failure -- an argument error reported as a bad model.
         self.max_samples_per_call = validate_max_samples_per_call(
             max_samples_per_call
+        )
+        self.aggregate = normalize_aggregate(aggregate)
+        require_pipeline_aggregate(
+            self.aggregate, has_validate_fn=validate_fn is not None
         )
         # `optimize()` auto-detects this from the sampler, but building an
         # objective directly leaves it None, and every pruning strategy
@@ -646,6 +665,7 @@ class PeriodicValidationCallback(Callback):
                     # condition, and discard the value, since the extraction
                     # below keys on `intermediate_metrics`.
                     joint_metrics=self._intermediate_joint_metrics(),
+                    aggregate=self.aggregate,
                 )
                 extracted: dict[str, float] = {
                     k: float(result.summary[k])
@@ -673,10 +693,12 @@ class PeriodicValidationCallback(Callback):
                     )
                     return None
                 return extracted
-        except JointMetricConfigurationError:
+        except (JointMetricConfigurationError, AggregationConfigError):
             # Not a validation failure. Swallowing it here would stop
             # pruning silently and leave the same error to surface from
             # final validation one wasted training run later.
+            # `AggregationDomainError` is a property of this trial's values,
+            # so it stays on the ordinary path and only skips a prune check.
             raise
         except optuna.TrialPruned:
             raise

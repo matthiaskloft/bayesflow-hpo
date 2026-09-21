@@ -63,6 +63,7 @@ _DUMMY_VALIDATION_DATA = ValidationDataset(
 # `cost_metric` is deliberately excluded: "inference_time" is measured by the
 # objective itself and is not a registry metric.
 _METRIC_NAME_FIELDS = {
+    "aggregate",
     "objective_metrics",
     "early_stopping_monitor",
     "pruning_strategy",
@@ -178,6 +179,10 @@ def test_field_canonicalizes_aliases(field_name):
     elif field_name in ("metric_constraints_hard", "metric_constraints_soft"):
         cfg = _config(**{field_name: [(_ALIAS, 0.1, "below")]})
         assert getattr(cfg, field_name) == [(_CANONICAL, 0.1, "below")]
+
+    elif field_name == "aggregate":
+        cfg = _config(aggregate={_ALIAS: "worst"})
+        assert cfg.aggregate == {_CANONICAL: "worst"}
 
     elif field_name == "joint_metrics":
         # Keyed by metric name; the values are callables and are untouched.

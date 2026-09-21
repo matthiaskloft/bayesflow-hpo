@@ -809,6 +809,10 @@ def create_study(
         # Without this the target holds COMPLETE trials and no provenance --
         # the exact signature of a legacy study -- so the resume guard would
         # reject a perfectly valid warm start from an already-re-encoded one.
+        source_aggregate = warm_start_from.user_attrs.get(
+            "bayesflow_hpo_aggregate", "mean"
+        )
+        study.set_user_attr("bayesflow_hpo_aggregate", source_aggregate)
         source_encoding = warm_start_from.user_attrs.get(
             "bayesflow_hpo_objective_encoding"
         )
