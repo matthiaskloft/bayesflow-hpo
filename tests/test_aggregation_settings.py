@@ -73,3 +73,86 @@ def test_warm_start_preserves_aggregation_metadata():
     check_aggregation_settings(target, {"nrmse": "geometric"})
     with pytest.raises(ValueError, match="aggregation"):
         check_aggregation_settings(target, "mean")
+
+# Direct GenericObjective lifecycle guards (issue #118 regression coverage).
+def _direct_objective(aggregate, sample):
+    from types import SimpleNamespace
+
+    from bayesflow_hpo.optimization.objective import GenericObjective
+
+    objective = GenericObjective.__new__(GenericObjective)
+    objective.config = SimpleNamespace(aggregate=aggregate, search_space=sample)
+    return objective
+
+
+class _SampleSpy:
+    def __init__(self):
+        self.calls = 0
+
+    def sample(self, trial):
+        self.calls += 1
+        raise RuntimeError("sample reached")
+
+
+def test_direct_first_geometric_trial_stamps_metadata_without_self_rejection():
+    study = optuna.create_study()
+    trial = study.ask()
+    spy = _SampleSpy()
+    objective = _direct_objective("geometric", spy)
+
+    with pytest.raises(RuntimeError, match="sample reached"):
+        objective(trial)
+
+    assert spy.calls == 1
+    assert study.user_attrs["bayesflow_hpo_aggregate"] == "geometric"
+
+
+def test_direct_resume_with_same_aggregation_reaches_trial_work():
+    study = optuna.create_study()
+    study.set_user_attr("bayesflow_hpo_aggregate", {"nrmse": "geometric"})
+    study.add_trial(optuna.trial.create_trial(value=0.2))
+    trial = study.ask()
+    spy = _SampleSpy()
+
+    with pytest.raises(RuntimeError, match="sample reached"):
+        _direct_objective({"nrmse": "geometric"}, spy)(trial)
+
+    assert spy.calls == 1
+
+
+def test_direct_changed_aggregation_rejects_before_sampling_after_complete_trial():
+    study = optuna.create_study()
+    study.set_user_attr("bayesflow_hpo_aggregate", "geometric")
+    study.add_trial(optuna.trial.create_trial(value=0.2))
+    trial = study.ask()
+    spy = _SampleSpy()
+
+    with pytest.raises(ValueError, match="aggregation"):
+        _direct_objective("mean", spy)(trial)
+
+    assert spy.calls == 0
+
+
+def test_direct_legacy_completed_study_rejects_nonmean_before_sampling():
+    study = optuna.create_study()
+    study.add_trial(optuna.trial.create_trial(value=0.2))
+    trial = study.ask()
+    spy = _SampleSpy()
+
+    with pytest.raises(ValueError, match="aggregation"):
+        _direct_objective("geometric", spy)(trial)
+
+    assert spy.calls == 0
+
+
+def test_direct_changed_aggregation_does_not_ignore_other_running_trial():
+    study = optuna.create_study()
+    study.set_user_attr("bayesflow_hpo_aggregate", "mean")
+    study.ask()  # Remains RUNNING in the study.
+    trial = study.ask()
+    spy = _SampleSpy()
+
+    with pytest.raises(ValueError, match="aggregation"):
+        _direct_objective("geometric", spy)(trial)
+
+    assert spy.calls == 0

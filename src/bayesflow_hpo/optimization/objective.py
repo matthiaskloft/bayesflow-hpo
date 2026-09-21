@@ -45,6 +45,7 @@ from bayesflow_hpo.objectives import (
     MAX_PARAM_COUNT,
     _direction_for,
     canonical_summary,
+    check_aggregation_settings,
     check_or_stamp_joint_metric_settings,
     compute_inference_time_per_dataset,
     extract_multi_objective_values,
@@ -1455,6 +1456,9 @@ class GenericObjective:
             Failed or budget-rejected trials return penalty values.
         """
         config = self.config
+        check_aggregation_settings(
+            trial.study, config.aggregate, current_trial_number=trial.number,
+        )
 
         # --- Step 1: Sample hparams ---
         params = config.search_space.sample(trial)

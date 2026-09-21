@@ -49,6 +49,12 @@ class _FakeStudy:
     """Minimal study stub for PeriodicValidationCallback compatibility."""
     directions = ["minimize", "minimize", "minimize"]
 
+    def __init__(self):
+        self.user_attrs = {}
+
+    def set_user_attr(self, key, value):
+        self.user_attrs[key] = value
+
     def get_trials(self, deepcopy=False, states=None):
         return []
 

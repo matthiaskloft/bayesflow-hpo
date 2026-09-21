@@ -9,3 +9,7 @@
   catch-all handlers, or an invalid reduction silently becomes a fallback score.
 - Aggregation changes score meaning, so `optimize()` records its configuration
   and checks resume/warm-start compatibility before comparing trials.
+
+- The aggregation guard also belongs at the start of `GenericObjective`, since
+  advanced callers bypass `optimize()`. Exclude only the current trial from
+  the legacy-study check: Optuna creates it before invoking the objective.

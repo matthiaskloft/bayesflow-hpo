@@ -127,6 +127,8 @@ reduced scores and must implement their own aggregation; non-default
 
 The study records its aggregation settings. Resuming or warm-starting through
 `optimize()` with different settings raises an error before trial training.
+Direct `GenericObjective` calls also check and record settings before sampling
+hyperparameters or starting training, including intermediate pruning.
 Studies without this metadata are treated as using the historical mean.
 
 ## Metric Registry
