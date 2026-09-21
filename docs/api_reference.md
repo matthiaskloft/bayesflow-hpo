@@ -515,11 +515,22 @@ from bayesflow_hpo import (
 
 `GenericObjective` and `PeriodicValidationCallback` **re-raise**
 `AggregationConfigError` and `JointMetricConfigurationError`, stopping the
-study; every other exception from validation becomes a failed trial scored on
-the training-loss fallback. A custom `validate_fn` that raises
-`AggregationConfigError` therefore halts the search instead of letting the
-whole budget be scored on a fabricated number. `AggregationDomainError` is
-deliberately *not* re-raised.
+study. A custom `validate_fn` that raises `AggregationConfigError` therefore
+halts the search instead of letting the whole budget be scored on a fabricated
+number. `AggregationDomainError` is deliberately *not* re-raised.
+
+`optuna.TrialPruned` propagates as well, at both sites, so a `validate_fn` can
+prune its own trial. It is not a misconfiguration and does not stop the study —
+Optuna records the trial as pruned.
+
+Every *other* exception is an ordinary failure of that one trial, and what
+happens next depends on which site raised it:
+
+| Raised from | Outcome |
+|---|---|
+| final validation, in `GenericObjective` | trial scored on the training-loss fallback (`validation_fallback` user attribute is `"training_loss"`, or `"penalty"` when no training loss was recorded); the message is stored as `validation_error` |
+| training, in `GenericObjective` | trial scored on `_penalty()`; the message is stored as `training_error` |
+| intermediate validation, in `PeriodicValidationCallback` | logged, that prune check skipped, training continues — the trial is *not* failed |
 
 ### C2ST Metrics
 
