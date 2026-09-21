@@ -484,6 +484,14 @@ compute_condition_metrics(draws, true_values, cond_id, metric_fns) -> dict[str, 
 aggregate_condition_rows(condition_rows: list[dict], aggregate: Aggregate = "mean") -> dict[str, float]
 ```
 
+The two reduction primitives are cited in
+[`references.md`](references.md): arithmetic averaging with NaN omission
+follows `numpy.nanmean`, and `"geometric"` follows `scipy.stats.gmean`, with
+strictly positive inputs required explicitly rather than shifted by a
+pseudocount. Per-metric mapping, worst-case direction resolution and the
+exception contract below are this package's own behaviour, not a method taken
+from a source.
+
 ### Errors
 
 All four are top-level exports and are also importable from
