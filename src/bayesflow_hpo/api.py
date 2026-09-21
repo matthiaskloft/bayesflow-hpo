@@ -39,7 +39,11 @@ from bayesflow_hpo.validation.inference import (
     DEFAULT_MAX_SAMPLES_PER_CALL,
     validate_max_samples_per_call,
 )
-from bayesflow_hpo.validation.metrics import Aggregate, normalize_aggregate
+from bayesflow_hpo.validation.metrics import (
+    Aggregate,
+    normalize_aggregate,
+    require_pipeline_aggregate,
+)
 from bayesflow_hpo.validation.registry import (
     canonical_metric_name,
     validate_objective_metric_kinds,
@@ -564,8 +568,7 @@ def optimize(
     if objective_metrics is None:
         objective_metrics = ["calibration_error", "nrmse"]
     aggregate = normalize_aggregate(aggregate)
-    if validate_fn is not None and aggregate not in ("mean", {}):
-        raise ValueError("aggregate requires the built-in validation pipeline.")
+    require_pipeline_aggregate(aggregate, has_validate_fn=validate_fn is not None)
     # Canonicalize at the PUBLIC boundary, before anything downstream sees the
     # names. Doing it inside ObjectiveConfig was too late: `check_pipeline`
     # already ran pre-flight against the caller's spelling, so

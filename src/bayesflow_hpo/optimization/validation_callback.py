@@ -52,8 +52,9 @@ from bayesflow_hpo.validation.inference import (
 )
 from bayesflow_hpo.validation.metrics import (
     Aggregate,
-    AggregationError,
+    AggregationConfigError,
     normalize_aggregate,
+    require_pipeline_aggregate,
 )
 from bayesflow_hpo.validation.registry import (
     CanonicalMetricName,
@@ -204,8 +205,9 @@ class PeriodicValidationCallback(Callback):
             max_samples_per_call
         )
         self.aggregate = normalize_aggregate(aggregate)
-        if validate_fn is not None and self.aggregate not in ("mean", {}):
-            raise ValueError("aggregate requires the built-in validation pipeline.")
+        require_pipeline_aggregate(
+            self.aggregate, has_validate_fn=validate_fn is not None
+        )
         # `optimize()` auto-detects this from the sampler, but building an
         # objective directly leaves it None, and every pruning strategy
         # compares it against an int.
@@ -691,10 +693,12 @@ class PeriodicValidationCallback(Callback):
                     )
                     return None
                 return extracted
-        except (JointMetricConfigurationError, AggregationError):
+        except (JointMetricConfigurationError, AggregationConfigError):
             # Not a validation failure. Swallowing it here would stop
             # pruning silently and leave the same error to surface from
             # final validation one wasted training run later.
+            # `AggregationDomainError` is a property of this trial's values,
+            # so it stays on the ordinary path and only skips a prune check.
             raise
         except optuna.TrialPruned:
             raise

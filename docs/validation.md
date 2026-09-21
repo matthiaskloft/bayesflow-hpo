@@ -105,17 +105,48 @@ result = run_validation_pipeline(
 Each named metric is reduced over all parameter-type × condition cells,
 with equal weight per cell. Unspecified metrics retain the default mean.
 Keys name metric outputs (or their registered aliases), such as `nrmse`,
-not metric groups such as `coverage`. Joint metrics have one value per
+not metric groups such as `coverage`. A key that matches no emitted summary
+column raises, naming the group's outputs where there is one — an unmatched
+key would otherwise leave the metric on the arithmetic mean with nothing to
+show that the setting never took effect. Joint metrics have one value per
 condition and are reduced over conditions only, without parameter duplication.
 The per-parameter and per-condition tables remain available for inspection.
 
-`"worst"` takes the maximum for lower-is-better metrics and the minimum for
-registered higher-is-better metrics. `"geometric"` computes
-`exp(mean(log(values)))`, following [SciPy's geometric mean definition](https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.gmean.html).
+### `"worst"`
+
+`"worst"` takes the minimum for metrics registered as higher-is-better
+(`correlation`, `contraction`, `log_gamma`) and the maximum for every other
+scorable metric.
+
+Diagnostic-only metrics have **no** worst case, because they are optimal at a
+point rather than at an extreme: signed `bias` is best at zero, so neither the
+largest nor the smallest condition is its worst, and `coverage_90` is best at
+its nominal 0.90, so an over-covering 0.99 is no worse or better a "worst
+case" than an under-covering 0.55. The affected outputs are those of `bias`,
+`z_score`, `coverage`, `coverage_left` and `coverage_right`.
+
+- Naming such a metric **explicitly** raises `ValueError`. The mapping asserts
+  a worst case that does not exist.
+- A **scalar** `aggregate="worst"` leaves them on the arithmetic mean, since it
+  sweeps up every reported metric rather than naming any. Scorable metrics are
+  reduced as usual.
+
+### `"geometric"`
+
+`"geometric"` computes `exp(mean(log(values)))`, following [SciPy's geometric
+mean definition](https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.gmean.html).
 It requires **strictly positive** values: zero or negative values raise
-`ValueError`; no clipping or epsilon is applied. Prefer a per-metric mapping
-because signed diagnostics and metrics that can be zero do not satisfy this
-domain. All reductions omit NaNs; all-NaN cells yield NaN, following the
+`ValueError`; no clipping or epsilon is applied.
+
+Prefer a per-metric mapping. A scalar `"geometric"` also covers `correlation`
+and `contraction`, which are in `DEFAULT_METRICS` and legitimately non-positive
+for an undertrained approximator, so a trial that hits the domain limit is
+recorded as a failed trial rather than ending the study. A reduction that is
+invalid for the *configuration* — a `"worst"` on a diagnostic, an unknown key —
+still stops the run on the first trial, because every later trial would repeat
+it.
+
+All reductions omit NaNs; all-NaN cells yield NaN, following the
 [NumPy `nanmean` convention](https://numpy.org/doc/stable/reference/generated/numpy.nanmean.html).
 A failed joint metric remains absent rather than being averaged over its
 successful conditions.

@@ -76,8 +76,9 @@ from bayesflow_hpo.validation.inference import (
 )
 from bayesflow_hpo.validation.metrics import (
     Aggregate,
-    AggregationError,
+    AggregationConfigError,
     normalize_aggregate,
+    require_pipeline_aggregate,
 )
 from bayesflow_hpo.validation.registry import (
     CanonicalMetricName,
@@ -744,8 +745,9 @@ class ObjectiveConfig:
     def __post_init__(self) -> None:
         validate_objective_metric_kinds(self.objective_metrics)
         self.aggregate = normalize_aggregate(self.aggregate)
-        if self.validate_fn is not None and self.aggregate not in ("mean", {}):
-            raise ValueError("aggregate requires the built-in validation pipeline.")
+        require_pipeline_aggregate(
+            self.aggregate, has_validate_fn=self.validate_fn is not None
+        )
         # Checked at THIS boundary too, not only in `optimize()`. Building a
         # config directly skips that check, and the memory estimator clamps
         # a sub-1 cap to 1 -- so an invalid value would reach training and
@@ -1759,13 +1761,16 @@ class GenericObjective:
                 config.train_fn(approximator, config.simulator, params, callbacks)
             else:
                 default_train_fn(approximator, config.simulator, params, callbacks)
-        except (JointMetricConfigurationError, AggregationError):
+        except (JointMetricConfigurationError, AggregationConfigError):
             # Reaches here from `PeriodicValidationCallback`, which runs
             # DURING training. The catch-all below would record it as a
             # `training_error` and return `_penalty()`, so the study would
             # spend its whole cap on a misconfiguration -- the same defect
             # already fixed for final validation, one layer out, and now
             # reachable because joint metrics no longer run in pre-flight.
+            # `AggregationDomainError` is deliberately absent: it reports
+            # THIS trial's values, not the study's settings, so it belongs
+            # on the failed-trial path below.
             cleanup_trial()
             raise
         except optuna.TrialPruned:
@@ -1894,7 +1899,7 @@ class GenericObjective:
             # Wrap for extract_multi_objective_values compatibility.
             metrics = {"summary": metrics_summary}
 
-        except (JointMetricConfigurationError, AggregationError):
+        except (JointMetricConfigurationError, AggregationConfigError):
             # NOT a trial failure, so it must not reach the catch-all below,
             # which converts anything it catches into a training-loss
             # fallback. This condition is a property of the STUDY -- changed
@@ -1905,6 +1910,14 @@ class GenericObjective:
             # not guarding at all: incomparable real numbers are at least
             # real. Raising stops on the first trial, the only useful moment
             # to tell the caller.
+            #
+            # `AggregationDomainError` is excluded on purpose. A geometric
+            # reduction rejects values <= 0, and `correlation` and
+            # `contraction` -- both in `DEFAULT_METRICS` -- are legitimately
+            # non-positive for an undertrained approximator. That is a
+            # property of one trial, not of the study, so it falls through
+            # to the catch-all and fails that trial instead of ending a
+            # healthy run on its first bad draw.
             cleanup_trial()
             raise
         except optuna.TrialPruned:

@@ -23,7 +23,11 @@ from bayesflow_hpo.optimization.objective import default_train_fn, default_valid
 from bayesflow_hpo.search_spaces.composite import CompositeSearchSpace
 from bayesflow_hpo.types import BuildApproximatorFn, TrainFn, ValidateFn
 from bayesflow_hpo.validation.data import generate_validation_dataset
-from bayesflow_hpo.validation.metrics import Aggregate, normalize_aggregate
+from bayesflow_hpo.validation.metrics import (
+    Aggregate,
+    normalize_aggregate,
+    require_pipeline_aggregate,
+)
 from bayesflow_hpo.validation.registry import (
     canonical_metric_name,
     is_joint_metric,
@@ -279,8 +283,7 @@ def check_pipeline(
     objective_metrics = [canonical_metric_name(m) for m in objective_metrics]
     validate_objective_metric_kinds(objective_metrics)
     aggregate = normalize_aggregate(aggregate)
-    if validate_fn is not None and aggregate not in ("mean", {}):
-        raise ValueError("aggregate requires the built-in validation pipeline.")
+    require_pipeline_aggregate(aggregate, has_validate_fn=validate_fn is not None)
 
     # --- Step 0: Validate hook signatures ---
     if build_approximator_fn is not None:

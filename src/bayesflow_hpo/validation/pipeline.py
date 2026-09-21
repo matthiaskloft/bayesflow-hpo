@@ -23,6 +23,7 @@ from bayesflow_hpo.validation.metrics import (
     compute_condition_metrics,
     normalize_aggregate,
     reduce_metric,
+    resolve_reduction,
 )
 from bayesflow_hpo.validation.registry import (
     _JOINT,
@@ -306,10 +307,8 @@ def _aggregate_joint_rows(
     for key in keys:
         vals = [row[key] for row in joint_condition_rows if key in row]
         if vals:
-            reduction = (
-                aggregate if isinstance(aggregate, str) else aggregate.get(key, "mean")
-            )
-            summary[key] = reduce_metric(vals, key, reduction)
+            reduction, explicit = resolve_reduction(aggregate, key)
+            summary[key] = reduce_metric(vals, key, reduction, explicit=explicit)
     return summary
 
 

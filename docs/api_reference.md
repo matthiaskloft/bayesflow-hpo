@@ -112,6 +112,7 @@ def check_pipeline(
     objective_metrics=None,
     sims_per_condition=5, n_posterior_samples=2,
     validation_conditions=None, epochs=1, num_batches=1,
+    aggregate="mean",
 ) -> None
 ```
 
@@ -414,10 +415,12 @@ load_validation_dataset(path) -> ValidationDataset
 ```python
 run_validation_pipeline(approximator, validation_data, n_posterior_samples=1000,
                         metrics=None, joint_metrics=None,
-                        max_samples_per_call=20_000) -> ValidationResult
+                        max_samples_per_call=20_000,
+                        aggregate="mean") -> ValidationResult
 validate_once(approximator, validation_data, n_sims=2,
               n_posterior_samples=10, metrics=None, joint_metrics=None,
-              max_samples_per_call=20_000) -> ValidationResult
+              max_samples_per_call=20_000,
+              aggregate="mean") -> ValidationResult
 ```
 
 ### ValidationResult

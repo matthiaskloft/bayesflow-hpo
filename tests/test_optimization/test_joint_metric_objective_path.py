@@ -162,7 +162,9 @@ def test_the_objective_re_raises_it_instead_of_penalizing() -> None:
     from bayesflow_hpo.optimization import objective as objective_module
 
     source = inspect.getsource(objective_module.GenericObjective)
-    reraise = source.index("except (JointMetricConfigurationError, AggregationError):")
+    reraise = source.index(
+        "except (JointMetricConfigurationError, AggregationConfigError):"
+    )
     catchall = source.index("except Exception as exc:", reraise)
     assert reraise < catchall, (
         "the configuration handler must precede the catch-all, or the "
@@ -323,7 +325,7 @@ def test_the_training_path_re_raises_configuration_errors() -> None:
     source = inspect.getsource(objective_module.GenericObjective)
     training = source.index("failed during training")
     reraise = source.rindex(
-        "except (JointMetricConfigurationError, AggregationError):", 0, training
+        "except (JointMetricConfigurationError, AggregationConfigError):", 0, training
     )
     catchall = source.rindex("except Exception as exc:", 0, training)
     assert reraise < catchall, (
