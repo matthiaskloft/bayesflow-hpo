@@ -270,6 +270,88 @@ def _declared_settings(
     }
 
 
+def _dropped_joint_keys(
+    failed_joint: dict[str, str], emitted_keys: dict[str, set[str]],
+) -> set[str]:
+    """Summary keys belonging to a joint metric invalidated for this trial.
+
+    Both sources are consulted: what the metric was observed to emit before
+    it failed, and what a registered name declares. The observed set is
+    empty when the metric failed on the very first condition, and the
+    declared set is only meaningful for a registered name, so neither covers
+    the other.
+    """
+    dropped: set[str] = set()
+    for name in failed_joint:
+        dropped.update(emitted_keys.get(name, ()))
+        dropped.update(output_keys_for(name))
+    return dropped
+
+
+def _joint_condition_frame(
+    joint_condition_rows: list[dict[str, float]],
+    failed_joint: dict[str, str],
+    emitted_keys: dict[str, set[str]],
+) -> pd.DataFrame:
+    """Per-condition joint values as a frame, one row per condition.
+
+    The values the loop already computed are what a caller needs to see
+    which conditions a joint metric actually scores on: an unconditional
+    reduction blends a condition where the metric detects a miscalibration
+    with one where it cannot, and the contribution of each is not
+    recoverable from the reduced number. Modrak et al. (2025) describe that
+    cancellation for the marginal case, and it is no weaker jointly, because
+    a joint metric's VALIDITY can differ by condition -- Lemos et al. (2023,
+    Sec. 4.3) give the concrete failure, an estimator returning the prior
+    that TARP scores as perfectly covered.
+
+    Keys of a metric in *failed_joint* are dropped here as they are from the
+    summary. The frame would otherwise invite the caller to reduce the
+    surviving conditions themselves and recover exactly the flattering
+    partial value that whole-trial invalidation exists to prevent;
+    ``ValidationResult.failed_joint_metrics`` names what was dropped and
+    why.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Columns ``id_cond`` plus each surviving joint key. Empty when no
+        joint value survived -- because none ran, or because every one of
+        them was invalidated -- so that ``.empty`` answers "is there
+        anything here" rather than "was a joint metric configured".
+    """
+    if not joint_condition_rows:
+        return pd.DataFrame()
+    dropped = _dropped_joint_keys(failed_joint, emitted_keys)
+    if all(key in dropped for row in joint_condition_rows for key in row):
+        # Every joint metric was invalidated, so nothing but `id_cond` would
+        # be left. A frame of bare condition ids is not "no joint data": it
+        # reports `.empty` as False, and the natural guard
+        # `if not result.joint_condition_metrics.empty` then walks into a
+        # KeyError on the first column a caller asks for. `summary` already
+        # treats this case as absence, and so does this.
+        return pd.DataFrame()
+    return pd.DataFrame(
+        [
+            {
+                "id_cond": cond_id,
+                # `id_cond` is excluded from the spread, not merely written
+                # first. A joint metric emitting a key of that name would
+                # otherwise overwrite the condition index -- the one column
+                # this frame exists to provide -- and every row would carry
+                # the metric's value instead, silently. Dropping the
+                # metric's key is the lesser loss: the index is what makes
+                # the other columns attributable.
+                **{
+                    k: v for k, v in row.items()
+                    if k not in dropped and k != "id_cond"
+                },
+            }
+            for cond_id, row in enumerate(joint_condition_rows)
+        ]
+    )
+
+
 def _aggregate_joint_rows(
     joint_condition_rows: list[dict[str, float]],
     failed_joint: dict[str, str],
@@ -287,15 +369,7 @@ def _aggregate_joint_rows(
     of real and penalty values, which reads as a mediocre model rather than
     a broken measurement.
     """
-    dropped: set[str] = set()
-    for name in failed_joint:
-        # Both sources: what the metric was observed to emit before it
-        # failed, and what a registered name declares. The observed set is
-        # empty when the metric failed on the very first condition, and the
-        # declared set is only meaningful for a registered name, so neither
-        # covers the other.
-        dropped.update(emitted_keys.get(name, ()))
-        dropped.update(output_keys_for(name))
+    dropped = _dropped_joint_keys(failed_joint, emitted_keys)
 
     keys: list[str] = []
     for row in joint_condition_rows:
@@ -551,6 +625,9 @@ def run_validation_pipeline(
 
         return ValidationResult(
             condition_metrics=condition_df,
+            joint_condition_metrics=_joint_condition_frame(
+                joint_condition_rows, failed_joint, emitted_keys
+            ),
             summary=overall_summary,
             per_parameter=per_parameter,
             timing=timing,
@@ -576,6 +653,9 @@ def run_validation_pipeline(
 
     return ValidationResult(
         condition_metrics=condition_df,
+        joint_condition_metrics=_joint_condition_frame(
+            joint_condition_rows, failed_joint, emitted_keys
+        ),
         summary=summary,
         timing=timing,
         n_conditions=n_conditions,

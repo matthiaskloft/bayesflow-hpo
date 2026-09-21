@@ -403,7 +403,9 @@ result = run_validation_pipeline(
    comparable across a change to this setting — relevant when warm-starting or
    resuming a study, where old and new trials share one Pareto front.
 3. **Per-condition metrics** — for each condition batch, run all metric functions
-4. **Aggregation** — average numeric values across conditions
+4. **Aggregation** — reduce numeric values across conditions per
+   `aggregate=`; joint per-condition values are kept in
+   `joint_condition_metrics`
 5. **GPU cleanup** — free memory after each condition via `cleanup_trial()`
 
 ### Return Type: ValidationResult
@@ -411,7 +413,7 @@ result = run_validation_pipeline(
 ```python
 @dataclass(frozen=True)
 class ValidationResult:
-    condition_metrics: pd.DataFrame       # one row per condition
+    condition_metrics: pd.DataFrame       # one row per condition (marginal)
     summary: dict[str, float]             # mean across conditions
     per_parameter: dict[str, ValidationResult] | None  # multi-param models
     timing: dict[str, float]              # "inference" and "metrics" seconds
@@ -420,7 +422,42 @@ class ValidationResult:
     metric_names: list[str]
     failed_joint_metrics: dict[str, str]  # joint metric name -> error message
     joint_metric_settings: dict[str, dict[str, Any]]  # configuration actually used
+    joint_condition_metrics: pd.DataFrame  # one row per condition (joint)
 ```
+
+`joint_condition_metrics` carries the values behind the joint entries of
+`summary`, one row per condition, keyed by `id_cond`. Joint metrics reduce
+across conditions and have no parameter axis, so they are not in
+`condition_metrics`.
+
+The frame is empty whenever no joint value survived — because none ran, or
+because every one of them was invalidated — so `if not
+result.joint_condition_metrics.empty:` is a safe guard before reading a
+column. `id_cond` is the pipeline's, not the metric's: a joint metric
+emitting a key of that name has it dropped rather than overwriting the
+condition index.
+
+Only the top-level result carries the frame. A `per_parameter` entry's is
+always empty, since a joint value has no parameter to belong to.
+
+This is a `run_validation_pipeline` return value, so it reaches a caller who
+invokes the pipeline directly or writes their own `validate_fn`. The
+`optimize()` path reduces to `dict(result.summary)` at the trial boundary,
+so a study's stored trials keep the summary numbers and not these rows.
+
+Keeping the rows matters because a joint metric's *validity*, not only its
+value, can differ by condition: Lemos et al. (2023, Sec. 4.3) show that TARP
+scores a posterior that ignores its data as perfectly covered, and whether a
+given condition is in that regime depends on how well the data identify the
+joint parameter vector there. A reduction over a condition where the metric
+detects a miscalibration and one where it cannot returns an unremarkable
+number, and the contribution of each is not recoverable from it — the
+cancellation Modrák et al. (2025) describe for the marginal case.
+
+A metric listed in `failed_joint_metrics` has no column here, just as it has
+no key in `summary`. Reducing the conditions it survived would recover
+exactly the flattering partial value that whole-trial invalidation exists to
+prevent.
 
 ### Table Methods
 
@@ -434,6 +471,10 @@ result.condition_table(metric="coverage") # only columns containing "coverage"
 
 # Per-parameter summary (multi-parameter models)
 result.parameter_table()
+
+# Per-condition joint metrics, optionally filtered
+result.joint_condition_table()                    # all columns
+result.joint_condition_table(metric="tarp_error") # only matching columns
 ```
 
 ### Objective Extraction

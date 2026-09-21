@@ -254,6 +254,7 @@ Feature implementations and their backing references.
 | Point-summary/loss consistency | `validation/registry.py` | Gneiting (2011) |
 | ECE term not claimed for `mean_calibration_error` | `validation/registry.py` | Naeini et al. (2015) |
 | TARP joint coverage (`tarp_error`, `tarp_error_random`) | `validation/tarp.py` | Lemos et al. (2023), Secs. 3.1--3.2, 4.1--4.3, Thm. 3, Alg. 2 |
+| Per-condition joint rows, against unconditional pooling | `validation/pipeline.py` | Modrák et al. (2025); Lemos et al. (2023), Sec. 4.3 |
 | SBI benchmarking | overall | Lueckmann et al. (2021) |
 
 ### BayesFlow Diagnostic Wrappers

@@ -125,6 +125,19 @@ covering [issue #82](https://github.com/matthiaskloft/bayesflow-hpo/issues/82)
 - `bayesflow_hpo_joint_metric_settings` pins the configuration a study's
   joint metrics ran at, declared by the callables that ran rather than
   repeated to `optimize()`.
+- **Joint per-condition rows survive the call
+  ([#111](https://github.com/matthiaskloft/bayesflow-hpo/issues/111)).**
+  `ValidationResult.joint_condition_metrics` carries the values behind the
+  joint entries of `summary`, one row per condition. They used to be reduced
+  and discarded, so a condition where a joint metric is blind -- Lemos et al.
+  (2023) Sec. 4.3's data-ignoring posterior, which TARP scores as perfectly
+  covered -- was indistinguishable from one where it works, and its
+  contribution was not recoverable from the reduced number. The other half of
+  #111, giving joint aggregation the marginal path's `aggregate=` treatment,
+  shipped with [#119](https://github.com/matthiaskloft/bayesflow-hpo/pull/119);
+  the issue's `<metric>/mean` + `<metric>/worst` key pair is
+  `bayesflow-irt`'s convention, not this package's, whose marginal metrics
+  emit one key and take the reduction as a parameter.
 
 **Found while implementing, worth knowing:**
 

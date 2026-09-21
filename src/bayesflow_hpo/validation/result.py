@@ -24,6 +24,8 @@ class ValidationResult:
     ----------
     condition_metrics
         DataFrame with one row per condition, columns are metric values.
+        Marginal metrics only; joint ones have no parameter axis and live in
+        *joint_condition_metrics*.
     summary
         Overall configured reduction for each metric key (mean by default).
     per_parameter
@@ -49,6 +51,39 @@ class ValidationResult:
         substitutes its registered worst case; without this field the only
         evidence would be a penalty value, which is indistinguishable from a
         genuinely bad model.
+    joint_condition_metrics
+        DataFrame with one row per condition and one column per surviving
+        joint metric output, plus ``id_cond``. Empty when no joint value
+        survived, whether because none ran or because every one of them was
+        invalidated. A joint metric can be valid on one condition and blind on
+        another, and the reduction in *summary* cannot show which, so the
+        values behind it are kept. Columns of a metric listed in
+        *failed_joint_metrics* are absent here as they are from *summary*.
+        Populated on the top-level result only: a *per_parameter* entry
+        always carries an empty frame, because a joint value has no
+        parameter to belong to.
+
+    References
+    ----------
+    Keeping *joint_condition_metrics* unreduced rests on two results, both
+    recorded in ``docs/references.md``. Modrak et al. (2025) describe the
+    cancellation an unconditional pooling produces, where over- and
+    under-coverage at different corners average to an acceptable number;
+    the reference entry records that claim without a section locator, so
+    none is asserted here. Lemos et al. (2023), Sec. 4.3 give the joint
+    counterpart: an
+    estimator returning the prior scores perfect expected coverage under
+    TARP with x-independent references, so whether a condition is one the
+    metric can see is a property of that condition, not of the metric.
+
+    Lemos, P., Coogan, A., Hezaveh, Y., & Perreault-Levasseur, L. (2023).
+    Sampling-based accuracy testing of posterior estimators for general
+    inference. *PMLR, 202*, 19256--19273.
+
+    Modrak, M., Moon, A. H., Kim, S., Burkner, P., Huurre, N., Faltejskova,
+    K., Gelman, A., & Vehtari, A. (2025). Simulation-based calibration
+    checking for Bayesian computation: The choice of test quantities shapes
+    sensitivity. *Bayesian Analysis, 20*(2), 461--488.
     """
 
     condition_metrics: pd.DataFrame
@@ -61,6 +96,9 @@ class ValidationResult:
     failed_joint_metrics: dict[str, str] = field(default_factory=dict)
     joint_metric_settings: dict[str, dict[str, Any]] = field(
         default_factory=dict
+    )
+    joint_condition_metrics: pd.DataFrame = field(
+        default_factory=pd.DataFrame
     )
 
     # ------------------------------------------------------------------
@@ -80,6 +118,36 @@ class ValidationResult:
             if metric in c or c == "id_cond"
         ]
         return DisplayDataFrame(self.condition_metrics[cols])
+
+    def joint_condition_table(
+        self, metric: str | None = None
+    ) -> DisplayDataFrame:
+        """Per-condition joint DataFrame, optionally filtered to *metric*.
+
+        The joint counterpart of :meth:`condition_table`.
+
+        Parameters
+        ----------
+        metric
+            Substring matched against column names; ``id_cond`` is retained
+            whatever it matches. ``None``, the default, returns every
+            column.
+
+        Returns
+        -------
+        DisplayDataFrame
+            One row per condition. Empty when no joint value survived --
+            see :attr:`joint_condition_metrics`. A *metric* matching no
+            column leaves only ``id_cond``, exactly as
+            :meth:`condition_table` does.
+        """
+        if metric is None:
+            return DisplayDataFrame(self.joint_condition_metrics)
+        cols = [
+            c for c in self.joint_condition_metrics.columns
+            if metric in c or c == "id_cond"
+        ]
+        return DisplayDataFrame(self.joint_condition_metrics[cols])
 
     def parameter_table(self) -> DisplayDataFrame | None:
         """Per-parameter summary (multi-parameter models only)."""

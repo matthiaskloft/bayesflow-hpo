@@ -437,9 +437,11 @@ class ValidationResult:
     metric_names: list[str]
     failed_joint_metrics: dict[str, str]
     joint_metric_settings: dict[str, dict[str, Any]]
+    joint_condition_metrics: pd.DataFrame
 
     def summary_table(self) -> DisplayDataFrame
     def condition_table(self, metric: str | None = None) -> DisplayDataFrame
+    def joint_condition_table(self, metric: str | None = None) -> DisplayDataFrame
     def parameter_table(self) -> DisplayDataFrame | None
     def objective_scalar(self, key: str = "calibration_error") -> float
 ```
