@@ -481,8 +481,56 @@ receives.
 
 ```python
 compute_condition_metrics(draws, true_values, cond_id, metric_fns) -> dict[str, Any]
-aggregate_condition_rows(condition_rows: list[dict]) -> dict[str, float]
+aggregate_condition_rows(condition_rows: list[dict], aggregate: Aggregate = "mean") -> dict[str, float]
 ```
+
+The two reduction primitives are cited in
+[`references.md`](references.md): arithmetic averaging with NaN omission
+follows `numpy.nanmean`, and `"geometric"` follows `scipy.stats.gmean`, with
+strictly positive inputs required explicitly rather than shifted by a
+pseudocount. Per-metric mapping, worst-case direction resolution and the
+exception contract below are this package's own behaviour, not a method taken
+from a source.
+
+### Errors
+
+All four are top-level exports and are also importable from
+`bayesflow_hpo.validation`.
+
+```python
+from bayesflow_hpo import (
+    AggregationError,
+    AggregationConfigError,
+    AggregationDomainError,
+    JointMetricConfigurationError,
+)
+```
+
+| Exception | Base | Meaning |
+|---|---|---|
+| `AggregationError` | `ValueError` | A reduction cannot score its inputs. Catch this in a one-shot caller (`validate_once`, `check_pipeline`) that only wants the message preserved. |
+| `AggregationConfigError` | `AggregationError` | The requested reduction is invalid for the configured metrics. Every trial would hit it identically. |
+| `AggregationDomainError` | `AggregationError` | A trial's own values fall outside the reduction's domain (e.g. `geometric` on a negative `correlation`). A property of the trial, not the study. |
+| `JointMetricConfigurationError` | `ValueError` | A joint metric is misconfigured for the study. |
+
+`GenericObjective` and `PeriodicValidationCallback` **re-raise**
+`AggregationConfigError` and `JointMetricConfigurationError`, stopping the
+study. A custom `validate_fn` that raises `AggregationConfigError` therefore
+halts the search instead of letting the whole budget be scored on a fabricated
+number. `AggregationDomainError` is deliberately *not* re-raised.
+
+`optuna.TrialPruned` propagates as well, at both sites, so a `validate_fn` can
+prune its own trial. It is not a misconfiguration and does not stop the study —
+Optuna records the trial as pruned.
+
+Every *other* exception is an ordinary failure of that one trial, and what
+happens next depends on which site raised it:
+
+| Raised from | Outcome |
+|---|---|
+| final validation, in `GenericObjective` | trial scored on the training-loss fallback (`validation_fallback` user attribute is `"training_loss"`, or `"penalty"` when no training loss was recorded); the message is stored as `validation_error` |
+| training, in `GenericObjective` | trial scored on `_penalty()`; the message is stored as `training_error` |
+| intermediate validation, in `PeriodicValidationCallback` | logged, that prune check skipped, training continues — the trial is *not* failed |
 
 ### C2ST Metrics
 

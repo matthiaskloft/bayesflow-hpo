@@ -18,12 +18,16 @@ from bayesflow_hpo.validation.data import (
 from bayesflow_hpo.validation.dry_run import validate_once
 from bayesflow_hpo.validation.inference import make_bayesflow_infer_fn
 from bayesflow_hpo.validation.metrics import (
+    AggregationConfigError,
+    AggregationDomainError,
+    AggregationError,
     aggregate_condition_rows,
     compute_condition_metrics,
 )
 from bayesflow_hpo.validation.pipeline import run_validation_pipeline
 from bayesflow_hpo.validation.registry import (
     DEFAULT_METRICS,
+    JointMetricConfigurationError,
     JointMetricInputs,
     MetricFn,
     describe_metrics,
@@ -44,7 +48,11 @@ from bayesflow_hpo.validation.tarp import (
 )
 
 __all__ = [
+    "AggregationConfigError",
+    "AggregationDomainError",
+    "AggregationError",
     "DEFAULT_METRICS",
+    "JointMetricConfigurationError",
     "JointMetricInputs",
     "GlobalC2STResult",
     "LC2STResult",
