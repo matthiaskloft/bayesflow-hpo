@@ -121,12 +121,25 @@ def _resolve_output_key(key: str) -> str:
     )
 
 
+def _no_worst_case_message(key: str) -> str:
+    """Explain why *key* has no worst case, for either rejection site."""
+    return (
+        f"Metric {key!r} is diagnostic-only and has no worst case: it is "
+        "optimal at a point rather than at an extreme, so no condition is "
+        "its worst. Use 'mean' or 'geometric' for it, or name a metric that "
+        "is eligible as an objective."
+    )
+
+
 def normalize_aggregate(aggregate: Aggregate) -> Aggregate:
     """Validate reductions and metric keys, returning a copied mapping.
 
     Mapping keys are resolved through :func:`_resolve_output_key`, so an
     alias is canonicalized and anything that is not an emitted summary
-    column is rejected rather than silently ignored.
+    column is rejected rather than silently ignored. A ``"worst"`` on a
+    diagnostic-only key is rejected here too, so an impossible reduction
+    stops the run before a trial is built rather than part-way through
+    training -- see :func:`worst_reducer`.
     """
     if isinstance(aggregate, str):
         if aggregate not in AGGREGATIONS:
@@ -145,6 +158,14 @@ def normalize_aggregate(aggregate: Aggregate) -> Aggregate:
         if not isinstance(reduction, str) or reduction not in AGGREGATIONS:
             raise ValueError(f"Unknown aggregate {reduction!r} for metric {key!r}.")
         name = _resolve_output_key(key)
+        if reduction == "worst" and worst_reducer(name) is None:
+            # Checked HERE and not only in `reduce_metric`. This runs at every
+            # public boundary, so the study is refused before `optimize()`
+            # builds it; leaving it to the reduction meant a trial had already
+            # been created and trained before the same error surfaced. Asking
+            # `worst_reducer` rather than re-deriving the rule keeps the two
+            # sites from drifting apart.
+            raise AggregationConfigError(_no_worst_case_message(name))
         if name in normalized and normalized[name] != reduction:
             raise ValueError(f"Conflicting aggregate settings for metric {name!r}.")
         normalized[name] = reduction
@@ -255,13 +276,11 @@ def reduce_metric(
         reducer = worst_reducer(key)
         if reducer is None:
             if explicit:
-                raise AggregationConfigError(
-                    f"Metric {key!r} is diagnostic-only and has no worst "
-                    "case: it is optimal at a point rather than at an "
-                    "extreme, so no condition is its worst. Use 'mean' or "
-                    "'geometric' for it, or name a metric that is eligible "
-                    "as an objective."
-                )
+                # Normally unreachable: `normalize_aggregate` rejects this at
+                # the boundary. Kept because `reduce_metric` is callable on
+                # its own, and silently returning a max would be the original
+                # defect back again.
+                raise AggregationConfigError(_no_worst_case_message(key))
             # Reached by a scalar `aggregate="worst"`, which sweeps up every
             # reported key and not only the scored ones. Taking the max here
             # would report the BEST condition for a higher-is-better key and

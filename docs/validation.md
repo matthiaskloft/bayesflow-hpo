@@ -125,8 +125,9 @@ its nominal 0.90, so an over-covering 0.99 is no worse or better a "worst
 case" than an under-covering 0.55. The affected outputs are those of `bias`,
 `z_score`, `coverage`, `coverage_left` and `coverage_right`.
 
-- Naming such a metric **explicitly** raises `ValueError`. The mapping asserts
-  a worst case that does not exist.
+- Naming such a metric **explicitly** raises `ValueError`, at the point the
+  `aggregate` argument is validated rather than part-way through a trial. The
+  mapping asserts a worst case that does not exist.
 - A **scalar** `aggregate="worst"` leaves them on the arithmetic mean, since it
   sweeps up every reported metric rather than naming any. Scorable metrics are
   reduced as usual.

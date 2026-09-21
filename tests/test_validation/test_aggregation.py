@@ -236,7 +236,7 @@ def test_intermediate_and_final_validation_use_same_grid_reduction():
         unregister_metric("grid_probe")
 
 
-def test_intermediate_validation_skips_pruning_on_a_domain_error():
+def test_intermediate_validation_skips_pruning_on_a_domain_error() -> None:
     """A non-positive value is this trial's problem, not the study's.
 
     `correlation` and `contraction` are in DEFAULT_METRICS and legitimately
@@ -265,7 +265,7 @@ def test_intermediate_validation_skips_pruning_on_a_domain_error():
         unregister_metric("grid_probe")
 
 
-def test_domain_and_config_errors_are_distinguishable():
+def test_domain_and_config_errors_are_distinguishable() -> None:
     from bayesflow_hpo.validation.metrics import (
         AggregationConfigError,
         AggregationDomainError,
@@ -278,7 +278,7 @@ def test_domain_and_config_errors_are_distinguishable():
     assert not issubclass(AggregationConfigError, AggregationDomainError)
 
 
-def test_objective_re_raises_config_errors_but_not_domain_errors():
+def test_objective_re_raises_config_errors_but_not_domain_errors() -> None:
     """The handlers must name the config error only.
 
     Widening them back to the `AggregationError` base would put a single
@@ -303,7 +303,7 @@ def test_objective_re_raises_config_errors_but_not_domain_errors():
 
 
 @pytest.mark.parametrize("key", ["bias", "coverage_90", "mean_z_score"])
-def test_explicit_worst_on_a_diagnostic_is_rejected(key):
+def test_explicit_worst_on_a_diagnostic_is_rejected(key: str) -> None:
     """These are optimal at a point, so no condition is their worst."""
     from bayesflow_hpo.validation.metrics import AggregationConfigError
 
@@ -311,6 +311,35 @@ def test_explicit_worst_on_a_diagnostic_is_rejected(key):
             {"id_cond": 1, "n_sims": 4, key: 0.1}]
     with pytest.raises(AggregationConfigError, match="no worst case"):
         aggregate_condition_rows(rows, {key: "worst"})
+
+
+@pytest.mark.parametrize("key", ["bias", "coverage_90", "mean_z_score"])
+def test_diagnostic_worst_is_rejected_when_the_argument_is_validated(
+    key: str,
+) -> None:
+    """The boundary refuses it, so no trial is built or trained first."""
+    from bayesflow_hpo.validation.metrics import AggregationConfigError
+
+    with pytest.raises(AggregationConfigError, match="no worst case"):
+        normalize_aggregate({key: "worst"})
+
+
+def test_callback_rejects_a_diagnostic_worst_before_any_training() -> None:
+    """Every boundary normalizes, so the refusal precedes the first epoch."""
+    import optuna
+
+    from bayesflow_hpo.optimization.validation_callback import (
+        PeriodicValidationCallback,
+    )
+    from bayesflow_hpo.validation.metrics import AggregationConfigError
+
+    with pytest.raises(AggregationConfigError, match="no worst case"):
+        PeriodicValidationCallback(
+            trial=optuna.create_study().ask(),
+            approximator=_GridApproximator(), validation_data=_grid_dataset(),
+            n_posterior_samples=3, objective_metrics=["nrmse"],
+            aggregate={"bias": "worst"},
+        )
 
 
 @pytest.mark.parametrize(
@@ -324,7 +353,9 @@ def test_explicit_worst_on_a_diagnostic_is_rejected(key):
         ("mae", 0.99),
     ],
 )
-def test_scalar_worst_leaves_diagnostics_on_the_mean(key, expected):
+def test_scalar_worst_leaves_diagnostics_on_the_mean(
+    key: str, expected: float,
+) -> None:
     """A scalar names no metric, so it reduces only the scorable ones.
 
     Taking the max of `coverage_90` would report the over-covering 0.99 as
@@ -335,7 +366,7 @@ def test_scalar_worst_leaves_diagnostics_on_the_mean(key, expected):
     assert aggregate_condition_rows(rows, "worst")[key] == pytest.approx(expected)
 
 
-def test_worst_uses_max_for_an_unregistered_but_scorable_metric():
+def test_worst_uses_max_for_an_unregistered_but_scorable_metric() -> None:
     """`mae` carries no directions entry yet is objective-eligible.
 
     Absence from that table means "no explicit scale", not "no direction",
@@ -355,13 +386,15 @@ def test_worst_uses_max_for_an_unregistered_but_scorable_metric():
         ({"coverage_two_sided": "worst"}, "metric group"),
     ],
 )
-def test_normalize_aggregate_rejects_keys_that_match_no_summary_column(bad, match):
+def test_normalize_aggregate_rejects_keys_that_match_no_summary_column(
+    bad: dict[str, str], match: str,
+) -> None:
     """An unmatched key is silently a no-op, which is the failure to avoid."""
     with pytest.raises(ValueError, match=match):
         normalize_aggregate(bad)
 
 
-def test_normalize_aggregate_accepts_a_multi_output_metrics_own_columns():
+def test_normalize_aggregate_accepts_a_multi_output_metrics_own_columns() -> None:
     assert normalize_aggregate({"left_coverage_90": "mean"}) == {
         "left_coverage_90": "mean"
     }
