@@ -53,8 +53,9 @@ class ValidationResult:
         genuinely bad model.
     joint_condition_metrics
         DataFrame with one row per condition and one column per surviving
-        joint metric output, plus ``id_cond``; empty when no joint metric
-        ran. A joint metric can be valid on one condition and blind on
+        joint metric output, plus ``id_cond``. Empty when no joint value
+        survived, whether because none ran or because every one of them was
+        invalidated. A joint metric can be valid on one condition and blind on
         another, and the reduction in *summary* cannot show which, so the
         values behind it are kept. Columns of a metric listed in
         *failed_joint_metrics* are absent here as they are from *summary*.

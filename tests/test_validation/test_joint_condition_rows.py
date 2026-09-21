@@ -125,6 +125,29 @@ def test_frame_is_empty_without_joint_metrics() -> None:
     assert result.joint_condition_table().empty
 
 
+def test_frame_is_empty_when_every_joint_metric_is_invalidated(
+    registered,
+) -> None:
+    """All-invalidated is absence, not a frame of bare condition ids.
+
+    ``_run_joint_metrics`` returns an empty row per condition once the only
+    metric is in ``failed_joint``, so the rows list is non-empty while
+    carrying no value. A frame of bare ``id_cond`` would report ``.empty``
+    as False and send the natural guard into a ``KeyError``.
+    """
+
+    def always_fails(inputs: JointMetricInputs) -> dict[str, float]:
+        raise RuntimeError("boom")
+
+    registered("joint_doomed", always_fails)
+    result = _run(["a", "b"], joint_metrics={"joint_doomed": always_fails})
+
+    assert result.joint_condition_metrics.empty
+    assert list(result.joint_condition_metrics.columns) == []
+    assert "joint_doomed" in result.failed_joint_metrics
+    assert "joint_doomed" not in result.summary
+
+
 def test_invalidated_metric_leaves_no_column(registered) -> None:
     """A metric dropped from the summary is dropped from the rows too.
 

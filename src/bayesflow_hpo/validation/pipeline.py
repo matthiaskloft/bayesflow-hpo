@@ -315,12 +315,22 @@ def _joint_condition_frame(
     Returns
     -------
     pandas.DataFrame
-        Columns ``id_cond`` plus each surviving joint key, or an empty frame
-        when no joint metric ran.
+        Columns ``id_cond`` plus each surviving joint key. Empty when no
+        joint value survived -- because none ran, or because every one of
+        them was invalidated -- so that ``.empty`` answers "is there
+        anything here" rather than "was a joint metric configured".
     """
     if not joint_condition_rows:
         return pd.DataFrame()
     dropped = _dropped_joint_keys(failed_joint, emitted_keys)
+    if all(key in dropped for row in joint_condition_rows for key in row):
+        # Every joint metric was invalidated, so nothing but `id_cond` would
+        # be left. A frame of bare condition ids is not "no joint data": it
+        # reports `.empty` as False, and the natural guard
+        # `if not result.joint_condition_metrics.empty` then walks into a
+        # KeyError on the first column a caller asks for. `summary` already
+        # treats this case as absence, and so does this.
+        return pd.DataFrame()
     return pd.DataFrame(
         [
             {

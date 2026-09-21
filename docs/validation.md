@@ -426,9 +426,14 @@ class ValidationResult:
 ```
 
 `joint_condition_metrics` carries the values behind the joint entries of
-`summary`, one row per condition, keyed by `id_cond`; it is empty when no
-joint metric ran. Joint metrics reduce across conditions and have no
-parameter axis, so they are not in `condition_metrics`.
+`summary`, one row per condition, keyed by `id_cond`. Joint metrics reduce
+across conditions and have no parameter axis, so they are not in
+`condition_metrics`.
+
+The frame is empty whenever no joint value survived — because none ran, or
+because every one of them was invalidated — so `if not
+result.joint_condition_metrics.empty:` is a safe guard before reading a
+column.
 
 Keeping the rows matters because a joint metric's *validity*, not only its
 value, can differ by condition: Lemos et al. (2023, Sec. 4.3) show that TARP
