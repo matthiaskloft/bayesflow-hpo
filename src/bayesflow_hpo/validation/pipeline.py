@@ -28,6 +28,7 @@ from bayesflow_hpo.validation.metrics import (
 from bayesflow_hpo.validation.registry import (
     _JOINT,
     DEFAULT_METRICS,
+    REQUIRES_SCALAR_PARAMETERS,
     JointMetricConfigurationError,
     JointMetricFn,
     JointMetricInputs,
@@ -84,6 +85,107 @@ def _joint_draws(draws: np.ndarray) -> np.ndarray:
     raise ValueError(
         "Expected posterior draws with 2 or 3 dimensions, got shape "
         f"{arr.shape}."
+    )
+
+
+def _parameter_width(
+    sim_batch: Mapping[str, Any], param_keys: Sequence[str]
+) -> int:
+    """Number of elements each parameter key holds per simulation.
+
+    ``(n_sims,)`` and ``(n_sims, 1)`` are width 1; ``(n_sims, n_items)`` is
+    width ``n_items``; ``(n_sims, *trailing)`` is ``prod(trailing)``.
+
+    Raises
+    ------
+    JointMetricConfigurationError
+        If the keys disagree on their width. Folding elements into rows
+        pairs element *i* of every key in one row, which has no meaning
+        when, say, ``a`` holds one value per item and ``theta`` one per
+        person.
+    """
+    widths = {
+        pk: int(np.prod(np.shape(sim_batch[pk])[1:], dtype=int))
+        for pk in param_keys
+    }
+    if len(set(widths.values())) > 1:
+        raise JointMetricConfigurationError(
+            "Parameter keys hold different numbers of elements per "
+            f"simulation: {widths}. The validation pipeline pools a "
+            "vector-valued parameter by folding its elements into rows, one "
+            "row per (simulation, element), which requires every key to "
+            "have the same per-simulation width. Validate keys of different "
+            "widths in separate runs, or with a custom `validate_fn`."
+        )
+    return next(iter(widths.values()), 1)
+
+
+def _check_vector_parameters(
+    validation_data: ValidationDataset,
+    joint_metric_fns: Mapping[str, Any],
+) -> None:
+    """Refuse, before any condition runs, what folding cannot support.
+
+    Uses the first condition's shapes. Raised as
+    :class:`JointMetricConfigurationError` so that `GenericObjective` stops
+    the study instead of scoring every trial with a penalty.
+    """
+    if not validation_data.simulations:
+        return
+    width = _parameter_width(
+        validation_data.simulations[0], validation_data.param_keys
+    )
+    if width == 1:
+        return
+    scalar_only = {
+        name: getattr(fn, REQUIRES_SCALAR_PARAMETERS)
+        for name, fn in joint_metric_fns.items()
+        if getattr(fn, REQUIRES_SCALAR_PARAMETERS, None)
+    }
+    if scalar_only:
+        raise JointMetricConfigurationError(
+            f"Joint metrics {sorted(scalar_only)} cannot run on "
+            f"vector-valued parameters ({width} elements per simulation): "
+            + " ".join(scalar_only.values())
+        )
+
+
+def _fold_vector_draws(
+    draws: np.ndarray, n_keys: int, width: int
+) -> np.ndarray:
+    """Fold per-simulation parameter elements into rows.
+
+    ``make_bayesflow_infer_fn`` concatenates the keys' draws on the last
+    axis, key by key, so for keys ``[a, b]`` of width ``W`` the columns are
+    ``a[0], ..., a[W-1], b[0], ..., b[W-1]``. This returns
+    ``(n_sims * W, n_samples, n_keys)`` where row ``s * W + i`` is element
+    ``i`` of simulation ``s`` and column ``k`` is key ``k``. That is the
+    row-major order of ``np.asarray(sim_batch[key]).reshape(-1)``, so the
+    truths the pipeline builds line up row for row.
+
+    Width 1 returns *draws* untouched, so a scalar study is unchanged.
+    """
+    arr = np.asarray(draws)
+    if width == 1:
+        return arr
+    if arr.ndim > 3 and n_keys > 1:
+        # Concatenating 4-D parts on the last axis interleaves the keys, and
+        # no reshape recovers the pairing.
+        raise ValueError(
+            "Posterior draws for multiple parameter keys must be 3-D "
+            f"(n_sims, n_samples, n_elements); got shape {arr.shape}."
+        )
+    n_sims, n_samples = arr.shape[:2]
+    arr = arr.reshape(n_sims, n_samples, -1)
+    if arr.shape[-1] != n_keys * width:
+        raise ValueError(
+            f"Posterior draws have {arr.shape[-1]} columns per sample, "
+            f"expected {n_keys} keys x {width} elements = {n_keys * width}."
+        )
+    return (
+        arr.reshape(n_sims, n_samples, n_keys, width)
+        .transpose(0, 3, 1, 2)
+        .reshape(n_sims * width, n_samples, n_keys)
     )
 
 
@@ -492,6 +594,7 @@ def run_validation_pipeline(
         available_keys=available_keys,
         max_samples_per_call=max_samples_per_call,
     )
+    _check_vector_parameters(validation_data, joint_metric_fns)
 
     timing: dict[str, float] = {"inference": 0.0, "metrics": 0.0}
     n_params = len(validation_data.param_keys)
@@ -525,6 +628,13 @@ def run_validation_pipeline(
         t0 = time.perf_counter()
         draws = infer_fn(sim_batch, n_posterior_samples)
         timing["inference"] += time.perf_counter() - t0
+        # Vector-valued parameters: one row per (simulation, element), for
+        # the joint and the marginal path alike. A no-op at width 1.
+        draws = _fold_vector_draws(
+            draws,
+            n_params,
+            _parameter_width(sim_batch, validation_data.param_keys),
+        )
 
         # --- Joint metrics, before the per-parameter branch ---
         # Placed here on purpose: the single-parameter branch below rebinds

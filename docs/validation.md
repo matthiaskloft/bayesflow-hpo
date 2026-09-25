@@ -497,6 +497,35 @@ result.per_parameter["sigma"].summary  # {"calibration_error": 0.05, ...}
 result.summary                         # average across parameters
 ```
 
+### Vector-Valued Parameters
+
+A parameter key may hold several values per simulation, e.g. an IRT model
+with `param_keys=["a", "b"]` where each is `(n_sims, n_items)`. The pipeline
+pools such keys by **folding the elements into rows**: every key of shape
+`(n_sims, *trailing)` contributes `n_sims * W` rows, `W = prod(trailing)`, and
+row `s * W + i` is element `i` of simulation `s`.
+
+- **Marginal metrics** score each key against its own draws, pooled over all
+  `(simulation, element)` rows. `per_parameter["a"]` is computed over every item of
+  every simulation.
+- **Joint metrics** receive `draws` of shape `(n_sims * W, n_samples,
+  n_keys)` and `true_values` of shape `(n_sims * W, n_keys)`. Each row is one
+  element's own parameter vector, so the joint test is on `d = n_keys`
+  coordinates (here `(a_i, b_i)`), not on `n_keys * W`.
+- `sim_batch` keeps its original per-simulation shape, so its rows do not
+  line up with the folded rows. A joint metric that pairs data with draws row
+  by row -- the built-in `lc2st` does -- is refused before any condition runs
+  when the parameters are vector-valued. A custom joint metric declares the
+  same restriction by setting the attribute named by
+  `bayesflow_hpo.validation.registry.REQUIRES_SCALAR_PARAMETERS` to a reason
+  string.
+- **Keys of different widths are rejected** before any condition runs, with
+  `JointMetricConfigurationError`: `a` per item and `theta` per person cannot
+  be paired row by row. The check uses the first condition's shapes. Validate
+  such keys separately, or with a custom `validate_fn`.
+
+Scalar parameters (`(n_sims,)` or `(n_sims, 1)`) are unaffected.
+
 ## Dry-Run Validation
 
 Catch shape mismatches and key errors before a full HPO run:

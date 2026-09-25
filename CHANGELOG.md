@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Fixed
+
+- **Vector-valued parameters in `run_validation_pipeline`** (#114). A
+  parameter key holding several values per simulation, `(n_sims, n_items)`,
+  made every joint metric fail on every condition (and so drop out of the
+  trial), and made the marginal path score the wrong columns under the wrong
+  key: `param_keys=["a", "b"]` scored `a[item 1]` as `"b"`. Such keys are now
+  folded into one row per `(simulation, element)` on both paths, so marginal
+  metrics for `a` pool over every item of every simulation and joint metrics
+  test each element's own `(a_i, b_i)` vector. Keys of different
+  per-simulation widths, and joint metrics that pair `sim_batch` data with
+  draws row by row (`lc2st`), are refused with
+  `JointMetricConfigurationError` before any condition runs. Scalar
+  parameters are unchanged. See "Vector-Valued Parameters" in
+  `docs/validation.md`.
+
 ## 0.5.0 -- 2026-09-21
 
 A feature release. Every stored objective value keeps its meaning: nothing
