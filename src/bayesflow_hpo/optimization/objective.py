@@ -22,6 +22,7 @@ Key design decisions:
 
 from __future__ import annotations
 
+import json
 import logging
 import math
 import numbers
@@ -311,7 +312,9 @@ def hook_joint_metric_settings(
     JointMetricConfigurationError
         If the attribute is present but is not a mapping of ``str`` to
         mapping. A configuration error, so the objective re-raises it and
-        the study stops rather than penalizing every trial.
+        the study stops rather than penalizing every trial. Also if a
+        settings key is not a ``str`` or the settings are not
+        JSON-serializable.
     """
     from bayesflow_hpo.validation.registry import JOINT_METRIC_SETTINGS
 
@@ -321,7 +324,9 @@ def hook_joint_metric_settings(
     if declared is None:
         return {}
     if not isinstance(declared, Mapping) or not all(
-        isinstance(name, str) and isinstance(value, Mapping)
+        isinstance(name, str)
+        and isinstance(value, Mapping)
+        and all(isinstance(key, str) for key in value)
         for name, value in declared.items()
     ):
         raise JointMetricConfigurationError(
@@ -330,7 +335,17 @@ def hook_joint_metric_settings(
             "{'tarp_error_item': {'reference_id': '...'}}; got "
             f"{declared!r}."
         )
-    return {name: dict(value) for name, value in declared.items()}
+    settings = {name: dict(value) for name, value in declared.items()}
+    try:
+        # Optuna stores user attributes as JSON; refusing here puts the error
+        # at configuration time rather than as a TypeError from storage.
+        json.dumps(settings)
+    except (TypeError, ValueError) as exc:
+        raise JointMetricConfigurationError(
+            f"validate_fn.{JOINT_METRIC_SETTINGS} must be JSON-serializable "
+            f"(plain str/int/float/bool/None values): {exc}"
+        ) from exc
+    return settings
 
 
 def _planned_joint_settings(config: ObjectiveConfig) -> dict[str, Any]:
@@ -720,8 +735,9 @@ class ObjectiveConfig:
         **Joint metric settings:** the hook may carry a
         ``joint_metric_settings`` attribute, ``{metric_name: {setting:
         value}}`` with flat JSON-serializable values (for example
-        ``{"tarp_error_item": {"reference_id": "..."}}``). It is pinned in
-        the study exactly as the pipeline's declared settings are: stamped
+        ``{"tarp_error_item": {"reference_id": "..."}}``), fixed for the
+        whole study. It is pinned in the study like the pipeline's declared
+        settings, without their validation-run counts: stamped
         on a fresh study, and a resume with different settings raises
         ``JointMetricConfigurationError``. A malformed attribute raises the
         same error when the configuration is built. A hook without it

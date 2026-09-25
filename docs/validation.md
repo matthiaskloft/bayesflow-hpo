@@ -258,6 +258,15 @@ else the score depends on — is the `joint_metric_settings` attribute
   value}}`, since a hook returns only floats. See
   [optimization.md](optimization.md#custom-validation-function).
 
+Keep the attribute fixed for the whole study: a hook's settings are checked
+before training and again after each call, so changing them mid-run stops
+the study. The hook path records exactly what the hook declares and adds no
+validation-run counts (`n_posterior_samples`, `n_conditions`), unlike the
+pipeline; include them if your score depends on them. The pin checks that
+runs are consistent with each other, not where a setting came from:
+`reference_id` is a label the author supplies, and nothing verifies that it
+names the reference actually used.
+
 For example, an item-pooled TARP scored against the same reference provider
 as `tarp_error`:
 

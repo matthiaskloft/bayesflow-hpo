@@ -238,8 +238,9 @@ def optimize(
         **Joint metric settings:** the hook may carry a
         ``joint_metric_settings`` attribute, ``{metric_name: {setting:
         value}}`` with flat JSON-serializable values (for example
-        ``{"tarp_error_item": {"reference_id": "..."}}``). It is pinned in
-        the study exactly as the pipeline's declared settings are: stamped
+        ``{"tarp_error_item": {"reference_id": "..."}}``), fixed for the
+        whole study. It is pinned in the study like the pipeline's declared
+        settings, without their validation-run counts: stamped
         on a fresh study, and a resume with different settings raises
         ``JointMetricConfigurationError``. A malformed attribute raises the
         same error when the configuration is built. A hook without it

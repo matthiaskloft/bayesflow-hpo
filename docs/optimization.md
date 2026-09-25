@@ -147,8 +147,9 @@ Without `validate_fn`, the default `run_validation_pipeline` is used for both fi
 
 A hook may carry a `joint_metric_settings` attribute, `{metric_name:
 {setting: value}}`, to record the configuration its joint metrics ran at —
-for example `{"tarp_error_item": {"reference_id": "..."}}`. It is pinned
-exactly as the pipeline's declared settings are: stamped on a fresh study,
+for example `{"tarp_error_item": {"reference_id": "..."}}`. Keep it fixed
+for the whole study. It is pinned like the pipeline's declared settings
+(without the pipeline's validation-run counts): stamped on a fresh study,
 refused with `JointMetricConfigurationError` on a resume that changes it. A
 malformed attribute raises the same error when the configuration is built; a
 hook without it records nothing. See

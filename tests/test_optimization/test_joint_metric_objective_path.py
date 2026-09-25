@@ -693,17 +693,25 @@ def test_a_malformed_hook_attribute_is_refused_at_configuration(
         _hook_config(_hook(bad))
 
 
-def test_the_hook_settings_are_checked_before_its_values_are_reported(
-) -> None:
-    """Same placement as the pipeline branch, asserted against the source."""
-    import inspect
+def test_non_json_hook_settings_are_refused_at_configuration() -> None:
+    with pytest.raises(JointMetricConfigurationError, match="JSON"):
+        _hook_config(_hook({"tarp_error_item": {"reference": lambda: 0}}))
+    with pytest.raises(JointMetricConfigurationError, match="validate_fn"):
+        _hook_config(_hook({"tarp_error_item": {1: "ref-a"}}))
 
-    from bayesflow_hpo.optimization import objective as objective_module
 
-    source = inspect.getsource(objective_module.GenericObjective)
-    call = source.index("raw = config.validate_fn(")
-    check = source.index(
-        "hook_joint_metric_settings(config.validate_fn)", call
+def test_an_unpinned_study_with_trials_names_the_attribute_to_set() -> None:
+    from bayesflow_hpo.optimization.objective import _planned_joint_settings
+
+    study = optuna.create_study(directions=["minimize"])
+    settings = _planned_joint_settings(
+        _hook_config(_hook({"tarp_error_item": {"reference_id": "ref-a"}}))
     )
-    report = source.index("metrics_summary = _validate_metric_keys(", call)
-    assert check < report
+    with pytest.raises(JointMetricConfigurationError) as info:
+        check_or_stamp_joint_metric_settings(
+            study, settings, n_completed_trials=2
+        )
+    assert (
+        "study.set_user_attr('bayesflow_hpo_joint_metric_settings', "
+        "{'tarp_error_item': {'reference_id': 'ref-a'}})"
+    ) in str(info.value)

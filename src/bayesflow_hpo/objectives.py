@@ -712,9 +712,9 @@ def check_or_stamp_joint_metric_settings(
 
     Raises
     ------
-    ValueError
-        If the study records different settings, or holds completed trials
-        with no record at all.
+    JointMetricConfigurationError
+        A ``ValueError`` subclass. If the study records different
+        settings, or holds completed trials with no record at all.
 
     Notes
     -----
@@ -781,9 +781,10 @@ def check_or_stamp_joint_metric_settings(
                 "older study -- the attribute can simply be set to this "
                 "run's settings; that case is not distinguishable from "
                 "trials run at settings nobody recorded, which is why it is "
-                "not assumed. Start a new study, or set the study's "
-                f"{JOINT_METRIC_SETTINGS_ATTR!r} user attribute to the "
-                "settings it was actually run with."
+                "not assumed. Start a new study, or, if they did run at "
+                "these settings, record that with "
+                f"study.set_user_attr({JOINT_METRIC_SETTINGS_ATTR!r}, "
+                f"{recorded!r})."
             )
         study.set_user_attr(JOINT_METRIC_SETTINGS_ATTR, recorded)
         return
