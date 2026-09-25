@@ -40,6 +40,7 @@ from bayesflow_hpo.validation.data import ValidationDataset
 from bayesflow_hpo.validation.inference import DEFAULT_MAX_SAMPLES_PER_CALL
 from bayesflow_hpo.validation.pipeline import run_validation_pipeline
 from bayesflow_hpo.validation.registry import (
+    REQUIRES_SCALAR_PARAMETERS,
     JointMetricFn,
     JointMetricInputs,
     register_joint_metric,
@@ -524,6 +525,15 @@ def _joint_observations(inputs: JointMetricInputs) -> np.ndarray:
     return np.concatenate(flat, axis=1)
 
 
+_LC2ST_SCALAR_ONLY = (
+    "L-C2ST classifies on concat(params, observations), one row per "
+    "simulation. With vector-valued parameters the pipeline pools one row per "
+    "(simulation, element), and those rows do not line up with the "
+    "observations' rows. Use a TARP metric, or validate L-C2ST with a custom "
+    "`validate_fn`."
+)
+
+
 def _subsampled_conditions(n_conditions: int, n_keep: int) -> set[int]:
     """Pick *n_keep* condition indices spread evenly over the grid.
 
@@ -693,6 +703,7 @@ def make_lc2st_joint_metric(
         )
         return {"lc2st": float(result.statistic)}
 
+    setattr(_lc2st_metric, REQUIRES_SCALAR_PARAMETERS, _LC2ST_SCALAR_ONLY)
     _lc2st_metric.joint_metric_settings = _lc2st_settings(  # type: ignore[attr-defined]
         n_folds=n_folds,
         n_null_trials=n_null_trials,
@@ -755,6 +766,8 @@ def _check_lc2st_dependency() -> None:
     """
     _require_sklearn()
 
+
+setattr(_default_lc2st_metric, REQUIRES_SCALAR_PARAMETERS, _LC2ST_SCALAR_ONLY)
 
 _default_lc2st_metric._bf_hpo_resolve_check = (  # type: ignore[attr-defined]
     _check_lc2st_dependency
