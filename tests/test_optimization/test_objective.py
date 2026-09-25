@@ -2383,3 +2383,59 @@ def test_custom_validate_fn_is_never_rejected_by_the_validation_budget(
 
     assert trial.user_attrs.get("rejected_reason") != "validation_memory_budget"
     assert "estimated_validation_memory_mb" not in trial.user_attrs
+
+
+def test_a_hook_that_changes_its_settings_mid_run_is_refused(monkeypatch):
+    """The post-hook check compares what actually ran (#117).
+
+    The attribute matches the stored pin before training, so the early check
+    passes; the hook's call then switches it to conflicting settings. The
+    trial must be refused before any of its values reach the study.
+    """
+    from bayesflow_hpo.objectives import JOINT_METRIC_SETTINGS_ATTR
+    from bayesflow_hpo.validation.registry import JointMetricConfigurationError
+
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.estimate_peak_memory_mb",
+        lambda params: 1.0,
+    )
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.build_continuous_approximator",
+        lambda params, adapter, search_space: _FakeApproximator(1_000),
+    )
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.cleanup_trial",
+        lambda: None,
+    )
+
+    pinned = {"tarp_error_item": {"reference_id": "ref-a"}}
+
+    def validate_fn(approximator, validation_data, n_posterior_samples):
+        validate_fn.joint_metric_settings = {
+            "tarp_error_item": {"reference_id": "ref-b"}
+        }
+        return {"calibration_error": 0.1, "nrmse": 0.1}
+
+    validate_fn.joint_metric_settings = pinned
+
+    objective = GenericObjective(
+        ObjectiveConfig(
+            simulator=MagicMock(),
+            adapter=lambda data: data,
+            search_space=_FakeSearchSpace(),
+            epochs=1,
+            num_batches=1,
+            validation_data=_DUMMY_VALIDATION_DATA_1COND,
+            train_fn=lambda approximator, simulator, hparams, callbacks: None,
+            validate_fn=validate_fn,
+        )
+    )
+
+    trial = _FakeTrial()
+    trial.study.study_name = "resumed"
+    trial.study.set_user_attr(JOINT_METRIC_SETTINGS_ATTR, dict(pinned))
+    with pytest.raises(JointMetricConfigurationError, match="ref-b"):
+        objective(trial)
+    assert "nrmse" not in trial.user_attrs
+    assert "calibration_error" not in trial.user_attrs
+    assert trial.study.user_attrs[JOINT_METRIC_SETTINGS_ATTR] == pinned

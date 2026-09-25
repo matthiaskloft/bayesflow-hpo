@@ -145,6 +145,16 @@ study = hpo.optimize(
 
 Without `validate_fn`, the default `run_validation_pipeline` is used for both final and intermediate validation. If the default pipeline cannot handle your approximator's output shapes (e.g., 3D per-item posteriors), intermediate validation will fail silently and pruning will be ineffective — providing a custom `validate_fn` is the fix.
 
+A hook may carry a `joint_metric_settings` attribute, `{metric_name:
+{setting: value}}`, to record the configuration its joint metrics ran at —
+for example `{"tarp_error_item": {"reference_id": "..."}}`. Keep it fixed
+for the whole study. It is pinned like the pipeline's declared settings
+(without the pipeline's validation-run counts): stamped on a fresh study,
+refused with `JointMetricConfigurationError` on a resume that changes it. A
+malformed attribute raises the same error when the configuration is built; a
+hook without it records nothing. See
+[validation.md](validation.md#recording-a-joint-metrics-settings).
+
 #### Training Failure Handling
 
 When training raises an exception, the objective:

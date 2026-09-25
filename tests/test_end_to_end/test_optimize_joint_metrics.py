@@ -212,3 +212,41 @@ def test_a_custom_hook_must_still_produce_its_joint_objective_key(
             validate_fn=lambda a, d, n: {"nrmse": 0.2},
         )
 
+
+
+def test_a_hook_declaring_settings_is_pinned_across_a_resume(
+    run_study, tmp_path
+) -> None:
+    """#117: a `validate_fn` hook's declared settings reach the study."""
+    from bayesflow_hpo.objectives import JOINT_METRIC_SETTINGS_ATTR
+
+    def _hook(reference_id: str):
+        def validate_fn(a, d, n):
+            return {"nrmse": 0.2}
+
+        validate_fn.joint_metric_settings = {
+            "tarp_error_item": {"reference_id": reference_id}
+        }
+        return validate_fn
+
+    storage = f"sqlite:///{(tmp_path / 'hook.db').as_posix()}"
+    study = run_study(
+        objective_metrics=["nrmse"],
+        validate_fn=_hook("ref-a"),
+        storage=storage,
+        study_name="hook_pin",
+    )
+    assert study.user_attrs[JOINT_METRIC_SETTINGS_ATTR] == {
+        "tarp_error_item": {"reference_id": "ref-a"}
+    }
+
+    # `n_trials` counts the stored trials too, so ask for more than exist.
+    with pytest.raises(JointMetricConfigurationError, match="ref-b"):
+        run_study(
+            objective_metrics=["nrmse"],
+            n_trials=4,
+            resume=True,
+            validate_fn=_hook("ref-b"),
+            storage=storage,
+            study_name="hook_pin",
+        )
