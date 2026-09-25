@@ -239,6 +239,42 @@ Joint metrics are excluded from *intermediate* validation unless
 Call `describe_metrics()` for the live registry, with each metric's kind,
 aliases, description, and extra dependency.
 
+#### Recording a joint metric's settings
+
+A joint metric's score moves with its configuration, and a TARP magnitude in
+particular is only meaningful relative to the reference points that produced
+it (Lemos et al., 2023, Sec. 4.3). The study pins that configuration in its
+`bayesflow_hpo_joint_metric_settings` user attribute: stamped on a fresh
+study, and a resume that changes it raises `JointMetricConfigurationError`.
+
+The public channel for recording a setting — a `reference_id`, or anything
+else the score depends on — is the `joint_metric_settings` attribute
+(`JOINT_METRIC_SETTINGS`), a flat JSON-serializable dict:
+
+- **On a custom joint metric callable**, when it runs through the pipeline
+  (`joint_metrics=` or `register_joint_metric()`). The pipeline collects it
+  into `ValidationResult.joint_metric_settings` under the metric's name.
+- **On a `validate_fn` hook** otherwise, as `{metric_name: {setting:
+  value}}`, since a hook returns only floats. See
+  [optimization.md](optimization.md#custom-validation-function).
+
+For example, an item-pooled TARP scored against the same reference provider
+as `tarp_error`:
+
+```python
+def tarp_item(inputs):
+    ...
+    return {"tarp_error_item": value}
+
+# Through the pipeline: settings on the metric itself.
+tarp_item.joint_metric_settings = {"reference_id": "irt-classical-jitter0"}
+
+# Through a custom hook: settings keyed by metric name.
+my_validate_fn.joint_metric_settings = {
+    "tarp_error_item": {"reference_id": "irt-classical-jitter0"},
+}
+```
+
 #### Choosing TARP reference points
 
 Which key a TARP metric emits is decided by whether *you* supply the
@@ -663,6 +699,11 @@ study = hpo.optimize(
     objective_metrics=["calibration_error", "nrmse"],
 )
 ```
+
+This hook does not carry `joint_metric_settings`, so a study driven by it
+does not pin the L-C2ST settings (`n_folds`, `seed`, ...). Attaching them
+would make every existing study of this kind refuse to resume, since it has
+completed trials and no pin.
 
 ## Possible Future Extensions
 

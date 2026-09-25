@@ -235,6 +235,16 @@ def optimize(
         path, which isolates pure inference timing, a custom
         ``validate_fn`` lumps inference and metric computation together.
 
+        **Joint metric settings:** the hook may carry a
+        ``joint_metric_settings`` attribute, ``{metric_name: {setting:
+        value}}`` with flat JSON-serializable values (for example
+        ``{"tarp_error_item": {"reference_id": "..."}}``). It is pinned in
+        the study exactly as the pipeline's declared settings are: stamped
+        on a fresh study, and a resume with different settings raises
+        ``JointMetricConfigurationError``. A malformed attribute raises the
+        same error when the configuration is built. A hook without it
+        records nothing.
+
         **Intermediate pruning:** this function is also called during
         training at the configured interval with a reduced
         ``n_posterior_samples`` for median-based multi-objective

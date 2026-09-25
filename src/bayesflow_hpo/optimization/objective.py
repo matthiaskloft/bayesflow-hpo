@@ -26,7 +26,7 @@ import logging
 import math
 import numbers
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal, cast
 
@@ -284,6 +284,55 @@ def default_validate_fn(
     return dict(result.summary)
 
 
+def hook_joint_metric_settings(
+    validate_fn: ValidateFn | None,
+) -> dict[str, dict[str, Any]]:
+    """Settings a custom ``validate_fn`` declares for the joint metrics it runs.
+
+    A hook returns a flat ``{name: value}`` dict, so it has no result object
+    to carry settings in. It may instead carry a ``joint_metric_settings``
+    attribute (:data:`~bayesflow_hpo.validation.registry.JOINT_METRIC_SETTINGS`)
+    of the same shape the pipeline records, ``{metric_name: {setting:
+    value}}``, and the objective pins that exactly as it pins the pipeline's.
+
+    Parameters
+    ----------
+    validate_fn
+        The configured hook, or ``None``.
+
+    Returns
+    -------
+    dict[str, dict[str, Any]]
+        A copy of the declared settings; empty when there is no hook or it
+        declares nothing, which leaves the study untouched.
+
+    Raises
+    ------
+    JointMetricConfigurationError
+        If the attribute is present but is not a mapping of ``str`` to
+        mapping. A configuration error, so the objective re-raises it and
+        the study stops rather than penalizing every trial.
+    """
+    from bayesflow_hpo.validation.registry import JOINT_METRIC_SETTINGS
+
+    if validate_fn is None:
+        return {}
+    declared = getattr(validate_fn, JOINT_METRIC_SETTINGS, None)
+    if declared is None:
+        return {}
+    if not isinstance(declared, Mapping) or not all(
+        isinstance(name, str) and isinstance(value, Mapping)
+        for name, value in declared.items()
+    ):
+        raise JointMetricConfigurationError(
+            f"validate_fn.{JOINT_METRIC_SETTINGS} must be a mapping of "
+            "metric name (str) to a mapping of settings, e.g. "
+            "{'tarp_error_item': {'reference_id': '...'}}; got "
+            f"{declared!r}."
+        )
+    return {name: dict(value) for name, value in declared.items()}
+
+
 def _planned_joint_settings(config: ObjectiveConfig) -> dict[str, Any]:
     """Settings the final validation WILL declare, resolved before training.
 
@@ -306,9 +355,9 @@ def _planned_joint_settings(config: ObjectiveConfig) -> dict[str, Any]:
     from bayesflow_hpo.validation.registry import resolve_joint_metrics
 
     if config.validate_fn is not None:
-        # The hook owns its validation step and reports no settings, so
-        # there is nothing to plan for. Documented on the pin itself.
-        return {}
+        # The hook owns its validation step; the only settings it reports
+        # are the ones it declares on itself, empty when it declares none.
+        return hook_joint_metric_settings(config.validate_fn)
 
     overrides = config.joint_metrics or {}
     names = _pipeline_metrics(
@@ -668,6 +717,16 @@ class ObjectiveConfig:
         computation together (unlike the default path which isolates
         pure inference timing).
 
+        **Joint metric settings:** the hook may carry a
+        ``joint_metric_settings`` attribute, ``{metric_name: {setting:
+        value}}`` with flat JSON-serializable values (for example
+        ``{"tarp_error_item": {"reference_id": "..."}}``). It is pinned in
+        the study exactly as the pipeline's declared settings are: stamped
+        on a fresh study, and a resume with different settings raises
+        ``JointMetricConfigurationError``. A malformed attribute raises the
+        same error when the configuration is built. A hook without it
+        records nothing.
+
         **Intermediate pruning:** also called during training at the
         configured interval with reduced ``n_posterior_samples`` for
         median-based multi-objective pruning.
@@ -748,6 +807,9 @@ class ObjectiveConfig:
         require_pipeline_aggregate(
             self.aggregate, has_validate_fn=self.validate_fn is not None
         )
+        # A malformed `joint_metric_settings` on the hook is refused here,
+        # before any study or trial exists, rather than at the first trial.
+        hook_joint_metric_settings(self.validate_fn)
         # Checked at THIS boundary too, not only in `optimize()`. Building a
         # config directly skips that check, and the memory estimator clamps
         # a sub-1 cap to 1 -- so an invalid value would reach training and
@@ -1804,6 +1866,14 @@ class GenericObjective:
                     config.n_posterior_samples,
                 )
                 inference_time = time.perf_counter() - t_val_start
+                # Same placement as the pipeline branch below: before the
+                # objective values are reported. Read from the hook's
+                # declared attribute, since its result carries none.
+                check_or_stamp_joint_metric_settings(
+                    trial.study,
+                    hook_joint_metric_settings(config.validate_fn),
+                    n_completed_trials=_n_measured_trials(trial.study),
+                )
                 metrics_summary = _validate_metric_keys(
                     raw, config.canonical_objective_metrics,
                     penalty_values=self._metric_penalty_map(),
