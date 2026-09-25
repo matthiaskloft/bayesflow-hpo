@@ -126,16 +126,30 @@ def _check_vector_parameters(
 ) -> None:
     """Refuse, before any condition runs, what folding cannot support.
 
-    Uses the first condition's shapes. Raised as
-    :class:`JointMetricConfigurationError` so that `GenericObjective` stops
-    the study instead of scoring every trial with a penalty.
+    Every condition is checked, not only the first: a grid over the number
+    of items can hold scalar parameters in condition 0 and vector-valued
+    ones later, and a check on condition 0 alone would pass a scalar-only
+    joint metric that then fails, and is invalidated, on every trial.
+    Widths may differ BETWEEN conditions -- each condition is folded with
+    its own -- but not between keys within one condition.
+
+    Raised as :class:`JointMetricConfigurationError` so that
+    `GenericObjective` stops the study instead of scoring every trial with a
+    penalty.
+
+    Raises
+    ------
+    JointMetricConfigurationError
+        If the keys of any condition differ in width, or if any condition
+        is vector-valued while a joint metric declares
+        :data:`~bayesflow_hpo.validation.registry.REQUIRES_SCALAR_PARAMETERS`.
     """
-    if not validation_data.simulations:
-        return
-    width = _parameter_width(
-        validation_data.simulations[0], validation_data.param_keys
-    )
-    if width == 1:
+    max_width = 1
+    for sim_batch in validation_data.simulations:
+        max_width = max(
+            max_width, _parameter_width(sim_batch, validation_data.param_keys)
+        )
+    if max_width == 1:
         return
     scalar_only = {
         name: getattr(fn, REQUIRES_SCALAR_PARAMETERS)
@@ -145,7 +159,8 @@ def _check_vector_parameters(
     if scalar_only:
         raise JointMetricConfigurationError(
             f"Joint metrics {sorted(scalar_only)} cannot run on "
-            f"vector-valued parameters ({width} elements per simulation): "
+            "vector-valued parameters (up to "
+            f"{max_width} elements per simulation): "
             + " ".join(scalar_only.values())
         )
 
@@ -164,6 +179,13 @@ def _fold_vector_draws(
     truths the pipeline builds line up row for row.
 
     Width 1 returns *draws* untouched, so a scalar study is unchanged.
+
+    Raises
+    ------
+    ValueError
+        If *draws* for several keys have more than 3 dimensions (the keys'
+        columns cannot be separated), or if the number of columns is not
+        ``n_keys * width``.
     """
     arr = np.asarray(draws)
     if width == 1:
@@ -630,11 +652,8 @@ def run_validation_pipeline(
         timing["inference"] += time.perf_counter() - t0
         # Vector-valued parameters: one row per (simulation, element), for
         # the joint and the marginal path alike. A no-op at width 1.
-        draws = _fold_vector_draws(
-            draws,
-            n_params,
-            _parameter_width(sim_batch, validation_data.param_keys),
-        )
+        width = _parameter_width(sim_batch, validation_data.param_keys)
+        draws = _fold_vector_draws(draws, n_params, width)
 
         # --- Joint metrics, before the per-parameter branch ---
         # Placed here on purpose: the single-parameter branch below rebinds
@@ -672,6 +691,9 @@ def run_validation_pipeline(
                 row = compute_condition_metrics(
                     param_draws, true_values, cond_id, metric_fns,
                 )
+                if width > 1:
+                    # `len(true_values)` counts folded rows, n_sims * width.
+                    row["n_sims"] = len(true_values) // width
                 param_condition_rows[param_key].append(row)
         else:
             param_key = validation_data.param_keys[0]
@@ -679,6 +701,8 @@ def run_validation_pipeline(
             if draws.ndim == 3 and draws.shape[-1] == 1:
                 draws = np.squeeze(draws, axis=-1)
             row = compute_condition_metrics(draws, true_values, cond_id, metric_fns)
+            if width > 1:
+                row["n_sims"] = len(true_values) // width
             param_condition_rows[param_key].append(row)
 
         timing["metrics"] += time.perf_counter() - t1

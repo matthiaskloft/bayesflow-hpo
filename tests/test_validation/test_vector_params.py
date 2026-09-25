@@ -230,3 +230,151 @@ def test_scalar_only_joint_metric_refused_for_vector_params() -> None:
             metrics=["rmse"],
             joint_metrics={"tarp_error": _rowwise},
         )
+
+
+def _grid(conditions: list[dict[str, np.ndarray]]) -> ValidationDataset:
+    sims = [{**c, "x": np.zeros((N_SIMS, 3))} for c in conditions]
+    return ValidationDataset(
+        simulations=sims,
+        condition_labels=[{"c": i} for i in range(len(sims))],
+        param_keys=list(conditions[0]),
+        data_keys=["x"],
+        seed=0,
+    )
+
+
+class _GridApproximator:
+    """Like `_TruthApproximator`, but serves each condition's own truths.
+
+    Conditions are told apart by the id stored in ``x``.
+    """
+
+    def __init__(self, grid: list[dict[str, np.ndarray]], good: set[str]):
+        self.inner = [_TruthApproximator(c, good) for c in grid]
+
+    def sample(self, *, conditions: Any, num_samples: int) -> dict[str, Any]:
+        cond = int(np.asarray(conditions["x"])[0, 0])
+        return self.inner[cond].sample(
+            conditions=conditions, num_samples=num_samples
+        )
+
+
+def _grid_with_ids(grid: list[dict[str, np.ndarray]]) -> ValidationDataset:
+    data = _grid(grid)
+    for i, sim in enumerate(data.simulations):
+        sim["x"] = np.full((N_SIMS, 3), float(i))
+    return data
+
+
+def test_width_may_vary_across_conditions() -> None:
+    rng = np.random.default_rng(10)
+    grid = [
+        {"a": rng.normal(size=(N_SIMS,)), "b": rng.normal(size=(N_SIMS,))},
+        {"a": rng.normal(size=(N_SIMS, 3)), "b": rng.normal(size=(N_SIMS, 3))},
+        {"a": rng.normal(size=(N_SIMS, 5)), "b": rng.normal(size=(N_SIMS, 5))},
+    ]
+    result = run_validation_pipeline(
+        approximator=_GridApproximator(grid, good={"a"}),
+        validation_data=_grid_with_ids(grid),
+        n_posterior_samples=N_SAMPLES,
+        metrics=["rmse", "tarp_error_random"],
+    )
+    assert result.failed_joint_metrics == {}
+    rows_a = result.per_parameter["a"].condition_metrics
+    rows_b = result.per_parameter["b"].condition_metrics
+    assert (rows_a["rmse"] < 0.1).all()
+    assert (rows_b["rmse"] > 40.0).all()
+    # The column counts simulations, not the pooled rows.
+    assert list(rows_a["n_sims"]) == [N_SIMS] * 3
+
+
+def test_scalar_only_metric_refused_if_a_later_condition_is_vector() -> None:
+    rng = np.random.default_rng(11)
+    grid = [
+        {"a": rng.normal(size=(N_SIMS,))},
+        {"a": rng.normal(size=(N_SIMS, 4))},
+    ]
+
+    def _rowwise(inputs: JointMetricInputs) -> dict[str, float]:
+        raise AssertionError("must be refused before it runs")
+
+    setattr(_rowwise, REQUIRES_SCALAR_PARAMETERS, "pairs data by row.")
+
+    class _NeverSample:
+        def sample(self, **_: Any) -> Any:
+            raise AssertionError("inference ran before the config check")
+
+    with pytest.raises(JointMetricConfigurationError, match="pairs data"):
+        run_validation_pipeline(
+            approximator=_NeverSample(),
+            validation_data=_grid(grid),
+            n_posterior_samples=N_SAMPLES,
+            metrics=["rmse"],
+            joint_metrics={"tarp_error": _rowwise},
+        )
+
+
+def test_mixed_widths_in_a_later_condition_raise_before_inference() -> None:
+    rng = np.random.default_rng(12)
+    grid = [
+        {"a": rng.normal(size=(N_SIMS, 2)), "b": rng.normal(size=(N_SIMS, 2))},
+        {"a": rng.normal(size=(N_SIMS, 2)), "b": rng.normal(size=(N_SIMS, 3))},
+    ]
+
+    class _NeverSample:
+        def sample(self, **_: Any) -> Any:
+            raise AssertionError("inference ran before the config check")
+
+    with pytest.raises(JointMetricConfigurationError, match="different numbers"):
+        run_validation_pipeline(
+            approximator=_NeverSample(),
+            validation_data=_grid(grid),
+            n_posterior_samples=N_SAMPLES,
+            metrics=["rmse"],
+        )
+
+
+class _MatrixApproximator:
+    """Per-key draws ``(S, N, W1, W2)``: several trailing axes per key."""
+
+    def __init__(self, truths: dict[str, np.ndarray], good: set[str]) -> None:
+        self.truths = truths
+        self.good = good
+
+    def sample(self, *, conditions: Any, num_samples: int) -> dict[str, Any]:
+        out = {}
+        for key, truth in self.truths.items():
+            centre = truth if key in self.good else truth + 50.0
+            out[key] = np.repeat(centre[:, None], num_samples, axis=1)
+        return out
+
+
+def test_multi_key_matrix_valued_params_fold_correctly() -> None:
+    rng = np.random.default_rng(13)
+    truths = {
+        "a": rng.normal(size=(N_SIMS, 2, 3)),
+        "b": rng.normal(size=(N_SIMS, 2, 3)),
+    }
+    seen: dict[str, np.ndarray] = {}
+
+    def _probe(inputs: JointMetricInputs) -> dict[str, float]:
+        seen["draws"] = inputs.draws
+        seen["true"] = inputs.true_values
+        return {"tarp_error": 0.0}
+
+    result = run_validation_pipeline(
+        approximator=_MatrixApproximator(truths, good={"a"}),
+        validation_data=_dataset(truths),
+        n_posterior_samples=N_SAMPLES,
+        metrics=["rmse"],
+        joint_metrics={"tarp_error": _probe},
+    )
+    assert result.failed_joint_metrics == {}
+    assert result.per_parameter["a"].summary["rmse"] < 1e-9
+    assert result.per_parameter["b"].summary["rmse"] > 40.0
+    assert seen["draws"].shape == (N_SIMS * 6, N_SAMPLES, 2)
+    np.testing.assert_allclose(seen["draws"][:, 0, 0], truths["a"].reshape(-1))
+    np.testing.assert_allclose(
+        seen["draws"][:, 0, 1], truths["b"].reshape(-1) + 50.0
+    )
+    np.testing.assert_allclose(seen["true"][:, 1], truths["b"].reshape(-1))

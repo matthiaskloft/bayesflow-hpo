@@ -67,7 +67,13 @@ class JointMetricInputs:
         with ``W = prod(trailing)`` -- it is ``n_sims * W``: row
         ``s * W + i`` is element ``i`` of simulation ``s``, and column ``k``
         is key ``k``'s value for that element. ``n_params`` is then the
-        number of keys, not ``n_keys * W``.
+        number of keys, not ``n_keys * W``. The ``W`` rows of one
+        simulation are NOT independent: they share its data and posterior.
+        A metric that treats rows as i.i.d. draws -- a uniformity test's
+        p-value, say -- is anti-conservative for such parameters, and
+        TARP's ``prior_derangement`` reference may be another element of the
+        same simulation. Caller-supplied TARP ``reference_points`` must have
+        ``n_sims * W`` rows in this order.
     true_values
         Ground-truth parameters, ``(n_rows, n_params)``, in the same row
         order as *draws*.
