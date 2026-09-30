@@ -102,7 +102,8 @@ def _parameter_width(
         If the keys disagree on their width. Folding elements into rows
         pairs element *i* of every key in one row, which has no meaning
         when, say, ``a`` holds one value per item and ``theta`` one per
-        person.
+        person. Also raised if a key holds no elements, e.g. shape
+        ``(n_sims, 0)``.
     """
     widths = {
         pk: int(np.prod(np.shape(sim_batch[pk])[1:], dtype=int))
@@ -116,6 +117,13 @@ def _parameter_width(
             "row per (simulation, element), which requires every key to "
             "have the same per-simulation width. Validate keys of different "
             "widths in separate runs, or with a custom `validate_fn`."
+        )
+    empty = sorted(pk for pk, width in widths.items() if width < 1)
+    if empty:
+        raise JointMetricConfigurationError(
+            f"Parameter keys {empty} hold no elements per simulation "
+            f"(shapes {[np.shape(sim_batch[pk]) for pk in empty]}). There is "
+            "nothing to validate; remove the key or fix the simulator output."
         )
     return next(iter(widths.values()), 1)
 

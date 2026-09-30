@@ -614,9 +614,9 @@ Slices the first condition to `n_sims` rows and wraps any error with a descripti
 
 ## Custom Validation for Structured Posteriors
 
-The default `run_validation_pipeline` expects flat 2D posteriors `(batch, param_dim)`. For models with structured (e.g., per-item) posteriors of shape `(batch, n_samples, items)`, the default pipeline will fail because `bf.diagnostics.calibration_error` cannot broadcast the shapes.
+Per-item posteriors of shape `(batch, n_samples, items)` need **no** custom hook: the default pipeline folds them into one row per (simulation, item), as described in [Vector-Valued Parameters](#vector-valued-parameters).
 
-**Solution**: provide a custom `validate_fn` to `optimize()` that flattens the structured posteriors before computing metrics:
+A custom `validate_fn` is still the route for what that folding refuses or does not compute: parameter keys of different widths (e.g. `a` per item and `theta` per person), scalar-only joint metrics such as L-C2ST on vector parameters, or a different pooling, such as keeping items as columns for a joint test over every coordinate. A minimal hook that pools per item by hand looks like this:
 
 ```python
 from bayesflow_hpo.validation.registry import resolve_metrics

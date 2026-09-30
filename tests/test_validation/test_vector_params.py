@@ -182,6 +182,22 @@ def test_mixed_widths_raise_before_inference() -> None:
         )
 
 
+def test_zero_width_key_raises_before_inference() -> None:
+    truths = {"a": np.zeros((N_SIMS, 0)), "b": np.zeros((N_SIMS, 0))}
+
+    class _NeverSample:
+        def sample(self, **_: Any) -> Any:
+            raise AssertionError("inference ran before the config check")
+
+    with pytest.raises(JointMetricConfigurationError, match="no elements"):
+        run_validation_pipeline(
+            approximator=_NeverSample(),
+            validation_data=_dataset(truths),
+            n_posterior_samples=N_SAMPLES,
+            metrics=["rmse"],
+        )
+
+
 def test_lc2st_refused_for_vector_params() -> None:
     pytest.importorskip("sklearn")
     rng = np.random.default_rng(7)
