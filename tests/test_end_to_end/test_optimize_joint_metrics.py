@@ -250,3 +250,32 @@ def test_a_hook_declaring_settings_is_pinned_across_a_resume(
             storage=storage,
             study_name="hook_pin",
         )
+
+
+def test_hook_settings_with_a_tuple_survive_sqlite_storage(
+    run_study, tmp_path
+) -> None:
+    """#117: a declaration JSON storage rewrites (tuple -> list) still matches.
+
+    The pre-training pin is read back from SQLite as a list; the post-hook
+    check must compare like with like, or an unchanged hook is refused
+    after training on its very first trial.
+    """
+    from bayesflow_hpo.objectives import JOINT_METRIC_SETTINGS_ATTR
+
+    def validate_fn(a, d, n):
+        return {"nrmse": 0.2}
+
+    validate_fn.joint_metric_settings = {"tarp_error_item": {"axes": (0, 1)}}
+    study = run_study(
+        objective_metrics=["nrmse"],
+        validate_fn=validate_fn,
+        storage=f"sqlite:///{(tmp_path / 'tuple.db').as_posix()}",
+        study_name="tuple_pin",
+    )
+    assert study.user_attrs[JOINT_METRIC_SETTINGS_ATTR] == {
+        "tarp_error_item": {"axes": [0, 1]}
+    }
+    assert any(
+        t.state == optuna.trial.TrialState.COMPLETE for t in study.trials
+    )

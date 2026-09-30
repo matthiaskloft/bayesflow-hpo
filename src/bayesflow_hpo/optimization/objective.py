@@ -338,14 +338,16 @@ def hook_joint_metric_settings(
     settings = {name: dict(value) for name, value in declared.items()}
     try:
         # Optuna stores user attributes as JSON; refusing here puts the error
-        # at configuration time rather than as a TypeError from storage.
-        json.dumps(settings)
+        # at configuration time rather than as a TypeError from storage. The
+        # round trip also returns the form storage will hand back -- a tuple
+        # reads back as a list from RDB storage -- so a pin written from this
+        # value compares equal to it on every later check.
+        return json.loads(json.dumps(settings))
     except (TypeError, ValueError) as exc:
         raise JointMetricConfigurationError(
             f"validate_fn.{JOINT_METRIC_SETTINGS} must be JSON-serializable "
             f"(plain str/int/float/bool/None values): {exc}"
         ) from exc
-    return settings
 
 
 def _planned_joint_settings(config: ObjectiveConfig) -> dict[str, Any]:

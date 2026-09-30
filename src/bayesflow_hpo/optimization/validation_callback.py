@@ -38,6 +38,7 @@ from bayesflow_hpo.objectives import (
     RawScore,
     _metric_to_minimize,
     canonical_summary,
+    check_or_stamp_joint_metric_settings,
 )
 from bayesflow_hpo.optimization.pruning_strategies import (
     should_prune_dominance,
@@ -613,6 +614,20 @@ class PeriodicValidationCallback(Callback):
                     self.approximator,
                     self.validation_data,
                     self.n_posterior_samples,
+                )
+                # The same guard final validation applies, before these
+                # scores can be reported or prune the trial: a hook whose
+                # declared settings changed mid-run would otherwise be
+                # compared against trials scored under the old ones.
+                from bayesflow_hpo.optimization.objective import (
+                    _n_measured_trials,
+                    hook_joint_metric_settings,
+                )
+
+                check_or_stamp_joint_metric_settings(
+                    self.trial.study,
+                    hook_joint_metric_settings(self.validate_fn),
+                    n_completed_trials=_n_measured_trials(self.trial.study),
                 )
                 # A hook returns the spelling its caller asked for, while
                 # `objective_metrics` was canonicalized at the API boundary.

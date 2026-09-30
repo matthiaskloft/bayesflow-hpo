@@ -404,3 +404,41 @@ def test_include_joint_metrics_is_reachable_from_optimize() -> None:
 
     assert "include_joint_metrics" in inspect.signature(optimize).parameters
 
+
+
+def test_a_hook_whose_settings_change_mid_run_is_refused_at_an_interval():
+    """#117: the hook-settings guard covers intermediate validation too.
+
+    The study is pinned at ``ref-a``; the hook switches to ``ref-b`` on its
+    first intermediate call. Its scores must neither be reported nor prune
+    the trial -- the configuration error is raised instead.
+    """
+    from bayesflow_hpo.objectives import JOINT_METRIC_SETTINGS_ATTR
+    from bayesflow_hpo.validation.registry import JointMetricConfigurationError
+
+    trial = _trial(1)
+    pinned = {"tarp_error_item": {"reference_id": "ref-a"}}
+    trial.study.set_user_attr(JOINT_METRIC_SETTINGS_ATTR, pinned)
+    approximator = MagicMock()
+    approximator.get_weights.return_value = []
+
+    def validate_fn(approx, data, n_samples):
+        validate_fn.joint_metric_settings = {
+            "tarp_error_item": {"reference_id": "ref-b"}
+        }
+        return {"nrmse": 1e9}
+
+    validate_fn.joint_metric_settings = pinned
+    cb = PeriodicValidationCallback(
+        trial=trial,
+        approximator=approximator,
+        validation_data=_dataset(),
+        interval=1,
+        warmup=0,
+        validate_fn=validate_fn,
+        objective_metrics=["nrmse"],
+    )
+    with pytest.raises(JointMetricConfigurationError, match="ref-b"):
+        cb.on_epoch_end(0)
+    assert trial.study.user_attrs[JOINT_METRIC_SETTINGS_ATTR] == pinned
+    assert not trial.study.trials[0].intermediate_values
