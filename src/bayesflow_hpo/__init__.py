@@ -120,11 +120,13 @@ from bayesflow_hpo.types import BuildApproximatorFn, TrainFn, ValidateFn
 from bayesflow_hpo.utils import loguniform_float, loguniform_int
 from bayesflow_hpo.validation import (
     DEFAULT_METRICS,
+    JOINT_METRIC_SETTINGS,
     AggregationConfigError,
     AggregationDomainError,
     AggregationError,
     GlobalC2STResult,
     JointMetricConfigurationError,
+    JointMetricFn,
     JointMetricInputs,
     LC2STResult,
     ValidationDataset,
@@ -132,6 +134,8 @@ from bayesflow_hpo.validation import (
     describe_metrics,
     generate_validation_dataset,
     global_c2st,
+    is_diagnostic_metric,
+    is_joint_metric,
     lc2st,
     list_metrics,
     load_validation_dataset,
@@ -139,6 +143,8 @@ from bayesflow_hpo.validation import (
     make_coverage_metric,
     make_lc2st_validate_fn,
     make_validation_dataset,
+    output_keys_for,
+    producer_for_key,
     register_joint_metric,
     register_metric,
     run_validation_pipeline,
@@ -267,4 +273,11 @@ __all__ = [
     "run_validation_pipeline",
     "save_validation_dataset",
     "validate_once",
+    # Metric registry shape accessors
+    "JOINT_METRIC_SETTINGS",
+    "JointMetricFn",
+    "is_diagnostic_metric",
+    "is_joint_metric",
+    "output_keys_for",
+    "producer_for_key",
 ]

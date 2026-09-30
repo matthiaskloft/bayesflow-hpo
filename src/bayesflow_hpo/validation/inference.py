@@ -218,8 +218,14 @@ def make_bayesflow_infer_fn(
             return draws
 
         draw_parts = [np.asarray(post_draws[key]) for key in param_keys]
+        # Each key flattened to (n_sims, n_samples, n_elements) BEFORE the
+        # concatenation: joining 4-D parts on the last axis would interleave
+        # the keys along the trailing dimensions, and no later reshape could
+        # recover which column belongs to which key. A 2-D part becomes a
+        # trailing axis of 1, a 3-D part is unchanged.
         normalized_parts = [
-            part[..., None] if part.ndim == 2 else part for part in draw_parts
+            part.reshape(part.shape[0], part.shape[1], -1)
+            for part in draw_parts
         ]
         return np.concatenate(normalized_parts, axis=-1)
 

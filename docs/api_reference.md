@@ -462,7 +462,37 @@ DEFAULT_METRICS: list[str]
 #   from bayesflow_hpo.validation.registry import get_metric, resolve_metrics
 get_metric(name) -> MetricFn
 resolve_metrics(names: list[str]) -> dict[str, MetricFn]
+
+# Shape accessors -- top-level exports, also in bayesflow_hpo.validation:
+output_keys_for(name: str) -> tuple[str, ...]
+producer_for_key(key: str) -> str | None
+is_joint_metric(name: str) -> bool
+is_diagnostic_metric(name: str) -> bool
+JointMetricFn = Callable[[JointMetricInputs], dict[str, float]]
+JOINT_METRIC_SETTINGS: str  # == "joint_metric_settings"
 ```
+
+The shape accessors answer questions about a metric without calling it, and
+read only what registration recorded:
+
+- `output_keys_for(name)` returns the summary keys a metric emits. For a
+  multi-output metric registered with `outputs=`, those keys (`coverage`
+  emits `coverage_90`, ... and never `coverage`); otherwise a one-tuple of
+  the canonical name. Aliases resolve. An **unregistered** name is not an
+  error: it returns `(name,)`.
+- `producer_for_key(key)` is the inverse: the canonical name of the
+  registered metric that emits summary column *key* (a registered metric
+  name or alias maps to its canonical name, whether or not that metric emits
+  a column under it), or `None` when no registered metric claims it.
+- `is_joint_metric(name)` is `True` if *name* (or its alias) was registered
+  with `register_joint_metric`, i.e. its callable takes `JointMetricInputs`.
+- `is_diagnostic_metric(name)` is `True` only for a registered metric
+  declared `kind="diagnostic"` -- the ones `objective_metrics` refuses. An
+  unregistered name returns `False`.
+- `JointMetricFn` is the type of a joint metric's callable.
+- `JOINT_METRIC_SETTINGS` is the attribute name under which a joint metric
+  callable declares its settings (a flat, JSON-serializable dict) so that a
+  resumed study can detect a changed configuration.
 
 Metrics registered with `kind="diagnostic"` remain available to validation
 reports but are rejected in `objective_metrics`.  `describe_metrics()` prints

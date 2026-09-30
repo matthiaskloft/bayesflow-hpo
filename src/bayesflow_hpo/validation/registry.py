@@ -57,19 +57,37 @@ class JointMetricInputs:
     Attributes
     ----------
     draws
-        Posterior draws, ``(n_sims, n_samples, n_params)``, **always 3-D**.
+        Posterior draws, ``(n_rows, n_samples, n_params)``, **always 3-D**.
         The pipeline normalizes a scalar-parameter study's 2-D array back to
         a trailing axis of 1 before constructing this, because two separate
         places squeeze it -- see
         :func:`~bayesflow_hpo.validation.pipeline.run_validation_pipeline`.
+        ``n_rows`` is ``n_sims`` for scalar parameters. For vector-valued
+        parameters -- every key ``(n_sims, W)`` or ``(n_sims, *trailing)``
+        with ``W = prod(trailing)`` -- it is ``n_sims * W``: row
+        ``s * W + i`` is element ``i`` of simulation ``s``, and column ``k``
+        is key ``k``'s value for that element. ``n_params`` is then the
+        number of keys, not ``n_keys * W``. The ``W`` rows of one
+        simulation are NOT independent: they share its data and posterior.
+        A metric that treats rows as i.i.d. draws -- a uniformity test's
+        p-value, say -- is anti-conservative for such parameters, and
+        TARP's ``prior_derangement`` reference may be another element of the
+        same simulation. Caller-supplied TARP ``reference_points`` must have
+        ``n_sims * W`` rows in this order.
     true_values
-        Ground-truth parameters, ``(n_sims, n_params)``.
+        Ground-truth parameters, ``(n_rows, n_params)``, in the same row
+        order as *draws*.
     param_keys
         Column order of the last axis of *draws* and of *true_values*.
         Nothing else records it: the pipeline reads it from the validation
         dataset and slices positionally.
     sim_batch
-        The whole condition batch, parameters and data alike.
+        The whole condition batch, parameters and data alike, in its
+        ORIGINAL per-simulation shape. For vector-valued parameters its rows
+        therefore do not line up with the rows of *draws*; a metric that
+        pairs data with draws row by row must declare
+        :data:`REQUIRES_SCALAR_PARAMETERS`, and the pipeline refuses it for
+        such parameters.
     data_keys
         Which keys of *sim_batch* are data rather than parameters.
     approximator
@@ -120,6 +138,14 @@ class JointMetricInputs:
 #: repeat it to `optimize()` is what stops the record from disagreeing with
 #: what actually ran.
 JOINT_METRIC_SETTINGS = "joint_metric_settings"
+
+
+#: Attribute a joint metric carries when it reads the data in ``sim_batch``
+#: one row per simulation, and so cannot run once the pipeline folds
+#: vector-valued parameters into one row per (simulation, element). The value
+#: is the reason, quoted in the configuration error the pipeline raises
+#: before any condition runs.
+REQUIRES_SCALAR_PARAMETERS = "_bf_hpo_requires_scalar_parameters"
 
 
 def joint_metric_settings(

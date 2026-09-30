@@ -497,6 +497,58 @@ result.per_parameter["sigma"].summary  # {"calibration_error": 0.05, ...}
 result.summary                         # average across parameters
 ```
 
+### Vector-Valued Parameters
+
+A parameter key may hold several values per simulation, e.g. an IRT model
+with `param_keys=["a", "b"]` where each is `(n_sims, n_items)`. The pipeline
+pools such keys by **folding the elements into rows**: every key of shape
+`(n_sims, *trailing)` contributes `n_sims * W` rows, `W = prod(trailing)`, and
+row `s * W + i` is element `i` of simulation `s`.
+
+- **Marginal metrics** score each key against its own draws, pooled over all
+  `(simulation, element)` rows. `per_parameter["a"]` is computed over every item of
+  every simulation.
+- **Joint metrics** receive `draws` of shape `(n_sims * W, n_samples,
+  n_keys)` and `true_values` of shape `(n_sims * W, n_keys)`. Each row is one
+  element's own parameter vector, so the joint test is on `d = n_keys`
+  coordinates (here `(a_i, b_i)`), not on `n_keys * W`.
+- `sim_batch` keeps its original per-simulation shape, so its rows do not
+  line up with the folded rows. A joint metric that pairs data with draws row
+  by row -- the built-in `lc2st` does -- is refused before any condition runs
+  when the parameters are vector-valued. A custom joint metric declares the
+  same restriction by setting the attribute named by
+  `bayesflow_hpo.validation.registry.REQUIRES_SCALAR_PARAMETERS` to a reason
+  string.
+- **Keys of different widths are rejected** before any condition runs, with
+  `JointMetricConfigurationError`: `a` per item and `theta` per person cannot
+  be paired row by row. Every condition is checked. Validate such keys
+  separately, or with a custom `validate_fn`. The width may differ *between*
+  conditions (a grid over `n_items`); each condition is folded with its own,
+  and a row-wise joint metric such as `lc2st` is refused if *any* condition
+  is vector-valued.
+- Keys with several trailing axes, `(n_sims, W1, W2)`, are flattened per key
+  to `W = W1 * W2` elements in row-major order before folding.
+- The `n_sims` column of the per-condition rows still counts simulations,
+  not the `n_sims * W` pooled rows the metrics were computed on.
+
+**The pooled rows are not independent.** The `W` rows from one simulation
+share its data and its posterior, but every metric treats the
+`n_sims * W` rows as if they were separate simulations:
+
+- The SBC uniformity tests (`sbc`: KS and chi-squared p-values) assume
+  i.i.d. ranks with `n = n_sims * W`. With correlated rows those p-values are
+  anti-conservative -- smaller than they should be -- for vector parameters.
+- Coverage, calibration error, RMSE and the other point estimates remain
+  valid averages over the pooled rows; only their precision is overstated
+  if read as if based on `n_sims * W` independent draws.
+- TARP with `reference="prior_derangement"` draws each row's reference from
+  another pooled row, which can be another element of the *same*
+  simulation rather than an independent prior draw.
+- Caller-supplied TARP `reference_points` must have `n_sims * W` rows, in the
+  folded row order, per condition.
+
+Scalar parameters (`(n_sims,)` or `(n_sims, 1)`) are unaffected.
+
 ## Dry-Run Validation
 
 Catch shape mismatches and key errors before a full HPO run:
@@ -517,9 +569,9 @@ Slices the first condition to `n_sims` rows and wraps any error with a descripti
 
 ## Custom Validation for Structured Posteriors
 
-The default `run_validation_pipeline` expects flat 2D posteriors `(batch, param_dim)`. For models with structured (e.g., per-item) posteriors of shape `(batch, n_samples, items)`, the default pipeline will fail because `bf.diagnostics.calibration_error` cannot broadcast the shapes.
+Per-item posteriors of shape `(batch, n_samples, items)` need **no** custom hook: the default pipeline folds them into one row per (simulation, item), as described in [Vector-Valued Parameters](#vector-valued-parameters).
 
-**Solution**: provide a custom `validate_fn` to `optimize()` that flattens the structured posteriors before computing metrics:
+A custom `validate_fn` is still the route for what that folding refuses or does not compute: parameter keys of different widths (e.g. `a` per item and `theta` per person), scalar-only joint metrics such as L-C2ST on vector parameters, or a different pooling, such as keeping items as columns for a joint test over every coordinate. A minimal hook that pools per item by hand looks like this:
 
 ```python
 from bayesflow_hpo.validation.registry import resolve_metrics
