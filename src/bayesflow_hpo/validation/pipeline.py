@@ -186,7 +186,9 @@ def _fold_vector_draws(
     row-major order of ``np.asarray(sim_batch[key]).reshape(-1)``, so the
     truths the pipeline builds line up row for row.
 
-    Width 1 returns *draws* untouched, so a scalar study is unchanged.
+    Width 1 returns *draws* untouched when they have at most 3 dimensions,
+    so a scalar study is unchanged; more trailing singleton axes, as from a
+    single key shaped ``(n_sims, 1, 1)``, are flattened to one.
 
     Raises
     ------
@@ -197,6 +199,10 @@ def _fold_vector_draws(
     """
     arr = np.asarray(draws)
     if width == 1:
+        # A single key shaped (S, 1, 1) arrives as (S, N, 1, 1): only a 3-D
+        # singleton is squeezed upstream, so flatten the trailing axes here.
+        if arr.ndim > 3:
+            return arr.reshape(*arr.shape[:2], -1)
         return arr
     if arr.ndim > 3 and n_keys > 1:
         # Concatenating 4-D parts on the last axis interleaves the keys, and
