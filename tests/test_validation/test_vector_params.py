@@ -394,3 +394,26 @@ def test_multi_key_matrix_valued_params_fold_correctly() -> None:
         seen["draws"][:, 0, 1], truths["b"].reshape(-1) + 50.0
     )
     np.testing.assert_allclose(seen["true"][:, 1], truths["b"].reshape(-1))
+
+
+def test_single_key_singleton_matrix_runs_marginal_and_joint() -> None:
+    rng = np.random.default_rng(14)
+    truths = {"a": rng.normal(size=(N_SIMS, 1, 1))}
+    seen: dict[str, tuple[int, ...]] = {}
+
+    def _probe(inputs: JointMetricInputs) -> dict[str, float]:
+        seen["draws"] = inputs.draws.shape
+        seen["true"] = inputs.true_values.shape
+        return {"tarp_error": 0.0}
+
+    result = run_validation_pipeline(
+        approximator=_MatrixApproximator(truths, good={"a"}),
+        validation_data=_dataset(truths),
+        n_posterior_samples=N_SAMPLES,
+        metrics=["rmse"],
+        joint_metrics={"tarp_error": _probe},
+    )
+    assert result.failed_joint_metrics == {}
+    assert result.summary["rmse"] < 1e-9
+    assert seen["draws"] == (N_SIMS, N_SAMPLES, 1)
+    assert seen["true"] == (N_SIMS, 1)
