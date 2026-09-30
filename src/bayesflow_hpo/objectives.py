@@ -712,9 +712,9 @@ def check_or_stamp_joint_metric_settings(
 
     Raises
     ------
-    ValueError
-        If the study records different settings, or holds completed trials
-        with no record at all.
+    JointMetricConfigurationError
+        A ``ValueError`` subclass. If the study records different
+        settings, or holds completed trials with no record at all.
 
     Notes
     -----
@@ -730,14 +730,16 @@ def check_or_stamp_joint_metric_settings(
       such a study would assert that its existing trials ran at these
       settings, which is exactly what is unknown. Refusing is the honest
       option, with the escape hatch of setting the attribute by hand.
-    - **It does not see a custom ``validate_fn`` at all.** The pin is
-      written from ``ValidationResult.joint_metric_settings``, and a
-      ``validate_fn`` hook returns a flat ``{name: value}`` dict, so there
-      is no declaration to read. A study driven by
-      ``make_lc2st_validate_fn`` therefore records nothing and compares
-      nothing -- including across a change of ``n_folds`` or ``seed``. The
-      hook owns its own validation step, and making it report settings
-      would mean changing a public contract for a guard it did not ask for.
+    - **It sees a custom ``validate_fn`` only through what the hook
+      declares.** A hook returns a flat ``{name: value}`` dict, so the pin
+      is written from the hook's own ``joint_metric_settings`` attribute
+      (read by ``optimization.objective.hook_joint_metric_settings``). A
+      hook without that attribute records nothing and compares nothing.
+      ``make_lc2st_validate_fn`` does not set it, so a study driven by it
+      still records nothing -- including across a change of ``n_folds`` or
+      ``seed``: attaching the settings now would make every existing study
+      of that kind, which has completed trials and no pin, refuse to
+      resume.
     - **It does not close the concurrent-stamp window.** Two workers racing
       on a fresh shared-storage study can both see zero completed trials and
       stamp different settings, last write winning. This pre-exists for the
@@ -779,9 +781,10 @@ def check_or_stamp_joint_metric_settings(
                 "older study -- the attribute can simply be set to this "
                 "run's settings; that case is not distinguishable from "
                 "trials run at settings nobody recorded, which is why it is "
-                "not assumed. Start a new study, or set the study's "
-                f"{JOINT_METRIC_SETTINGS_ATTR!r} user attribute to the "
-                "settings it was actually run with."
+                "not assumed. Start a new study, or, if they did run at "
+                "these settings, record that with "
+                f"study.set_user_attr({JOINT_METRIC_SETTINGS_ATTR!r}, "
+                f"{recorded!r})."
             )
         study.set_user_attr(JOINT_METRIC_SETTINGS_ATTR, recorded)
         return

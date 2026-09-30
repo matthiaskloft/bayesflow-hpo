@@ -217,6 +217,13 @@ class PeriodicValidationCallback(Callback):
             else n_startup_trials
         )
         self.validate_fn = validate_fn
+        from bayesflow_hpo.optimization.objective import (
+            hook_joint_metric_settings,
+        )
+
+        # What the hook declares before its first call: a later call that
+        # drops a metric from it is refused, not silently unpinned.
+        self._initial_hook_settings = hook_joint_metric_settings(validate_fn)
         self._step = 0  # monotonic step counter for Optuna
         self._last_scores: dict[str, float] | None = None
         self._consecutive_failures = 0
@@ -613,6 +620,19 @@ class PeriodicValidationCallback(Callback):
                     self.approximator,
                     self.validation_data,
                     self.n_posterior_samples,
+                )
+                # The same guard final validation applies, before these
+                # scores can be reported or prune the trial: a hook whose
+                # declared settings changed mid-run would otherwise be
+                # compared against trials scored under the old ones.
+                from bayesflow_hpo.optimization.objective import (
+                    check_hook_joint_metric_settings,
+                )
+
+                check_hook_joint_metric_settings(
+                    self.trial.study,
+                    self.validate_fn,
+                    self._initial_hook_settings,
                 )
                 # A hook returns the spelling its caller asked for, while
                 # `objective_metrics` was canonicalized at the API boundary.

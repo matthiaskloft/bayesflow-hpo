@@ -11,6 +11,17 @@
   documented in `docs/api_reference.md`. No behaviour change; they were
   already importable from `bayesflow_hpo.validation.registry`, without a
   stability promise.
+- **A custom `validate_fn` can pin joint metric settings** (#117). A hook
+  may carry a `joint_metric_settings` attribute, `{metric_name: {setting:
+  value}}`, which the objective pins in the study the way it pins the
+  pipeline's declared settings, minus the validation-run counts the
+  pipeline adds: stamped on a fresh study, refused with
+  `JointMetricConfigurationError` on a resume that changes it. This is the
+  channel for recording a score's `reference_id`, e.g. an item-pooled TARP's
+  `{"tarp_error_item": {"reference_id": "..."}}`. A malformed attribute is
+  refused when `ObjectiveConfig` is built; a hook without it behaves as
+  before. `make_lc2st_validate_fn` deliberately does not set it, since that
+  would stop existing studies it drives from resuming.
 
 ### Fixed
 
