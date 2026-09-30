@@ -38,7 +38,6 @@ from bayesflow_hpo.objectives import (
     RawScore,
     _metric_to_minimize,
     canonical_summary,
-    check_or_stamp_joint_metric_settings,
 )
 from bayesflow_hpo.optimization.pruning_strategies import (
     should_prune_dominance,
@@ -218,6 +217,13 @@ class PeriodicValidationCallback(Callback):
             else n_startup_trials
         )
         self.validate_fn = validate_fn
+        from bayesflow_hpo.optimization.objective import (
+            hook_joint_metric_settings,
+        )
+
+        # What the hook declares before its first call: a later call that
+        # drops a metric from it is refused, not silently unpinned.
+        self._initial_hook_settings = hook_joint_metric_settings(validate_fn)
         self._step = 0  # monotonic step counter for Optuna
         self._last_scores: dict[str, float] | None = None
         self._consecutive_failures = 0
@@ -620,14 +626,13 @@ class PeriodicValidationCallback(Callback):
                 # declared settings changed mid-run would otherwise be
                 # compared against trials scored under the old ones.
                 from bayesflow_hpo.optimization.objective import (
-                    _n_measured_trials,
-                    hook_joint_metric_settings,
+                    check_hook_joint_metric_settings,
                 )
 
-                check_or_stamp_joint_metric_settings(
+                check_hook_joint_metric_settings(
                     self.trial.study,
-                    hook_joint_metric_settings(self.validate_fn),
-                    n_completed_trials=_n_measured_trials(self.trial.study),
+                    self.validate_fn,
+                    self._initial_hook_settings,
                 )
                 # A hook returns the spelling its caller asked for, while
                 # `objective_metrics` was canonicalized at the API boundary.

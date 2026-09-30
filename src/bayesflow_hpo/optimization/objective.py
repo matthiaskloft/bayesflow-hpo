@@ -350,6 +350,48 @@ def hook_joint_metric_settings(
         ) from exc
 
 
+def check_hook_joint_metric_settings(
+    study: optuna.Study,
+    validate_fn: ValidateFn | None,
+    initial: Mapping[str, Any],
+) -> None:
+    """Pin a hook's settings after a call, refusing any it dropped.
+
+    `check_or_stamp_joint_metric_settings` compares only the metrics a
+    declaration names, so a hook that clears its attribute, or removes one
+    metric from it, mid-trial would pass unchecked while the study keeps the
+    old pin. *initial* is what the hook declared when the trial started.
+
+    Parameters
+    ----------
+    study
+        The trial's study.
+    validate_fn
+        The hook that was just called.
+    initial
+        The hook's declaration at the start of the trial, from
+        :func:`hook_joint_metric_settings`.
+
+    Raises
+    ------
+    JointMetricConfigurationError
+        If a metric declared at the start is no longer declared, or if the
+        remaining settings conflict with the study's pin.
+    """
+    current = hook_joint_metric_settings(validate_fn)
+    removed = sorted(set(initial) - set(current))
+    if removed:
+        raise JointMetricConfigurationError(
+            f"validate_fn stopped declaring joint metric settings for "
+            f"{removed} during the trial (declared at start: "
+            f"{dict(initial)!r}; now: {current!r}). Keep the attribute fixed "
+            "for the whole study."
+        )
+    check_or_stamp_joint_metric_settings(
+        study, current, n_completed_trials=_n_measured_trials(study)
+    )
+
+
 def _planned_joint_settings(config: ObjectiveConfig) -> dict[str, Any]:
     """Settings the final validation WILL declare, resolved before training.
 
@@ -1833,6 +1875,7 @@ class GenericObjective:
             _planned_joint_settings(config),
             n_completed_trials=_n_measured_trials(trial.study),
         )
+        initial_hook_settings = hook_joint_metric_settings(config.validate_fn)
 
         # --- Step 7: TRAIN ---
         t_train_start = time.perf_counter()
@@ -1887,10 +1930,8 @@ class GenericObjective:
                 # Same placement as the pipeline branch below: before the
                 # objective values are reported. Read from the hook's
                 # declared attribute, since its result carries none.
-                check_or_stamp_joint_metric_settings(
-                    trial.study,
-                    hook_joint_metric_settings(config.validate_fn),
-                    n_completed_trials=_n_measured_trials(trial.study),
+                check_hook_joint_metric_settings(
+                    trial.study, config.validate_fn, initial_hook_settings
                 )
                 metrics_summary = _validate_metric_keys(
                     raw, config.canonical_objective_metrics,

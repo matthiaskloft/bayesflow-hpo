@@ -2439,3 +2439,50 @@ def test_a_hook_that_changes_its_settings_mid_run_is_refused(monkeypatch):
     assert "nrmse" not in trial.user_attrs
     assert "calibration_error" not in trial.user_attrs
     assert trial.study.user_attrs[JOINT_METRIC_SETTINGS_ATTR] == pinned
+
+
+def test_a_hook_that_clears_its_settings_mid_run_is_refused(monkeypatch):
+    """#117: an emptied declaration is a change, not "declares nothing"."""
+    from bayesflow_hpo.objectives import JOINT_METRIC_SETTINGS_ATTR
+    from bayesflow_hpo.validation.registry import JointMetricConfigurationError
+
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.estimate_peak_memory_mb",
+        lambda params: 1.0,
+    )
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.build_continuous_approximator",
+        lambda params, adapter, search_space: _FakeApproximator(1_000),
+    )
+    monkeypatch.setattr(
+        "bayesflow_hpo.optimization.objective.cleanup_trial",
+        lambda: None,
+    )
+
+    pinned = {"tarp_error_item": {"reference_id": "ref-a"}}
+
+    def validate_fn(approximator, validation_data, n_posterior_samples):
+        validate_fn.joint_metric_settings = {}
+        return {"calibration_error": 0.1, "nrmse": 0.1}
+
+    validate_fn.joint_metric_settings = pinned
+
+    objective = GenericObjective(
+        ObjectiveConfig(
+            simulator=MagicMock(),
+            adapter=lambda data: data,
+            search_space=_FakeSearchSpace(),
+            epochs=1,
+            num_batches=1,
+            validation_data=_DUMMY_VALIDATION_DATA_1COND,
+            train_fn=lambda approximator, simulator, hparams, callbacks: None,
+            validate_fn=validate_fn,
+        )
+    )
+
+    trial = _FakeTrial()
+    trial.study.study_name = "resumed"
+    trial.study.set_user_attr(JOINT_METRIC_SETTINGS_ATTR, dict(pinned))
+    with pytest.raises(JointMetricConfigurationError, match="stopped declaring"):
+        objective(trial)
+    assert "nrmse" not in trial.user_attrs
