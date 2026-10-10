@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+### Changed
+
+- **Conditional search spaces are sampled jointly** (TPE `group=True`). The
+  `"tpe"` sampler preset now sets `group=True` alongside `multivariate=True`.
+  Multivariate TPE models only the parameters shared by every trial, so in a
+  conditional (define-by-run) space every family-specific dimension fell back
+  to independent sampling, silently (`warn_independent_sampling=False`).
+  `group=True` fits a joint model per group of co-occurring parameters. On an
+  unconditional space it is a no-op (tested: identical draws for a fixed
+  seed). `group` is experimental in Optuna, so Optuna may emit an
+  `ExperimentalWarning`. A study created with the old sampler and resumed
+  continues with the new one; its later suggestions differ for conditional
+  spaces only.
+- **QMC warm-up no longer drops conditional dimensions silently.** Optuna's
+  `QMCSampler` fixes its space from the first trial and skips categoricals.
+  `QMCWarmupSampler` now draws categorical parameters balanced (least-used
+  choice among trials that sampled that parameter, so a family choice is
+  split evenly and a categorical nested in one family is balanced within
+  it), seeds the independent sampler (`seed=42`), and logs once per
+  parameter that a dimension outside the first trial's space is sampled
+  uniformly at random during the warm-up. Dimensions of a family absent
+  from the first trial are random, not Sobol, during warm-up. Categorical
+  warm-up draws on unconditional spaces change from i.i.d. random to
+  balanced, so warm-up trials differ from earlier releases for a given seed.
+
 ### Added
 
 - **The metric registry's shape accessors are public** (#122):
