@@ -23,6 +23,7 @@ import warnings
 from collections.abc import Callable, Sequence
 from typing import Any
 
+import numpy as np
 import optuna
 from optuna.trial import TrialState
 
@@ -223,8 +224,29 @@ def _resolve_sampler(
         (``"botorch"`` needs ``optuna-integration[botorch]``;
         ``"auto"`` needs a newer Optuna version).
 
+    Notes
+    -----
+    The ``"tpe"`` preset sets ``multivariate=True`` and ``group=True``.
+    Multivariate TPE alone models only the intersection of the search
+    spaces of all past trials, so in a conditional (define-by-run) space,
+    where a categorical choice decides which further parameters exist,
+    every parameter that is not present in every trial falls back to
+    independent univariate sampling (and ``warn_independent_sampling=False``
+    hides that).  With ``group=True`` Optuna decomposes the observed space
+    into maximal groups of parameters that co-occur in the same trials and
+    fits a joint multivariate TPE per group (Optuna developers, 2025,
+    ``TPESampler`` ``group`` argument, experimental since Optuna 2.8.0).
+    On an unconditional space every trial has the same parameters, so there
+    is a single group equal to the intersection space; the draws are
+    unchanged (checked by test against Optuna 4.9.0).
+
     References
     ----------
+    Optuna developers (2025). ``optuna.samplers.TPESampler`` (``group``
+        and ``multivariate`` arguments). Optuna 5.0.0 API reference, and
+        ``optuna/samplers/_tpe/sampler.py`` /
+        ``optuna/search_space/group_decomposed.py`` in the installed
+        release (4.9.0, verified 2026-10-10).
     Bergstra, J., et al. (2011). Algorithms for hyper-parameter
         optimization. *NeurIPS 24*.
     Balandat, M., et al. (2020). BoTorch. *NeurIPS 33*.
@@ -241,9 +263,13 @@ def _resolve_sampler(
     )
 
     def _make_tpe() -> optuna.samplers.TPESampler:
+        # ``group=True`` is a no-op on an unconditional space (one group =
+        # the whole space) and lets TPE model a conditional space's
+        # family-specific dimensions jointly; see the Notes section above.
         return optuna.samplers.TPESampler(
             seed=42,
             multivariate=True,
+            group=True,
             n_startup_trials=25 if n_startup_trials is None else n_startup_trials,
             warn_independent_sampling=False,
             constraints_func=constraints,
@@ -357,12 +383,52 @@ class QMCWarmupSampler(optuna.samplers.BaseSampler):
     ``qmc_startup_trials`` parameter on :func:`create_study` and
     :func:`~bayesflow_hpo.optimize`.
 
+    Notes
+    -----
+    Optuna's ``QMCSampler`` fixes its search space from the *first* trial
+    (``infer_relative_search_space`` in ``optuna/samplers/_qmc.py``; Optuna
+    developers, 2025); the first trial itself and everything outside that
+    space is drawn by its independent sampler.  Since Optuna 5.0 it also
+    samples categorical parameters of that space, each from one Sobol
+    coordinate floored to a choice index.  In a conditional space this means
+    the dimensions of every family absent from the first trial would be
+    i.i.d. random draws, a family's dimensions would be low-discrepancy only
+    for the first trial's family, and the family choice is a Sobol
+    coordinate that does not account for which families earlier trials took
+    (with a non-power-of-2 warm-up, Sobol' points are not balanced either).  To keep the
+    warm-up from silently losing coverage, this wrapper:
+
+    - removes categorical parameters from the Sobol search space during
+      the warm-up and draws every *categorical* parameter in a balanced way:
+      the choice
+      used least often so far among the trials that sampled that same
+      parameter (ties broken by a seeded RNG).  Because only trials that
+      sampled the parameter count, a categorical nested inside one family
+      is balanced within that family, and the family choice itself is
+      balanced across the warm-up;
+    - seeds the independent sampler (``seed``), so the draws that remain
+      random (first trial, and dimensions that are not in the first
+      trial's space) are reproducible;
+    - logs once per parameter that a dimension is outside the Sobol space
+      and is sampled uniformly at random during the warm-up.
+
+    Dimensions that exist only for a family other than the first trial's
+    are therefore random, not low-discrepancy, during the warm-up.  The
+    alternative (a separate Sobol sequence per family) needs the families
+    to be known before the first trial, which a define-by-run space does
+    not provide.  On an unconditional space the only behavioural changes
+    versus plain ``QMCSampler`` are the balanced categorical draw and the
+    seeded independent draws.
+
     Parameters
     ----------
     main_sampler
         The sampler to use after the QMC warm-up phase.
     qmc_startup_trials
         Number of non-rejected QMC trials before switching.
+    seed
+        Seed for the independent sampler and the balanced categorical
+        tie-break.  ``None`` leaves them unseeded.
 
     Raises
     ------
@@ -381,6 +447,12 @@ class QMCWarmupSampler(optuna.samplers.BaseSampler):
         Computing*, *30*(5), 2635-2654.
         https://doi.org/10.1137/070709359
 
+    Optuna developers (2025). ``optuna.samplers.QMCSampler``. Optuna 5.0.0
+        API reference, and ``optuna/samplers/_qmc.py`` in Optuna 5.0.0
+        (verified 2026-10-11): the search space is inferred from the first
+        trial, and ``sample_relative`` maps each categorical to
+        ``FloatDistribution(0, C)`` and floors the Sobol value to a choice.
+
     SciPy API reference: ``scipy.stats.qmc.Sobol``, which Optuna's
         ``QMCSampler`` wraps.  It takes its direction numbers from Joe &
         Kuo (2008) and documents that Sobol' points "lose their balance
@@ -396,6 +468,7 @@ class QMCWarmupSampler(optuna.samplers.BaseSampler):
         self,
         main_sampler: optuna.samplers.BaseSampler,
         qmc_startup_trials: int,
+        seed: int | None = 42,
     ) -> None:
         if qmc_startup_trials < 0:
             raise ValueError(
@@ -406,7 +479,10 @@ class QMCWarmupSampler(optuna.samplers.BaseSampler):
         self._qmc_sampler = optuna.samplers.QMCSampler(
             qmc_type="sobol",
             scramble=False,
+            seed=seed,
         )
+        self._rng = np.random.RandomState(seed)
+        self._warned_params: set[str] = set()
         self._n_qmc_completed: int = 0
         self._pending_qmc_trials: set[int] = set()
 
@@ -437,7 +513,16 @@ class QMCWarmupSampler(optuna.samplers.BaseSampler):
         study: optuna.Study,
         trial: optuna.trial.FrozenTrial,
     ) -> dict[str, optuna.distributions.BaseDistribution]:
-        return self._active_sampler.infer_relative_search_space(study, trial)
+        space = self._active_sampler.infer_relative_search_space(study, trial)
+        if not self._is_qmc_phase:
+            return space
+        # Categoricals go to `sample_independent`, which balances them;
+        # left in, QMCSampler (Optuna >= 5.0) would draw them from Sobol.
+        return {
+            name: dist
+            for name, dist in space.items()
+            if not isinstance(dist, optuna.distributions.CategoricalDistribution)
+        }
 
     def sample_relative(
         self,
@@ -458,9 +543,52 @@ class QMCWarmupSampler(optuna.samplers.BaseSampler):
     ) -> Any:
         if self._is_qmc_phase:
             self._pending_qmc_trials.add(trial.number)
+            if isinstance(
+                param_distribution, optuna.distributions.CategoricalDistribution
+            ):
+                return self._balanced_choice(
+                    study, trial, param_name, param_distribution
+                )
+            self._warn_if_outside_sobol_space(study, trial, param_name)
         return self._active_sampler.sample_independent(
             study, trial, param_name, param_distribution,
         )
+
+    def _balanced_choice(
+        self,
+        study: optuna.Study,
+        trial: optuna.trial.FrozenTrial,
+        param_name: str,
+        dist: optuna.distributions.CategoricalDistribution,
+    ) -> Any:
+        """Pick the least-used choice among earlier trials with this param."""
+        used = [
+            t.params[param_name]
+            for t in study.get_trials(deepcopy=False)
+            if t.number != trial.number and param_name in t.params
+        ]
+        counts = [sum(1 for u in used if u == c) for c in dist.choices]
+        lowest = [i for i, n in enumerate(counts) if n == min(counts)]
+        return dist.choices[int(lowest[self._rng.randint(len(lowest))])]
+
+    def _warn_if_outside_sobol_space(
+        self,
+        study: optuna.Study,
+        trial: optuna.trial.FrozenTrial,
+        param_name: str,
+    ) -> None:
+        """Log once when a non-categorical dim is not in the Sobol space."""
+        if trial.number == 0 or param_name in self._warned_params:
+            return
+        first = study.get_trials(deepcopy=False)[0]
+        if param_name not in first.distributions:
+            self._warned_params.add(param_name)
+            logger.warning(
+                "QMC warm-up: parameter %r is not in the first trial's search "
+                "space (conditional dimension); it is sampled uniformly at "
+                "random during the warm-up, not from the Sobol sequence.",
+                param_name,
+            )
 
     def before_trial(
         self,

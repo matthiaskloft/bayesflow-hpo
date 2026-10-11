@@ -1140,3 +1140,28 @@ Documents arithmetic averaging with NaN omission and NaN for all-NaN
 slices. Backs the aggregation missing-value convention; official package
 documentation is the primary source rather than an academic-method claim.
 An OpenAlex API search for `numpy.nanmean` returned no indexed works.
+
+**Optuna developers. (2025). `optuna.samplers.TPESampler` and
+`optuna.samplers.QMCSampler`.** Optuna 5.0.0 API reference.
+https://optuna.readthedocs.io/en/v5.0.0/reference/generated/optuna.samplers.TPESampler.html
+and
+https://optuna.readthedocs.io/en/v5.0.0/reference/generated/optuna.samplers.QMCSampler.html
+
+Backs the conditional-search-space handling in `optimization/study.py`.
+`TPESampler(group=True)` (experimental, added in Optuna 2.8.0; requires
+`multivariate=True`) decomposes the search space of past trials into maximal
+groups of co-occurring parameters and fits a joint multivariate TPE per
+group, which is what lets family-specific dimensions of a conditional space
+be modelled jointly instead of falling back to independent sampling.
+`QMCSampler` infers its search space from the first trial and, since
+Optuna 5.0, samples the categorical parameters in it from one Sobol
+coordinate each (`sample_relative` maps a categorical to
+`FloatDistribution(0, C)` and floors the value), so `QMCWarmupSampler` removes
+categoricals from that space during the warm-up to balance them itself. The
+TPE claims were read from the Optuna 4.9.0 source
+(`optuna/samplers/_tpe/sampler.py`, `optuna/search_space/group_decomposed.py`)
+on 2026-10-10; the QMC claim from the Optuna 5.0.0 source
+(`optuna/samplers/_qmc.py`) on 2026-10-11. The `group=True` no-op claim on an
+unconditional space and the balanced warm-up are asserted by
+`tests/test_optimization/test_qmc_warmup.py::TestConditionalSpaces`, which CI
+runs against Optuna 5.x.

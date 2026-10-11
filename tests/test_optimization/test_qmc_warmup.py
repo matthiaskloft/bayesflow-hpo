@@ -333,3 +333,149 @@ class TestResolveNStartupTrialsQMC:
         wrapper = QMCWarmupSampler(main, 32)
         result = _resolve_n_startup_trials(wrapper)
         assert result == 32  # max(32, 10)
+
+
+# ---------------------------------------------------------------------------
+# Conditional (define-by-run) search spaces
+# ---------------------------------------------------------------------------
+
+
+def _conditional_objective(trial: optuna.Trial) -> float:
+    family = trial.suggest_categorical("family", ["x", "y"])
+    if family == "x":
+        a = trial.suggest_float("x_a", 0.0, 1.0)
+        b = trial.suggest_float("x_b", 0.0, 1.0)
+        return (a - 0.3) ** 2 + (b - 0.6) ** 2
+    c = trial.suggest_float("y_c", 0.0, 1.0)
+    return (c - 0.8) ** 2
+
+
+def _unconditional_objective(trial: optuna.Trial) -> float:
+    a = trial.suggest_float("a", 0.0, 1.0)
+    b = trial.suggest_float("b", 1e-3, 1.0, log=True)
+    k = trial.suggest_categorical("k", ["u", "v", "w"])
+    return (a - 0.3) ** 2 + (b - 0.1) ** 2 + (k == "v") * 0.1
+
+
+class TestConditionalSpaces:
+    def test_tpe_preset_sets_group_and_multivariate(self):
+        from bayesflow_hpo.optimization.study import _resolve_sampler
+
+        sampler = _resolve_sampler("tpe")
+        assert sampler._multivariate is True
+        assert sampler._group is True
+
+    def test_tpe_runs_on_conditional_space(self):
+        from bayesflow_hpo.optimization.study import _resolve_sampler
+
+        sampler = _resolve_sampler("tpe", n_startup_trials=6)
+        study = optuna.create_study(storage=None, sampler=sampler)
+        study.optimize(_conditional_objective, n_trials=30)
+        fams = {t.params["family"] for t in study.trials}
+        assert fams == {"x", "y"}
+        # After startup, family-specific dims are sampled (no exception, in range).
+        for t in study.trials:
+            for v in t.params.values():
+                assert v in ("x", "y") or 0.0 <= v <= 1.0
+
+    def test_group_is_noop_on_unconditional_space(self):
+        def run(group: bool) -> list[dict]:
+            sampler = optuna.samplers.TPESampler(
+                seed=42,
+                multivariate=True,
+                group=group,
+                n_startup_trials=5,
+                warn_independent_sampling=False,
+            )
+            study = optuna.create_study(storage=None, sampler=sampler)
+            study.optimize(_unconditional_objective, n_trials=25)
+            return [t.params for t in study.trials]
+
+        assert run(True) == run(False)
+
+    def test_warmup_covers_both_families(self):
+        main = optuna.samplers.RandomSampler(seed=0)
+        sampler = QMCWarmupSampler(main, 8)
+        study = optuna.create_study(storage=None, sampler=sampler)
+        study.optimize(_conditional_objective, n_trials=8)
+        fams = [t.params["family"] for t in study.trials]
+        # Balanced family choice: 4 + 4.
+        assert fams.count("x") == 4
+        assert fams.count("y") == 4
+        for t in study.trials:
+            names = set(t.params) - {"family"}
+            assert names == (
+                {"x_a", "x_b"} if t.params["family"] == "x" else {"y_c"}
+            )
+
+    def test_balanced_with_many_choices(self):
+        # Optuna >= 5.0 samples categoricals in QMCSampler's relative space;
+        # with two choices Sobol happens to balance them, with six it does not.
+        def obj(trial: optuna.Trial) -> float:
+            trial.suggest_categorical("family", list("abcdef"))
+            trial.suggest_float("u", 0.0, 1.0)
+            return 0.0
+
+        sampler = QMCWarmupSampler(optuna.samplers.RandomSampler(seed=0), 8)
+        study = optuna.create_study(storage=None, sampler=sampler)
+        study.optimize(obj, n_trials=8)
+        fams = [t.params["family"] for t in study.trials]
+        counts = [fams.count(c) for c in "abcdef"]
+        assert max(counts) - min(counts) <= 1
+
+    def test_same_seed_reproduces_warmup(self):
+        def run() -> list[dict]:
+            sampler = QMCWarmupSampler(
+                optuna.samplers.RandomSampler(seed=0), 8, seed=7
+            )
+            study = optuna.create_study(storage=None, sampler=sampler)
+            study.optimize(_conditional_objective, n_trials=8)
+            return [t.params for t in study.trials]
+
+        assert run() == run()
+
+    def test_balanced_nested_categorical_within_family(self):
+        def obj(trial: optuna.Trial) -> float:
+            fam = trial.suggest_categorical("family", ["x", "y"])
+            if fam == "x":
+                trial.suggest_categorical("act", ["relu", "gelu"])
+            return 0.0
+
+        sampler = QMCWarmupSampler(optuna.samplers.RandomSampler(seed=0), 8)
+        study = optuna.create_study(storage=None, sampler=sampler)
+        study.optimize(obj, n_trials=8)
+        acts = [t.params["act"] for t in study.trials if "act" in t.params]
+        assert acts.count("relu") == acts.count("gelu") == 2
+
+    def test_conditional_dim_outside_sobol_space_is_logged_once(self, caplog):
+        sampler = QMCWarmupSampler(optuna.samplers.RandomSampler(seed=0), 8)
+        study = optuna.create_study(storage=None, sampler=sampler)
+        with caplog.at_level(logging.WARNING, logger="bayesflow_hpo"):
+            study.optimize(_conditional_objective, n_trials=8)
+        texts = [r.getMessage() for r in caplog.records]
+        msgs = [m for m in texts if "QMC warm-up" in m]
+        # First trial is family x (balanced tie-break aside); the other
+        # family's dimensions are the conditional ones, each logged once.
+        assert len(msgs) == len(set(msgs))
+        assert msgs
+
+    def test_unconditional_space_unchanged_dimensions_stay_sobol(self, caplog):
+        sampler = QMCWarmupSampler(optuna.samplers.RandomSampler(seed=0), 8)
+        study = optuna.create_study(storage=None, sampler=sampler)
+        with caplog.at_level(logging.WARNING, logger="bayesflow_hpo"):
+            study.optimize(_unconditional_objective, n_trials=8)
+        assert not [r for r in caplog.records if "QMC warm-up" in r.getMessage()]
+        ks = [t.params["k"] for t in study.trials]
+        assert max(ks.count(c) for c in "uvw") - min(ks.count(c) for c in "uvw") <= 1
+
+    def test_create_study_end_to_end_conditional(self):
+        study = create_study(
+            storage=None,
+            directions=["minimize"],
+            metric_names=["loss"],
+            qmc_startup_trials=4,
+            sampler_n_startup_trials=4,
+            has_cost=False,
+        )
+        study.optimize(_conditional_objective, n_trials=12)
+        assert {t.params["family"] for t in study.trials} == {"x", "y"}
