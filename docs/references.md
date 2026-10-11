@@ -1153,10 +1153,15 @@ Backs the conditional-search-space handling in `optimization/study.py`.
 groups of co-occurring parameters and fits a joint multivariate TPE per
 group, which is what lets family-specific dimensions of a conditional space
 be modelled jointly instead of falling back to independent sampling.
-`QMCSampler` infers its search space from the first trial and skips
-categorical parameters. Both read from the installed Optuna 4.9.0 source
-(`optuna/samplers/_tpe/sampler.py`, `optuna/search_space/group_decomposed.py`,
-`optuna/samplers/_qmc.py::_infer_initial_search_space`) on 2026-10-10, and the
-`group=True` no-op claim on an unconditional space is asserted by
-`tests/test_optimization/test_qmc_warmup.py::TestConditionalSpaces`.
-Not re-run against 5.0.0.
+`QMCSampler` infers its search space from the first trial and, since
+Optuna 5.0, samples the categorical parameters in it from one Sobol
+coordinate each (`sample_relative` maps a categorical to
+`FloatDistribution(0, C)` and floors the value), so `QMCWarmupSampler` removes
+categoricals from that space during the warm-up to balance them itself. The
+TPE claims were read from the Optuna 4.9.0 source
+(`optuna/samplers/_tpe/sampler.py`, `optuna/search_space/group_decomposed.py`)
+on 2026-10-10; the QMC claim from the Optuna 5.0.0 source
+(`optuna/samplers/_qmc.py`) on 2026-10-11. The `group=True` no-op claim on an
+unconditional space and the balanced warm-up are asserted by
+`tests/test_optimization/test_qmc_warmup.py::TestConditionalSpaces`, which CI
+runs against Optuna 5.x.

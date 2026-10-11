@@ -386,16 +386,21 @@ class QMCWarmupSampler(optuna.samplers.BaseSampler):
     Notes
     -----
     Optuna's ``QMCSampler`` fixes its search space from the *first* trial
-    and excludes categorical parameters (``_infer_initial_search_space``
-    in ``optuna/samplers/_qmc.py``; Optuna developers, 2025); the first
-    trial itself and everything outside that space is drawn by its
-    independent sampler.  In a conditional space this means the family
-    choice and the dimensions of every family absent from the first trial
-    would be i.i.d. random draws, and a family's dimensions would be
-    low-discrepancy only for the first trial's family.  To keep the
+    (``infer_relative_search_space`` in ``optuna/samplers/_qmc.py``; Optuna
+    developers, 2025); the first trial itself and everything outside that
+    space is drawn by its independent sampler.  Since Optuna 5.0 it also
+    samples categorical parameters of that space, each from one Sobol
+    coordinate floored to a choice index.  In a conditional space this means
+    the dimensions of every family absent from the first trial would be
+    i.i.d. random draws, a family's dimensions would be low-discrepancy only
+    for the first trial's family, and the family choice is a Sobol
+    coordinate that does not account for which families earlier trials took
+    (with a non-power-of-2 warm-up, Sobol' points are not balanced either).  To keep the
     warm-up from silently losing coverage, this wrapper:
 
-    - draws every *categorical* parameter in a balanced way: the choice
+    - removes categorical parameters from the Sobol search space during
+      the warm-up and draws every *categorical* parameter in a balanced way:
+      the choice
       used least often so far among the trials that sampled that same
       parameter (ties broken by a seeded RNG).  Because only trials that
       sampled the parameter count, a categorical nested inside one family
@@ -443,9 +448,10 @@ class QMCWarmupSampler(optuna.samplers.BaseSampler):
         https://doi.org/10.1137/070709359
 
     Optuna developers (2025). ``optuna.samplers.QMCSampler``. Optuna 5.0.0
-        API reference, and ``optuna/samplers/_qmc.py`` in the installed
-        release (4.9.0, verified 2026-10-10): the search space is inferred
-        from the first trial and categorical parameters are skipped.
+        API reference, and ``optuna/samplers/_qmc.py`` in Optuna 5.0.0
+        (verified 2026-10-11): the search space is inferred from the first
+        trial, and ``sample_relative`` maps each categorical to
+        ``FloatDistribution(0, C)`` and floors the Sobol value to a choice.
 
     SciPy API reference: ``scipy.stats.qmc.Sobol``, which Optuna's
         ``QMCSampler`` wraps.  It takes its direction numbers from Joe &
@@ -507,7 +513,16 @@ class QMCWarmupSampler(optuna.samplers.BaseSampler):
         study: optuna.Study,
         trial: optuna.trial.FrozenTrial,
     ) -> dict[str, optuna.distributions.BaseDistribution]:
-        return self._active_sampler.infer_relative_search_space(study, trial)
+        space = self._active_sampler.infer_relative_search_space(study, trial)
+        if not self._is_qmc_phase:
+            return space
+        # Categoricals go to `sample_independent`, which balances them;
+        # left in, QMCSampler (Optuna >= 5.0) would draw them from Sobol.
+        return {
+            name: dist
+            for name, dist in space.items()
+            if not isinstance(dist, optuna.distributions.CategoricalDistribution)
+        }
 
     def sample_relative(
         self,

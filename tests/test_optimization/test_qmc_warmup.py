@@ -408,6 +408,32 @@ class TestConditionalSpaces:
                 {"x_a", "x_b"} if t.params["family"] == "x" else {"y_c"}
             )
 
+    def test_balanced_with_many_choices(self):
+        # Optuna >= 5.0 samples categoricals in QMCSampler's relative space;
+        # with two choices Sobol happens to balance them, with six it does not.
+        def obj(trial: optuna.Trial) -> float:
+            trial.suggest_categorical("family", list("abcdef"))
+            trial.suggest_float("u", 0.0, 1.0)
+            return 0.0
+
+        sampler = QMCWarmupSampler(optuna.samplers.RandomSampler(seed=0), 8)
+        study = optuna.create_study(storage=None, sampler=sampler)
+        study.optimize(obj, n_trials=8)
+        fams = [t.params["family"] for t in study.trials]
+        counts = [fams.count(c) for c in "abcdef"]
+        assert max(counts) - min(counts) <= 1
+
+    def test_same_seed_reproduces_warmup(self):
+        def run() -> list[dict]:
+            sampler = QMCWarmupSampler(
+                optuna.samplers.RandomSampler(seed=0), 8, seed=7
+            )
+            study = optuna.create_study(storage=None, sampler=sampler)
+            study.optimize(_conditional_objective, n_trials=8)
+            return [t.params for t in study.trials]
+
+        assert run() == run()
+
     def test_balanced_nested_categorical_within_family(self):
         def obj(trial: optuna.Trial) -> float:
             fam = trial.suggest_categorical("family", ["x", "y"])
