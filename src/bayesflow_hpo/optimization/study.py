@@ -27,7 +27,11 @@ import numpy as np
 import optuna
 from optuna.trial import TrialState
 
-from bayesflow_hpo.objectives import mean_objective_score, schema_matches
+from bayesflow_hpo.objectives import (
+    INTERMEDIATE_VALIDATION_SCHEDULE_ATTR,
+    mean_objective_score,
+    schema_matches,
+)
 from bayesflow_hpo.optimization.constraints import MetricConstraintSpec
 from bayesflow_hpo.results.extraction import _objective_column_names
 
@@ -952,12 +956,61 @@ def create_study(
             study.set_user_attr(
                 "bayesflow_hpo_objective_schema", source_schema
             )
+        # Copied trials keep their step scores, so they keep the schedule
+        # those scores were taken at; `optimize()` has already refused a
+        # source whose schedule differs from the run's.
+        source_schedule = warm_start_from.user_attrs.get(
+            INTERMEDIATE_VALIDATION_SCHEDULE_ATTR
+        )
+        if source_schedule is not None:
+            study.set_user_attr(
+                INTERMEDIATE_VALIDATION_SCHEDULE_ATTR, source_schedule
+            )
     return study
 
 
 def resume_study(study_name: str, storage: str) -> optuna.Study:
     """Resume a persisted study."""
     return create_study(study_name=study_name, storage=storage, load_if_exists=True)
+
+
+def select_warm_start_trials(
+    source_study: optuna.Study,
+    top_k: int = 25,
+    has_cost: bool = True,
+) -> list[optuna.trial.FrozenTrial]:
+    """The completed trials :func:`warm_start_study` copies, best first.
+
+    Separate so a caller can validate exactly the trials that will be
+    imported -- not the source's running, pruned or lower-ranked ones,
+    which never reach the target.
+
+    Parameters
+    ----------
+    source_study
+        Study to copy trials from.
+    top_k
+        Maximum number of trials to select.
+    has_cost
+        Whether the studies' last objective is a cost score to exclude
+        from the ranking.
+
+    Returns
+    -------
+    list[optuna.trial.FrozenTrial]
+        Up to *top_k* COMPLETE trials, ranked as :func:`warm_start_study`
+        ranks them.
+    """
+    complete_trials = [
+        trial
+        for trial in source_study.trials
+        if trial.state == TrialState.COMPLETE and trial.values is not None
+    ]
+    ranked = sorted(
+        complete_trials,
+        key=lambda t: _mean_ranking_key(t, has_cost=has_cost),
+    )
+    return ranked[: max(0, int(top_k))]
 
 
 def warm_start_study(
@@ -990,21 +1043,10 @@ def warm_start_study(
     int
         Number of trials actually added.
     """
-    complete_trials = [
-        trial
-        for trial in source_study.trials
-        if trial.state == TrialState.COMPLETE and trial.values is not None
-    ]
-    if not complete_trials:
-        return 0
-
-    ranked = sorted(
-        complete_trials,
-        key=lambda t: _mean_ranking_key(t, has_cost=has_cost),
-    )
-
     added = 0
-    for trial in ranked[: max(0, int(top_k))]:
+    for trial in select_warm_start_trials(
+        source_study, top_k=top_k, has_cost=has_cost
+    ):
         seeded_trial = optuna.trial.create_trial(
             params=trial.params,
             distributions=trial.distributions,

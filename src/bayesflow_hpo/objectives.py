@@ -24,7 +24,8 @@ from __future__ import annotations
 import importlib.util
 import logging
 import math
-from collections.abc import Callable, Mapping
+import re
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, NewType, TypeVar
 
@@ -680,6 +681,174 @@ def check_aggregation_settings(
         )
     if record:
         study.set_user_attr("bayesflow_hpo_aggregate", requested)
+
+
+#: User attribute recording the intermediate-validation schedule a study's
+#: step scores were taken at, as ``{"warmup": int, "interval": int}``.
+INTERMEDIATE_VALIDATION_SCHEDULE_ATTR = (
+    "bayesflow_hpo_intermediate_validation_schedule"
+)
+
+#: The schedule every study ran at before ``optimize()`` exposed it, and
+#: what an absent attribute is read as -- the same convention as a missing
+#: ``bayesflow_hpo_aggregate`` reading as ``"mean"``.
+DEFAULT_INTERMEDIATE_VALIDATION_SCHEDULE: dict[str, int] = {
+    "warmup": 10,
+    "interval": 10,
+}
+
+# `PeriodicValidationCallback` writes `val_{metric}_step_{N}` on
+# multi-objective trials; single-objective trials go through
+# `trial.report()` into `intermediate_values` instead.
+_STEP_SCORE_ATTR = re.compile(r"^val_.+_step_\d+$")
+
+
+#: Trial user attributes recording the schedule THAT trial validates at,
+#: written by ``GenericObjective`` before training. The study attribute alone
+#: cannot vouch for a trial still running under an older schedule: it can be
+#: overwritten by another worker before that trial has produced a score.
+TRIAL_SCHEDULE_ATTRS = (
+    "intermediate_validation_warmup",
+    "intermediate_validation_interval",
+)
+
+
+def _has_step_scores(trial: Any) -> bool:
+    """Whether *trial* carries scores indexed by intermediate-validation step."""
+    if trial.intermediate_values:
+        return True
+    return any(_STEP_SCORE_ATTR.match(key) for key in trial.user_attrs)
+
+
+def _trial_schedule(trial: Any) -> dict[str, int] | None:
+    """The schedule *trial* recorded for itself, or ``None`` if it has none."""
+    warmup = trial.user_attrs.get(TRIAL_SCHEDULE_ATTRS[0])
+    interval = trial.user_attrs.get(TRIAL_SCHEDULE_ATTRS[1])
+    if isinstance(warmup, int) and isinstance(interval, int):
+        return {"warmup": warmup, "interval": interval}
+    return None
+
+
+def stamp_trial_intermediate_validation_schedule(
+    trial: Any, warmup: int, interval: int
+) -> None:
+    """Record on *trial* the schedule it is about to validate at.
+
+    Written before training, so a concurrent worker's
+    :func:`check_intermediate_validation_schedule` sees the schedule of a
+    trial that has not yet produced its first step score.
+    """
+    trial.set_user_attr(TRIAL_SCHEDULE_ATTRS[0], int(warmup))
+    trial.set_user_attr(TRIAL_SCHEDULE_ATTRS[1], int(interval))
+
+
+def check_intermediate_validation_schedule(
+    study: Any,
+    warmup: int,
+    interval: int,
+    *,
+    record: bool = True,
+    current_trial_number: int | None = None,
+    trials: Sequence[Any] | None = None,
+) -> None:
+    """Refuse mixing intermediate-validation schedules; record new settings.
+
+    Intermediate scores are indexed by validation STEP, counted from 1, not
+    by epoch (``PeriodicValidationCallback``), and every pruning strategy
+    compares a running trial's step-N scores with other trials' step-N
+    scores. Step 1 is epoch index 10 under the default schedule and epoch
+    index 48 under ``warmup=48``, so a study whose stored step scores were
+    taken at one schedule and a run at another would compare models at
+    different points in training with nothing to say so.
+
+    Each trial is judged by its own schedule, recorded on it before
+    training (:func:`stamp_trial_intermediate_validation_schedule`). A
+    trial conflicts, other than ``current_trial_number``, when its schedule
+    differs from the requested one and it either carries step scores or is
+    still unfinished and so can produce them. The second case is what lets
+    two overlapping workers see each other: worker A's trial, still in its
+    warmup, has no scores yet, and the study attribute alone would let
+    worker B overwrite the schedule underneath it. A finished trial without
+    scores -- failed, rejected, or run with no intermediate validation --
+    holds nothing to mismatch.
+
+    A trial without its own record (written before this guard existed) is
+    read at the study attribute's schedule, and a missing study attribute
+    as :data:`DEFAULT_INTERMEDIATE_VALIDATION_SCHEDULE`, the only schedule
+    ``optimize()`` could run before it accepted these arguments. A study
+    built directly from an ``ObjectiveConfig`` with another schedule before
+    this guard existed will be misread that way; set the study attribute by
+    hand to the schedule it ran at.
+
+    One window stays open: between Optuna creating a trial and the objective
+    stamping it, the trial carries no record, so a worker checking in that
+    instant does not see it. Closing it would need a storage-level
+    compare-and-set that Optuna's user attributes do not offer -- the same
+    limit as :func:`check_or_stamp_joint_metric_settings`.
+
+    Parameters
+    ----------
+    study
+        The Optuna study being written to, or a warm-start source.
+    warmup
+        Requested ``intermediate_validation_warmup``.
+    interval
+        Requested ``intermediate_validation_interval``.
+    record
+        Whether to write the requested schedule to the study. ``False``
+        for a warm-start source, which this run only reads.
+    current_trial_number
+        Trial to ignore: Optuna has already created it, but it has not been
+        validated yet.
+    trials
+        Trials to judge instead of all of *study*'s. For a warm-start
+        source, the trials that will actually be copied: the source's
+        running, pruned or unselected trials never reach the target, so
+        they cannot mix with its scores. *study* still supplies the
+        schedule read for trials without their own record.
+
+    Raises
+    ------
+    ValueError
+        If another trial ran, or is running, at a different schedule and
+        holds or can still produce step scores.
+    """
+    requested = {"warmup": int(warmup), "interval": int(interval)}
+    stored = study.user_attrs.get(INTERMEDIATE_VALIDATION_SCHEDULE_ATTR)
+    if not (
+        isinstance(stored, Mapping)
+        and isinstance(stored.get("warmup"), int)
+        and isinstance(stored.get("interval"), int)
+    ):
+        # Unrecognized reads as absent, matching the other settings guards:
+        # `user_attrs` is caller-writable and round-trips through JSON.
+        stored = DEFAULT_INTERMEDIATE_VALIDATION_SCHEDULE
+    stored = {"warmup": stored["warmup"], "interval": stored["interval"]}
+    candidates = study.get_trials(deepcopy=False) if trials is None else trials
+    for trial in candidates:
+        if trial.number == current_trial_number:
+            continue
+        own = _trial_schedule(trial)
+        schedule = own if own is not None else stored
+        if schedule == requested:
+            continue
+        unfinished = own is not None and not trial.state.is_finished()
+        if not (unfinished or _has_step_scores(trial)):
+            continue
+        holds = (
+            "is running" if unfinished and not _has_step_scores(trial)
+            else "holds intermediate validation scores"
+        )
+        raise ValueError(
+            f"Trial {trial.number} of study {study.study_name!r} {holds} at "
+            f"warmup={schedule['warmup']}, interval={schedule['interval']}, "
+            f"but this run requests warmup={requested['warmup']}, "
+            f"interval={requested['interval']}. Pruning compares scores by "
+            "validation step, so the two would be compared at different "
+            "epochs. Start a new study or restore the schedule."
+        )
+    if record:
+        study.set_user_attr(INTERMEDIATE_VALIDATION_SCHEDULE_ATTR, requested)
 
 
 def check_or_stamp_joint_metric_settings(

@@ -677,6 +677,102 @@ class TestPruningStrategyWiring:
             )
 
 
+class TestIntermediateValidationScheduleWiring:
+    """intermediate_validation_warmup/interval reach ObjectiveConfig (#131)."""
+
+    def _optimize(self, **kwargs):
+        with (
+            patch("bayesflow_hpo.api._infer_and_validate_keys") as mock_keys,
+            patch("bayesflow_hpo.api._setup_validation_data") as mock_setup,
+            patch("bayesflow_hpo.api.check_pipeline"),
+            patch("bayesflow_hpo.api._build_objective") as mock_build,
+            patch("bayesflow_hpo.api._derive_directions") as mock_dirs,
+            patch("bayesflow_hpo.api._create_and_run_study"),
+        ):
+            mock_keys.return_value = (["p"], ["x"])
+            mock_build.return_value = MagicMock(n_objectives=3)
+            mock_dirs.return_value = (["minimize"] * 3, ["a", "b", "c"])
+            optimize(
+                simulator=MagicMock(),
+                adapter=MagicMock(),
+                search_space=MagicMock(),
+                storage=None,
+                **kwargs,
+            )
+            return mock_build, mock_setup
+
+    def test_defaults_forwarded(self):
+        mock_build, _ = self._optimize()
+        assert mock_build.call_args[1]["intermediate_validation_warmup"] == 10
+        assert mock_build.call_args[1]["intermediate_validation_interval"] == 10
+
+    def test_custom_values_forwarded(self):
+        mock_build, _ = self._optimize(
+            intermediate_validation_warmup=48,
+            intermediate_validation_interval=16,
+        )
+        assert mock_build.call_args[1]["intermediate_validation_warmup"] == 48
+        assert mock_build.call_args[1]["intermediate_validation_interval"] == 16
+
+    @pytest.mark.parametrize(
+        ("kwargs", "match"),
+        [
+            ({"intermediate_validation_interval": 0}, "interval must be >= 1"),
+            ({"intermediate_validation_warmup": -1}, "warmup must be >= 0"),
+        ],
+    )
+    def test_invalid_schedule_rejected_before_simulation(self, kwargs, match):
+        with (
+            patch("bayesflow_hpo.api._infer_and_validate_keys") as mock_keys,
+            patch("bayesflow_hpo.api._setup_validation_data") as mock_setup,
+        ):
+            mock_keys.return_value = (["p"], ["x"])
+            with pytest.raises(ValueError, match=match):
+                optimize(
+                    simulator=MagicMock(),
+                    adapter=MagicMock(),
+                    search_space=MagicMock(),
+                    storage=None,
+                    **kwargs,
+                )
+            mock_keys.assert_not_called()
+            mock_setup.assert_not_called()
+
+    def test_build_objective_sets_config_fields(self):
+        objective = _build_objective(
+            simulator=MagicMock(),
+            adapter=MagicMock(),
+            search_space=MagicMock(),
+            validation_data=_DUMMY_VALIDATION_DATA,
+            training_mode="fixed_budget",
+            epochs=64,
+            num_batches=50,
+            early_stopping_patience=None,
+            early_stopping_window=7,
+            early_stopping_monitor="objective_mean",
+            lr_warmup_epochs=None,
+            lr_warmup_steps=None,
+            lr_warmup_fraction=None,
+            max_param_count=1_000_000,
+            max_memory_mb=None,
+            metric_constraints_hard=None,
+            n_posterior_samples=500,
+            objective_metrics=["calibration_error"],
+            objective_mode="pareto",
+            cost_metric="inference_time",
+            report_frequency=10,
+            pruning_strategy="dominance",
+            build_approximator_fn=None,
+            train_fn=None,
+            validate_fn=None,
+            checkpoint_pool=None,
+            intermediate_validation_warmup=48,
+            intermediate_validation_interval=16,
+        )
+        assert objective.config.intermediate_validation_warmup == 48
+        assert objective.config.intermediate_validation_interval == 16
+
+
 class TestObjectiveConfigPruningValidation:
     """Tests for ObjectiveConfig.pruning_strategy validation."""
 
@@ -698,6 +794,17 @@ class TestObjectiveConfigPruningValidation:
         )
         defaults.update(overrides)
         return ObjectiveConfig(**defaults)
+
+    @pytest.mark.parametrize(
+        ("overrides", "match"),
+        [
+            ({"intermediate_validation_interval": 0}, "interval must be >= 1"),
+            ({"intermediate_validation_warmup": -1}, "warmup must be >= 0"),
+        ],
+    )
+    def test_invalid_intermediate_schedule_raises(self, overrides, match) -> None:
+        with pytest.raises(ValueError, match=match):
+            self._make_config(**overrides)
 
     def test_diagnostic_objective_metric_raises(self) -> None:
         with pytest.raises(ValueError, match="correlation.*cannot be used"):

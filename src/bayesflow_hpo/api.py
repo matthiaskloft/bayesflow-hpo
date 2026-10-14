@@ -14,6 +14,7 @@ from bayesflow_hpo.objectives import (
     ENCODING_UNCHANGED_AT_V2,
     OBJECTIVE_ENCODING_VERSION,
     check_aggregation_settings,
+    check_intermediate_validation_schedule,
     schema_matches,
 )
 from bayesflow_hpo.optimization.checkpoint_pool import CheckpointPool
@@ -21,12 +22,18 @@ from bayesflow_hpo.optimization.constraints import (
     MetricConstraintSpec,
     _detect_gpu_memory_mb,
 )
-from bayesflow_hpo.optimization.objective import GenericObjective, ObjectiveConfig
+from bayesflow_hpo.optimization.objective import (
+    GenericObjective,
+    ObjectiveConfig,
+    _check_intermediate_validation_schedule,
+    _intermediate_validation_runs,
+)
 from bayesflow_hpo.optimization.study import (
     DEFAULT_STORAGE,
     _resolve_n_startup_trials,
     create_study,
     optimize_until,
+    select_warm_start_trials,
 )
 from bayesflow_hpo.pipeline import check_pipeline
 from bayesflow_hpo.search_spaces.composite import CompositeSearchSpace
@@ -186,6 +193,8 @@ def optimize(
     joint_metrics: dict[str, Any] | None = None,
     include_joint_metrics: bool = False,
     aggregate: Aggregate = "mean",
+    intermediate_validation_warmup: int = 10,
+    intermediate_validation_interval: int = 10,
 ) -> optuna.Study:
     """Run HPO with a high-level convenience API.
 
@@ -546,6 +555,41 @@ def optimize(
         the full parameter-by-condition grid; omitted metrics retain means.
         Geometric requires positive values. See
         :func:`~bayesflow_hpo.validation.pipeline.run_validation_pipeline`.
+    intermediate_validation_warmup
+        Number of epochs skipped before the first intermediate validation
+        (default 10). Epochs are counted from 0, as Keras passes them to
+        ``on_epoch_end``, so the first check runs after epoch index
+        ``intermediate_validation_warmup``. Must be an int >= 0.
+        Intermediate validation only runs when ``pruning_strategy`` is not
+        ``"none"`` or ``training_mode="open_ended"``; it is what pruning and
+        open-ended early stopping act on.
+
+        Both schedules decay the learning rate: ``fixed_budget`` uses the
+        Keras ``CosineDecay`` schedule and ``open_ended`` the
+        inverse-square-root schedule of Vaswani et al. (2017, Sec. 5.3).
+        An early check therefore scores the model at a higher learning
+        rate than later ones. Raise the warmup to move the checks later,
+        e.g. ``intermediate_validation_warmup=48`` with
+        ``intermediate_validation_interval=16`` at ``epochs=64`` makes a
+        single check at epoch index 48. Whether a check that late still
+        saves enough training to be worth pruning on is for the caller to
+        measure.
+
+        A warmup at or beyond a trial's ``epochs`` schedules no check for
+        that trial, so nothing prunes it and open-ended early stopping
+        cannot stop it; a warning is logged once per such epoch count.
+        With a sampled ``epochs`` dimension this can hold for some trials
+        only. ``early_stopping_patience`` counts checks, not epochs:
+        patience 5 at interval 16 is 80 epochs without improvement.
+
+        Pruning compares trials by check number, not by epoch, so the
+        schedule is recorded on the study, and ``resume=True`` or
+        ``warm_start_from`` with a different schedule raises once the
+        study holds intermediate scores. See
+        :func:`~bayesflow_hpo.objectives.check_intermediate_validation_schedule`.
+    intermediate_validation_interval
+        Run an intermediate validation every *n* epochs after the warmup
+        (default 10). Must be an int >= 1.
 
     Returns
     -------
@@ -605,6 +649,12 @@ def optimize(
         raise ValueError(
             f"report_frequency must be >= 1, got {report_frequency}."
         )
+    # Also checked in ObjectiveConfig, which runs before any trial; repeated
+    # here so the error names optimize()'s own argument before the
+    # validation dataset is simulated.
+    _check_intermediate_validation_schedule(
+        intermediate_validation_warmup, intermediate_validation_interval
+    )
     # Startup counts are validated HERE, not only where they are consumed.
     # create_study() checks them too, but by then _create_and_run_study() has
     # already called optuna.delete_study() for a non-resumed run: a malformed
@@ -705,6 +755,8 @@ def optimize(
         validate_fn=validate_fn,
         checkpoint_pool=checkpoint_pool,
         aggregate=aggregate,
+        intermediate_validation_warmup=intermediate_validation_warmup,
+        intermediate_validation_interval=intermediate_validation_interval,
     )
 
     # Step 5: Derive directions
@@ -839,6 +891,8 @@ def _build_objective(
     validate_fn: ValidateFn | None,
     checkpoint_pool: CheckpointPool | None,
     aggregate: Aggregate = "mean",
+    intermediate_validation_warmup: int = 10,
+    intermediate_validation_interval: int = 10,
 ) -> GenericObjective:
     """Construct the :class:`GenericObjective` from configuration."""
     return GenericObjective(
@@ -874,6 +928,8 @@ def _build_objective(
             validate_fn=validate_fn,
             checkpoint_pool=checkpoint_pool,
             aggregate=aggregate,
+            intermediate_validation_warmup=intermediate_validation_warmup,
+            intermediate_validation_interval=intermediate_validation_interval,
         )
     )
 
@@ -1200,11 +1256,29 @@ def _create_and_run_study(
     aggregate: Aggregate = "mean",
 ) -> optuna.Study:
     """Create (or resume) an Optuna study and run optimization."""
+    cfg = objective.config
+    # A study that runs no intermediate validation writes no step scores, so
+    # its schedule is neither compared nor recorded.
+    schedule_applies = _intermediate_validation_runs(cfg)
     if warm_start_from is not None and warm_start_top_k > 0 and any(
         t.state == optuna.trial.TrialState.COMPLETE and t.values is not None
         for t in warm_start_from.trials
     ):
         check_aggregation_settings(warm_start_from, aggregate, record=False)
+        # Warm start copies trials WITH their user attributes, step scores
+        # included, and pruning then reads them as references. Only the
+        # trials it will copy are judged: the source's running, pruned or
+        # unselected trials never reach the target.
+        if schedule_applies:
+            check_intermediate_validation_schedule(
+                warm_start_from,
+                cfg.intermediate_validation_warmup,
+                cfg.intermediate_validation_interval,
+                record=False,
+                trials=select_warm_start_trials(
+                    warm_start_from, top_k=warm_start_top_k, has_cost=has_cost
+                ),
+            )
     if not resume and storage is not None:
         try:
             optuna.delete_study(study_name=study_name, storage=storage)
@@ -1235,9 +1309,14 @@ def _create_and_run_study(
     )
 
     check_aggregation_settings(study, aggregate)
+    if schedule_applies:
+        check_intermediate_validation_schedule(
+            study,
+            cfg.intermediate_validation_warmup,
+            cfg.intermediate_validation_interval,
+        )
 
     # Auto-detect n_startup_trials from sampler if not set explicitly.
-    cfg = objective.config
     if cfg.pruning_n_startup_trials is None:
         resolved = _resolve_n_startup_trials(study.sampler)
         cfg.pruning_n_startup_trials = resolved

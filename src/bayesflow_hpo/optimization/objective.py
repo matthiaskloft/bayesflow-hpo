@@ -47,12 +47,14 @@ from bayesflow_hpo.objectives import (
     _direction_for,
     canonical_summary,
     check_aggregation_settings,
+    check_intermediate_validation_schedule,
     check_or_stamp_joint_metric_settings,
     compute_inference_time_per_dataset,
     extract_multi_objective_values,
     get_param_count,
     mean_objective_score,
     normalize_param_count,
+    stamp_trial_intermediate_validation_schedule,
     worst_objective_value,
     worst_raw_value,
 )
@@ -163,6 +165,34 @@ def _largest_validation_condition(validation_data: ValidationDataset) -> int:
         if rows:
             sizes.append(int(rows))
     return max(sizes, default=1)
+
+
+def _check_intermediate_validation_schedule(warmup: int, interval: int) -> None:
+    """Reject an intermediate-validation schedule the callback cannot run.
+
+    `PeriodicValidationCallback.on_epoch_end` computes
+    ``(epoch - warmup) % interval``, so ``interval=0`` would raise
+    ``ZeroDivisionError`` mid-training, after the first ``warmup`` epochs
+    had already been paid for. A negative warmup has no meaning. A float
+    or bool is refused outright: ``interval=2.5`` passes ``>= 1`` and then
+    lands on no epoch the caller expected.
+    """
+    for name, value in (
+        ("intermediate_validation_warmup", warmup),
+        ("intermediate_validation_interval", interval),
+    ):
+        if isinstance(value, bool) or not isinstance(value, numbers.Integral):
+            raise TypeError(
+                f"{name} must be an int, got {type(value).__name__} {value!r}."
+            )
+    if interval < 1:
+        raise ValueError(
+            f"intermediate_validation_interval must be >= 1, got {interval}."
+        )
+    if warmup < 0:
+        raise ValueError(
+            f"intermediate_validation_warmup must be >= 0, got {warmup}."
+        )
 
 
 def _intermediate_validation_runs(config: ObjectiveConfig) -> bool:
@@ -717,10 +747,15 @@ class ObjectiveConfig:
         (default 250).
     intermediate_validation_interval
         Run a lightweight validation every *n* epochs for pruning
-        (default 10).
+        (default 10). Must be an int >= 1.
     intermediate_validation_warmup
         Skip the first *n* epochs before intermediate validation
-        (default 10).
+        (default 10). Must be an int >= 0. Under a decaying learning-rate
+        schedule an early check scores the model at a still-high learning
+        rate; see :func:`~bayesflow_hpo.optimize`. A study records the
+        schedule and refuses a different one once it holds intermediate
+        scores; see
+        :func:`~bayesflow_hpo.objectives.check_intermediate_validation_schedule`.
     pruning_strategy
         Multi-objective pruning strategy.  One of ``"dominance"``
         (default), ``"mo-sha"``, ``"primary"``, or ``"none"``.
@@ -1055,6 +1090,10 @@ class ObjectiveConfig:
             raise ValueError(
                 f"report_frequency must be >= 1, got {self.report_frequency}."
             )
+        _check_intermediate_validation_schedule(
+            self.intermediate_validation_warmup,
+            self.intermediate_validation_interval,
+        )
         # Validate pruning_strategy.
         _valid = {"none", "dominance", "mo-sha", "primary"}
         if isinstance(self.pruning_strategy, tuple):
@@ -1398,6 +1437,40 @@ class GenericObjective:
             self._checkpoint_pool = CheckpointPool()
         else:
             self._checkpoint_pool = config.checkpoint_pool
+        # Epoch counts already warned about by `_warn_if_warmup_unreachable`,
+        # so a fixed `epochs` warns once rather than once per trial.
+        self._warned_unreachable_warmup: set[int] = set()
+
+    def _warn_if_warmup_unreachable(self, epochs: int) -> None:
+        """Warn when no intermediate validation can run in *epochs* epochs.
+
+        Keras numbers epochs from 0, so the last index is ``epochs - 1``
+        and a warmup at or beyond ``epochs`` schedules no check: pruning
+        never acts, and in ``open_ended`` mode early stopping never fires.
+        Checked per trial because ``epochs`` may be a sampled dimension,
+        under which only some trials are affected.
+        """
+        config = self.config
+        if (
+            not _intermediate_validation_runs(config)
+            or config.intermediate_validation_warmup < epochs
+            or epochs in self._warned_unreachable_warmup
+        ):
+            return
+        self._warned_unreachable_warmup.add(epochs)
+        consequence = (
+            "early stopping cannot fire, so the trial runs to the epochs cap"
+            if config.training_mode == "open_ended"
+            else "pruning cannot act on it"
+        )
+        logger.warning(
+            "intermediate_validation_warmup=%d is not below epochs=%d: a "
+            "trial of %d epochs runs no intermediate validation, and %s.",
+            config.intermediate_validation_warmup,
+            epochs,
+            epochs,
+            consequence,
+        )
 
     @property
     def checkpoint_pool(self) -> CheckpointPool:
@@ -1590,6 +1663,18 @@ class GenericObjective:
         check_aggregation_settings(
             trial.study, config.aggregate, current_trial_number=trial.number,
         )
+        if _intermediate_validation_runs(config):
+            check_intermediate_validation_schedule(
+                trial.study,
+                config.intermediate_validation_warmup,
+                config.intermediate_validation_interval,
+                current_trial_number=trial.number,
+            )
+            stamp_trial_intermediate_validation_schedule(
+                trial,
+                config.intermediate_validation_warmup,
+                config.intermediate_validation_interval,
+            )
 
         # --- Step 1: Sample hparams ---
         params = config.search_space.sample(trial)
@@ -1628,6 +1713,7 @@ class GenericObjective:
                 num_batches,
             )
             return self._penalty()
+        self._warn_if_warmup_unreachable(epochs)
         trial.set_user_attr("training_mode", config.training_mode)
         trial.set_user_attr("epochs", epochs)
         trial.set_user_attr("num_batches", num_batches)

@@ -109,6 +109,40 @@ In `"mean"` mode, or `"pareto"` mode over a single metric, `cost_metric=None` le
 
 `pruning_n_startup_trials` controls how many completed trials are needed before pruning activates. When `None` (default), it is auto-detected from the sampler: `_n_startup_trials` for TPE/GP (25/10), `population_size` for NSGA-II/III (50), fallback 10 for others.
 
+`intermediate_validation_warmup` and `intermediate_validation_interval` (both
+default 10, also accepted by `optimize()`) set when `PeriodicValidationCallback`
+validates, and so when pruning or open-ended early stopping can act. Epochs are
+counted from 0: with `warmup=10, interval=10` the checks run at epoch indices
+10, 20, 30, ... Both training modes decay the learning rate -- Keras
+`CosineDecay` under `fixed_budget`, the inverse-square-root schedule of Vaswani
+et al. (2017) under `open_ended` -- so an early check scores the model at a
+higher learning rate than the final validation does. To prune only late in
+training, raise the warmup -- e.g.
+`intermediate_validation_warmup=48, intermediate_validation_interval=16` at
+`epochs=64` gives a single check at epoch index 48. Whether a check that late
+is reliable enough to prune on is for the caller to measure.
+
+- **Warmup at or beyond `epochs`.** No check runs, so the trial cannot be
+  pruned and, under `open_ended`, cannot stop early. A warning is logged once
+  per affected epoch count. With a sampled `epochs` dimension only some trials
+  may be affected.
+- **Patience counts checks.** `early_stopping_patience=5` at interval 16 is 80
+  epochs without improvement.
+- **The schedule is pinned to the study.** Intermediate scores are stored by
+  check number (`val_{metric}_step_{N}`, or `trial.report(step=N)` for a
+  single-objective study), and pruning compares trials at equal N. A study
+  therefore records its schedule (`bayesflow_hpo_intermediate_validation_schedule`),
+  and each trial records its own before training
+  (`intermediate_validation_warmup` / `intermediate_validation_interval`
+  trial attributes). Resuming, warm-starting, or starting a concurrent worker
+  with a different schedule raises once another trial holds intermediate
+  scores at the old one or is still running under it. For a warm start, only
+  the source trials that will be copied are judged. Trials without their
+  own record are read at the study's schedule, and a study without the
+  attribute as the default 10/10. A run that does no intermediate validation
+  (`pruning_strategy="none"` under `fixed_budget`) neither checks nor records
+  it.
+
 #### Custom Training Function
 
 `train_fn` allows users to override the default training loop. The signature is `(approximator, simulator, hparams, callbacks) -> None`. When `None`, the objective uses `approximator.fit(simulator=..., epochs=..., num_batches=..., ...)`. Example:
