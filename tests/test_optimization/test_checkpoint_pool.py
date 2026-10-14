@@ -452,6 +452,25 @@ class TestExtraMetadata:
         with pytest.raises(TypeError, match="strings"):
             CheckpointPool(pool_dir=pool_dir, extra_metadata={1: "x"})
 
+    @pytest.mark.parametrize(
+        "extra",
+        [
+            # json.dumps would coerce 1 -> "1" and drop one entry.
+            {"moments": {1: "first", "1": "second"}},
+            {"moments": [{"ok": 1}, {None: 2}]},
+            {"moments": ({"nested": {True: 3}},)},
+        ],
+    )
+    def test_nested_non_string_key_rejected(self, pool_dir, extra):
+        with pytest.raises(TypeError, match="strings"):
+            CheckpointPool(pool_dir=pool_dir, extra_metadata=extra)
+
+    def test_nested_string_keys_round_trip(self, pool_dir, mock_approximator):
+        extra = {"moments": {"mean": [1.0, 2.0], "sd": {"a": 0.5}}}
+        pool = CheckpointPool(pool_dir=pool_dir, extra_metadata=extra)
+        pool.maybe_save(0, 0.5, mock_approximator)
+        assert _sidecar(pool.best_checkpoint_dir)["moments"] == extra["moments"]
+
     def test_callable_returning_non_mapping_rejected(
         self, pool_dir, mock_approximator
     ):

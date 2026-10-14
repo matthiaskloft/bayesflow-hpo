@@ -13,8 +13,8 @@
   checkpoint (e.g. adapter moments) without subclassing the pool. The
   pool's own keys (`RESERVED_METADATA_KEYS`, in
   `bayesflow_hpo.optimization.checkpoint_pool`) cannot be overwritten; a
-  reserved, non-string or non-strict-JSON entry raises instead of being
-  dropped. During `optimize()`, a callable that fails on a completed trial
+  reserved, non-string (at any nesting level) or non-strict-JSON entry
+  raises instead of being dropped. During `optimize()`, a callable that fails on a completed trial
   stops the run; on a pruned trial it is logged at WARNING and the trial is
   not retained. Default `None`: sidecars are unchanged.
 

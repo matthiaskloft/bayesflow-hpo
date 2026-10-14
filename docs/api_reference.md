@@ -384,7 +384,7 @@ without subclassing; a value passed to `maybe_save()` / `save_pruned()`
 replaces the pool-level one for that call. Default `None`: the sidecar is
 unchanged.
 
-Keys must be strings and values strict-JSON-serializable: `NaN`/`inf`
+Keys must be strings, at every nesting level, and values strict-JSON-serializable: `NaN`/`inf`
 are rejected, and so are NumPy scalars other than `np.float64` — convert
 with `float()` / `.tolist()`. The keys the pool writes itself cannot be
 overwritten: `trial_number`, `state`, `objective_value`,

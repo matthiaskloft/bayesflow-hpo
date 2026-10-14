@@ -129,7 +129,8 @@ class CheckpointPool:
         :meth:`save_pruned` whenever a call passes none of its own.  A
         mapping, or a callable ``(approximator, trial_number) -> mapping``
         evaluated at save time.  Keys must be strings outside
-        :data:`RESERVED_METADATA_KEYS`, values strict-JSON-serializable:
+        :data:`RESERVED_METADATA_KEYS` (nested mappings must have string
+        keys too), values strict-JSON-serializable:
         ``NaN``/``inf`` are rejected, and so are NumPy scalars other than
         ``np.float64`` -- convert with ``float()`` / ``.tolist()``.  This is
         how a hooks package supplies metadata to checkpoints written by
@@ -433,11 +434,7 @@ def _validate_extra_metadata(extra: Any) -> dict[str, Any]:
             "extra_metadata must be a mapping or a callable returning one, "
             f"got {type(extra).__name__}"
         )
-    bad_keys = [k for k in extra if not isinstance(k, str)]
-    if bad_keys:
-        raise TypeError(
-            f"extra_metadata keys must be strings, got {bad_keys!r}"
-        )
+    _check_string_keys(extra, "extra_metadata")
     reserved = sorted(RESERVED_METADATA_KEYS.intersection(extra))
     if reserved:
         raise ValueError(
@@ -453,6 +450,27 @@ def _validate_extra_metadata(extra: Any) -> dict[str, Any]:
             f"extra_metadata must be JSON-serializable: {exc}"
         ) from exc
     return result
+
+
+def _check_string_keys(value: Any, path: str) -> None:
+    """Reject non-string keys at any nesting depth.
+
+    ``json.dumps`` coerces ``int``/``float``/``bool``/``None`` keys to
+    strings, so ``{1: "a", "1": "b"}`` would serialize to ``{"1": "b"}``
+    and silently lose an entry.  Checked recursively because nested dicts
+    are the natural shape for adapter metadata.
+    """
+    if isinstance(value, Mapping):
+        bad_keys = [k for k in value if not isinstance(k, str)]
+        if bad_keys:
+            raise TypeError(
+                f"{path} keys must be strings, got {bad_keys!r}"
+            )
+        for key, item in value.items():
+            _check_string_keys(item, f"{path}[{key!r}]")
+    elif isinstance(value, (list, tuple)):
+        for i, item in enumerate(value):
+            _check_string_keys(item, f"{path}[{i}]")
 
 
 def _write_checkpoint(
