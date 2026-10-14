@@ -10,9 +10,11 @@ reordering ``cleanup_trial()``.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import optuna
+import pytest
 
 from bayesflow_hpo.optimization.checkpoint_pool import CheckpointPool
 from bayesflow_hpo.optimization.objective import default_train_fn
@@ -66,3 +68,66 @@ def test_pruned_weights_are_discarded_by_default(run_study, tmp_path):
     )
     assert pool.pruned_trial_numbers == []
     assert not pool.pruned_pool_dir.exists()
+
+
+def _sidecar(dest) -> dict[str, Any]:
+    return json.loads((dest / "checkpoint.json").read_text())
+
+
+def test_pool_level_extra_metadata_reaches_completed_checkpoints(
+    run_study, tmp_path
+):
+    """#130: a pool-level setting reaches what ``optimize()`` writes."""
+    seen: list[int] = []
+
+    def extra(approximator, trial_number):
+        seen.append(trial_number)
+        return {"domain_fact": trial_number * 10}
+
+    pool = CheckpointPool(pool_dir=tmp_path / "meta", extra_metadata=extra)
+    study = run_study(checkpoint_pool=pool)
+
+    complete = {
+        t.number for t in study.trials
+        if t.state == optuna.trial.TrialState.COMPLETE
+    }
+    assert pool.trial_numbers, "expected the pool to keep a trial"
+    assert set(pool.trial_numbers) <= complete
+    for number in pool.trial_numbers:
+        meta = _sidecar(tmp_path / "meta" / f"trial_{number:04d}")
+        assert meta["domain_fact"] == number * 10
+        assert meta["state"] == "complete"
+    assert set(pool.trial_numbers) <= set(seen)
+
+
+def test_pool_level_extra_metadata_reaches_pruned_checkpoints(
+    run_study, tmp_path
+):
+    pool = CheckpointPool(
+        pool_dir=tmp_path / "meta_pruned", pruned_pool_size=4, seed=0,
+        extra_metadata={"domain_fact": "x"},
+    )
+    run_study(train_fn=_PruneAfterTraining(), checkpoint_pool=pool)
+
+    assert pool.pruned_trial_numbers, "expected a retained pruned trial"
+    for number in pool.pruned_trial_numbers:
+        meta = _sidecar(pool.pruned_pool_dir / f"trial_{number:04d}")
+        assert meta["domain_fact"] == "x"
+        assert meta["state"] == "pruned"
+
+
+def test_failing_extra_metadata_on_a_completed_trial_stops_the_run(
+    run_study, tmp_path
+):
+    """Documented fail-loud behaviour: no checkpoint without its metadata."""
+    calls = {"n": 0}
+
+    def broken(approximator, trial_number):
+        calls["n"] += 1
+        raise RuntimeError("cannot compute moments")
+
+    pool = CheckpointPool(pool_dir=tmp_path / "broken", extra_metadata=broken)
+    with pytest.raises(RuntimeError, match="cannot compute moments"):
+        run_study(checkpoint_pool=pool, n_trials=3)
+    assert calls["n"] == 1
+    assert pool.trial_numbers == []

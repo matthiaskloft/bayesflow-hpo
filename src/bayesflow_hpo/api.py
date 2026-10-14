@@ -542,7 +542,9 @@ def optimize(
         Optional :class:`CheckpointPool` for persisting the best
         trial weights.  Pass one built with ``pruned_pool_size > 0`` to
         also retain a bounded sample of *pruned* trials' weights, which
-        the default pool discards.
+        the default pool discards.  Set its ``extra_metadata`` to add
+        caller-supplied keys to every ``checkpoint.json`` it writes,
+        scored and pruned.
     show_progress_bar
         Whether to show Optuna's progress bar (default ``True``).
 

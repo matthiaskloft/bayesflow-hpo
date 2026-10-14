@@ -53,7 +53,7 @@ objects (e.g. `ObjectiveConfig`, `create_study`) directly.
 | `warm_start_from` | `None` | Optional source `optuna.Study` to seed initial trials from. |
 | `warm_start_top_k` | `25` | Number of best trials to copy from the source study. |
 | `qmc_startup_trials` | `0` | Number of initial trials to sample with a Sobol quasi-random sequence before the main sampler takes over. Provides better space-filling coverage than random startup. Only non-rejected completions count. Default 0 (disabled). See `create_study` for details. |
-| `checkpoint_pool` | `None` | Optional `CheckpointPool` for persisting the best trial weights. Pass one built with `pruned_pool_size > 0` to also retain a bounded sample of *pruned* trials' weights, which the default pool discards. |
+| `checkpoint_pool` | `None` | Optional `CheckpointPool` for persisting the best trial weights. Pass one built with `pruned_pool_size > 0` to also retain a bounded sample of *pruned* trials' weights, which the default pool discards. Set its `extra_metadata` to add caller-supplied keys to every `checkpoint.json` it writes, scored and pruned. |
 | `show_progress_bar` | `True` | Whether to show Optuna's progress bar. |
 | `max_samples_per_call` | `20000` | Cap on posterior draws materialized by one `approximator.sample()` call during validation (default `DEFAULT_MAX_SAMPLES_PER_CALL`). Keyword-only, `int` or `None`; a float is rejected. Pass `None` to sample each condition in a single call. A custom *validate_fn* does not read this and sets its own cap -- `make_lc2st_validate_fn` takes one. |
 | `sampler_n_startup_trials` | `None` | Override how many trials a string sampler preset draws before its model takes over. `None` (default) keeps the preset value -- 25 for `"tpe"`. Ignored when *sampler* is a sampler instance. |
@@ -251,6 +251,7 @@ on individual dimensions or creating the space with overridden fields.
 | Behavior | Keep best 5 trial weights, auto-evict worst | `CheckpointPool.maybe_save()` |
 | Pruned pool size | **0** (off) | `CheckpointPool` |
 | Pruned retention | Uniform random sample of pruned trials, separate pool | `CheckpointPool.save_pruned()` |
+| Extra sidecar metadata | `None` (sidecar unchanged) | `CheckpointPool(extra_metadata=...)` |
 
 ---
 
