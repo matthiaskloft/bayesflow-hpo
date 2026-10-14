@@ -311,3 +311,117 @@ class TestPrunedPool:
         pool.cleanup()
         assert not pool.pruned_pool_dir.exists()
         assert pool.pruned_trial_numbers == []
+
+
+def _sidecar(path: Path) -> dict:
+    return json.loads((path / "checkpoint.json").read_text())
+
+
+class TestExtraMetadata:
+    def test_default_sidecar_is_unchanged(self, pool_dir, mock_approximator):
+        pool = CheckpointPool(pool_dir=pool_dir)
+        pool.maybe_save(0, 0.5, mock_approximator)
+        assert set(_sidecar(pool.best_checkpoint_dir)) == {
+            "trial_number", "state", "objective_value", "weights_file", "note",
+        }
+
+    def test_per_call_dict_is_merged(self, pool_dir, mock_approximator):
+        pool = CheckpointPool(pool_dir=pool_dir)
+        pool.maybe_save(
+            0, 0.5, mock_approximator,
+            extra_metadata={"size_moments": [1.0, 2.0]},
+        )
+        meta = _sidecar(pool.best_checkpoint_dir)
+        assert meta["size_moments"] == [1.0, 2.0]
+        assert meta["state"] == "complete"
+
+    def test_pool_level_callable_is_used_by_both_pools(
+        self, pool_dir, mock_approximator
+    ):
+        calls = []
+
+        def extra(approximator, trial_number):
+            calls.append((approximator, trial_number))
+            return {"seen_trial": trial_number}
+
+        pool = CheckpointPool(
+            pool_dir=pool_dir, pruned_pool_size=2, seed=0,
+            extra_metadata=extra,
+        )
+        pool.maybe_save(3, 0.5, mock_approximator)
+        pool.save_pruned(7, mock_approximator, step=2)
+
+        assert calls == [(mock_approximator, 3), (mock_approximator, 7)]
+        assert _sidecar(pool_dir / "trial_0003")["seen_trial"] == 3
+        pruned = _sidecar(pool.pruned_pool_dir / "trial_0007")
+        assert pruned["seen_trial"] == 7
+        assert pruned["pruned_at_step"] == 2
+
+    def test_per_call_overrides_pool_level(self, pool_dir, mock_approximator):
+        pool = CheckpointPool(pool_dir=pool_dir, extra_metadata={"a": 1})
+        pool.maybe_save(0, 0.5, mock_approximator, extra_metadata={"b": 2})
+        meta = _sidecar(pool.best_checkpoint_dir)
+        assert meta["b"] == 2
+        assert "a" not in meta
+
+    def test_callable_not_run_for_rejected_trial(
+        self, pool_dir, mock_approximator
+    ):
+        extra = MagicMock(return_value={})
+        pool = CheckpointPool(pool_dir=pool_dir, pool_size=1)
+        pool.maybe_save(0, 0.1, mock_approximator)
+        assert pool.maybe_save(
+            1, 0.9, mock_approximator, extra_metadata=extra,
+        ) is False
+        extra.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "key",
+        [
+            "trial_number", "state", "objective_value",
+            "pruned_at_step", "weights_file", "note",
+        ],
+    )
+    def test_reserved_keys_rejected_at_construction(self, pool_dir, key):
+        with pytest.raises(ValueError, match="reserved"):
+            CheckpointPool(pool_dir=pool_dir, extra_metadata={key: 0})
+
+    def test_reserved_key_from_callable_rejected_without_writing(
+        self, pool_dir, mock_approximator
+    ):
+        pool = CheckpointPool(
+            pool_dir=pool_dir,
+            extra_metadata=lambda approx, n: {"state": "complete"},
+        )
+        with pytest.raises(ValueError, match="reserved"):
+            pool.maybe_save(0, 0.5, mock_approximator)
+        mock_approximator.save_weights.assert_not_called()
+        assert pool.trial_numbers == []
+
+    def test_rejected_pruned_metadata_does_not_consume_a_draw(
+        self, pool_dir, mock_approximator
+    ):
+        pool = CheckpointPool(pool_dir=pool_dir, pruned_pool_size=2, seed=0)
+        with pytest.raises(ValueError):
+            pool.save_pruned(
+                0, mock_approximator, extra_metadata={"note": "x"},
+            )
+        assert pool._pruned_seen == 0
+        assert pool.pruned_trial_numbers == []
+
+    def test_non_serializable_value_rejected(self, pool_dir):
+        with pytest.raises(TypeError, match="JSON"):
+            CheckpointPool(pool_dir=pool_dir, extra_metadata={"x": object()})
+
+    def test_non_string_key_rejected(self, pool_dir):
+        with pytest.raises(TypeError, match="strings"):
+            CheckpointPool(pool_dir=pool_dir, extra_metadata={1: "x"})
+
+    def test_callable_returning_non_mapping_rejected(
+        self, pool_dir, mock_approximator
+    ):
+        pool = CheckpointPool(
+            pool_dir=pool_dir, extra_metadata=lambda approx, n: [1, 2],
+        )
+        with pytest.raises(TypeError, match="mapping"):
+            pool.maybe_save(0, 0.5, mock_approximator)

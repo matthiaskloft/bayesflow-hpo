@@ -341,10 +341,12 @@ exceeds_memory_budget(params, max_memory_mb, batch_size=None) -> bool
 ```python
 class CheckpointPool:
     def __init__(self, pool_dir="checkpoints", pool_size=5,
-                 pruned_pool_size=0, seed=None): ...
-    def maybe_save(self, trial_number, objective_value, approximator) -> bool
+                 pruned_pool_size=0, seed=None, extra_metadata=None): ...
+    def maybe_save(self, trial_number, objective_value, approximator,
+                   extra_metadata=None) -> bool
     def save_pruned(self, trial_number, approximator,
-                    step=None, objective_value=None) -> bool
+                    step=None, objective_value=None,
+                    extra_metadata=None) -> bool
     @property
     def best_checkpoint_dir(self) -> Path | None
     @property
@@ -361,6 +363,48 @@ Each checkpoint directory holds `weights.weights.h5` plus a
 pruned trials the rung they stopped at). Only weights are written, so
 `keras.saving.load_model()` on one of these fails: rebuild the
 approximator from `trial.params`, then `load_weights()`.
+
+**Ranking.** Scored trials are ranked by the single `objective_value`
+passed to `maybe_save()`, lower is better. Inside `optimize()` that is
+`mean_objective_score()` (`bayesflow_hpo/objectives.py`): the mean of the
+quality objectives, with the cost score dropped. For a multi-objective
+study this is **not** a Pareto ranking — the pool can keep a dominated
+trial and evict a Pareto-optimal one. Choose models from
+`get_pareto_trials()`; treat the pool as a cache of good weights.
+
+#### Extra sidecar metadata
+
+`extra_metadata` adds caller-supplied keys to `checkpoint.json`, for facts
+needed to rebuild a weights-only checkpoint correctly that `trial.params`
+does not carry (e.g. adapter moments computed at training time). It is
+either a dict or a callable `(approximator, trial_number) -> dict`,
+evaluated only when a checkpoint is actually written. Set it on the pool
+to apply it to every checkpoint `optimize()` writes, scored and pruned,
+without subclassing; a value passed to `maybe_save()` / `save_pruned()`
+replaces the pool-level one for that call. Default `None`: the sidecar is
+unchanged.
+
+Keys must be strings, values JSON-serializable, and the keys the pool
+writes itself (`RESERVED_METADATA_KEYS`: `trial_number`, `state`,
+`objective_value`, `pruned_at_step`, `weights_file`, `note`) cannot be
+overwritten. A violation raises (`ValueError` for a reserved key,
+`TypeError` otherwise) instead of writing a checkpoint without the
+metadata — at construction for a dict, at save time for a callable. A
+callable that raises or returns bad metadata during `optimize()` therefore
+fails the completed trial; for a pruned trial the failure is logged and
+the trial is not retained.
+
+```python
+from bayesflow_hpo import CheckpointPool, optimize
+
+def adapter_moments(approximator, trial_number):
+    return {"size_moments": compute_moments().tolist()}
+
+study = optimize(
+    ...,
+    checkpoint_pool=CheckpointPool(extra_metadata=adapter_moments),
+)
+```
 
 #### Retaining pruned trials
 

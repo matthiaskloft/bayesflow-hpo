@@ -33,8 +33,9 @@ import json
 import logging
 import random
 import shutil
+from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeAlias
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,24 @@ DEFAULT_PRUNED_POOL_SIZE = 0
 
 _WEIGHTS_FILE = "weights.weights.h5"
 _METADATA_FILE = "checkpoint.json"
+
+#: Sidecar keys the pool writes itself.  Caller-supplied metadata may not
+#: use them: a domain package must never be able to make a checkpoint lie
+#: about which trial, state or rung it holds.
+RESERVED_METADATA_KEYS: frozenset[str] = frozenset({
+    "trial_number",
+    "state",
+    "objective_value",
+    "pruned_at_step",
+    "weights_file",
+    "note",
+})
+
+#: Extra ``checkpoint.json`` content: a mapping, or a callable
+#: ``(approximator, trial_number) -> mapping`` evaluated at save time.
+ExtraMetadata: TypeAlias = (
+    Mapping[str, Any] | Callable[[Any, int], Mapping[str, Any]]
+)
 
 
 class CheckpointPool:
@@ -66,6 +85,21 @@ class CheckpointPool:
     and -- for pruned trials -- the validation step it stopped at.  A
     pruned trial's weights are only meaningful together with the rung
     they were taken at, and that cannot be inferred from the file.
+    ``extra_metadata`` adds caller-supplied keys to that sidecar, for facts
+    a domain package needs to rebuild the approximator correctly that
+    ``trial.params`` does not carry (e.g. adapter moments computed at
+    training time).
+
+    Scored trials are ranked by the single ``objective_value`` the caller
+    passes to :meth:`maybe_save`, lower is better.  Under
+    :class:`~bayesflow_hpo.optimization.objective.GenericObjective` that
+    value is :func:`~bayesflow_hpo.objectives.mean_objective_score`, the
+    mean of the quality objectives with the cost score dropped.  For a
+    multi-objective study this is *not* a Pareto ranking: the pool can
+    keep a dominated trial and evict a Pareto-optimal one.  Select from
+    the Pareto front with
+    :func:`~bayesflow_hpo.results.extraction.get_pareto_trials` and treat
+    the pool as a cache of good weights, not as the front.
 
     Parameters
     ----------
@@ -90,6 +124,23 @@ class CheckpointPool:
     seed
         Seed for the retention sampler.  ``None`` (default) uses an
         unseeded :class:`random.Random`.
+    extra_metadata
+        Pool-level extra sidecar content, used by :meth:`maybe_save` and
+        :meth:`save_pruned` whenever a call passes none of its own.  A
+        mapping, or a callable ``(approximator, trial_number) -> mapping``
+        evaluated at save time.  Keys must be strings outside
+        :data:`RESERVED_METADATA_KEYS`, values JSON-serializable.  This is
+        how a hooks package supplies metadata to checkpoints written by
+        ``optimize()`` without subclassing the pool.  Default ``None``:
+        the sidecar is unchanged.
+
+    Raises
+    ------
+    ValueError
+        If a mapping ``extra_metadata`` uses a reserved key.
+    TypeError
+        If a mapping ``extra_metadata`` has a non-string key or a value
+        that is not JSON-serializable.
     """
 
     def __init__(
@@ -98,10 +149,15 @@ class CheckpointPool:
         pool_size: int = DEFAULT_POOL_SIZE,
         pruned_pool_size: int = DEFAULT_PRUNED_POOL_SIZE,
         seed: int | None = None,
+        extra_metadata: ExtraMetadata | None = None,
     ):
+        if extra_metadata is not None and not callable(extra_metadata):
+            # Fail at construction, not at the first trial that finishes.
+            _validate_extra_metadata(extra_metadata)
         self.pool_dir = Path(pool_dir)
         self.pool_size = pool_size
         self.pruned_pool_size = pruned_pool_size
+        self.extra_metadata = extra_metadata
         # (objective_value, trial_number) -> checkpoint path
         self._entries: list[tuple[float, int, Path]] = []
         # (trial_number, checkpoint path), retention order, not ranked.
@@ -125,11 +181,38 @@ class CheckpointPool:
         trial_number: int,
         objective_value: float,
         approximator: Any,
+        extra_metadata: ExtraMetadata | None = None,
     ) -> bool:
         """Save *approximator* weights if they're in the current top-k.
 
-        Returns ``True`` when the checkpoint was saved (or the pool was
-        updated), ``False`` otherwise.
+        Parameters
+        ----------
+        trial_number
+            Optuna trial number.
+        objective_value
+            Scalar ranking score, lower is better.  See the class docstring
+            for what the objective passes here.
+        approximator
+            The trained approximator whose weights are saved.
+        extra_metadata
+            Extra sidecar content for this checkpoint; see the class
+            parameter of the same name.  ``None`` (default) falls back to
+            the pool-level :attr:`extra_metadata`.  A callable is evaluated
+            only when the trial is actually saved.
+
+        Returns
+        -------
+        bool
+            ``True`` when the checkpoint was saved (or the pool was
+            updated), ``False`` otherwise.
+
+        Raises
+        ------
+        ValueError
+            If the resolved extra metadata uses a reserved key.
+        TypeError
+            If it is not a mapping with string keys and JSON-serializable
+            values.
         """
         if (
             len(self._entries) >= self.pool_size
@@ -137,11 +220,15 @@ class CheckpointPool:
         ):
             return False
 
+        extra = self._resolve_extra_metadata(
+            extra_metadata, approximator, trial_number,
+        )
         dest = self.pool_dir / f"trial_{trial_number:04d}"
         if not _write_checkpoint(
             dest,
             approximator,
             {
+                **extra,
                 "trial_number": trial_number,
                 "state": "complete",
                 "objective_value": float(objective_value),
@@ -167,6 +254,7 @@ class CheckpointPool:
         approximator: Any,
         step: int | None = None,
         objective_value: float | None = None,
+        extra_metadata: ExtraMetadata | None = None,
     ) -> bool:
         """Retain a pruned trial's weights, if the pruned pool is enabled.
 
@@ -183,11 +271,24 @@ class CheckpointPool:
         objective_value
             Scalar summary of the trial's scores at that step, if known.
             Recorded but not used for ranking -- see the class docstring.
+        extra_metadata
+            Extra sidecar content for this checkpoint; see the class
+            parameter of the same name.  ``None`` (default) falls back to
+            the pool-level :attr:`extra_metadata`.  A callable is evaluated
+            only when the trial is actually retained.
 
         Returns
         -------
         bool
             ``True`` when the checkpoint was written and retained.
+
+        Raises
+        ------
+        ValueError
+            If the resolved extra metadata uses a reserved key.
+        TypeError
+            If it is not a mapping with string keys and JSON-serializable
+            values.
         """
         if self.pruned_pool_size <= 0:
             return False
@@ -225,10 +326,17 @@ class CheckpointPool:
                 return False
             evict_slot = self._rng.randrange(self.pruned_pool_size)
 
+        # Resolved after the retention draw, so a rejected offer never runs
+        # the callable; and before the write, so a bad value raises without
+        # consuming the draw (`_pruned_seen` is untouched until success).
+        extra = self._resolve_extra_metadata(
+            extra_metadata, approximator, trial_number,
+        )
         if not _write_checkpoint(
             dest,
             approximator,
             {
+                **extra,
                 "trial_number": trial_number,
                 "state": "pruned",
                 "pruned_at_step": step,
@@ -259,6 +367,22 @@ class CheckpointPool:
 
         return True
 
+    def _resolve_extra_metadata(
+        self,
+        extra_metadata: ExtraMetadata | None,
+        approximator: Any,
+        trial_number: int,
+    ) -> dict[str, Any]:
+        """Return the validated extra sidecar content for one save."""
+        source = (
+            self.extra_metadata if extra_metadata is None else extra_metadata
+        )
+        if source is None:
+            return {}
+        if callable(source):
+            source = source(approximator, trial_number)
+        return _validate_extra_metadata(source)
+
     @property
     def best_checkpoint_dir(self) -> Path | None:
         """Path to the best checkpoint, or ``None`` if the pool is empty."""
@@ -282,6 +406,38 @@ class CheckpointPool:
         self._entries.clear()
         self._pruned_entries.clear()
         self._pruned_seen = 0
+
+
+def _validate_extra_metadata(extra: Any) -> dict[str, Any]:
+    """Check caller-supplied sidecar content and return it as a dict.
+
+    Raises rather than dropping keys: the metadata exists because the
+    checkpoint cannot be rebuilt correctly without it, so a checkpoint
+    silently missing it is worse than a loud failure.
+    """
+    if not isinstance(extra, Mapping):
+        raise TypeError(
+            "extra_metadata must be a mapping or a callable returning one, "
+            f"got {type(extra).__name__}"
+        )
+    bad_keys = [k for k in extra if not isinstance(k, str)]
+    if bad_keys:
+        raise TypeError(
+            f"extra_metadata keys must be strings, got {bad_keys!r}"
+        )
+    reserved = sorted(RESERVED_METADATA_KEYS.intersection(extra))
+    if reserved:
+        raise ValueError(
+            f"extra_metadata may not set reserved checkpoint keys {reserved}"
+        )
+    result = dict(extra)
+    try:
+        json.dumps(result)
+    except (TypeError, ValueError) as exc:
+        raise TypeError(
+            f"extra_metadata must be JSON-serializable: {exc}"
+        ) from exc
+    return result
 
 
 def _write_checkpoint(
