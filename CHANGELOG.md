@@ -1,5 +1,35 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Caller-supplied checkpoint metadata** (#130). `CheckpointPool` takes an
+  `extra_metadata` argument -- a dict, or a callable
+  `(approximator, trial_number) -> dict` -- on the constructor and on
+  `maybe_save()` / `save_pruned()`, merged into each `checkpoint.json`. A
+  pool-level value applies to every checkpoint `optimize()` writes, so a
+  hooks package can record facts needed to rebuild a weights-only
+  checkpoint (e.g. adapter moments) without subclassing the pool. The
+  pool's own keys (`RESERVED_METADATA_KEYS`, in
+  `bayesflow_hpo.optimization.checkpoint_pool`) cannot be overwritten; a
+  reserved, non-string (at any nesting level) or non-strict-JSON entry
+  raises instead of being dropped. During `optimize()`, a callable that fails on a completed trial
+  stops the run; on a pruned trial it is logged at WARNING and the trial is
+  not retained. Default `None`: sidecars are unchanged.
+
+### Changed
+
+- A pruned trial's `pruned_at_step` user attribute is now recorded before
+  its checkpoint is saved, and a failure to retain a pruned checkpoint is
+  logged at WARNING instead of DEBUG.
+
+### Documentation
+
+- The checkpoint pool's ranking is documented: trials are ranked by
+  `mean_objective_score()`, the mean of the quality objectives, which is
+  not a Pareto ranking for multi-objective studies.
+
 ## 0.5.1 -- 2026-10-11
 
 ### Changed
