@@ -165,6 +165,24 @@ def _largest_validation_condition(validation_data: ValidationDataset) -> int:
     return max(sizes, default=1)
 
 
+def _check_intermediate_validation_schedule(warmup: int, interval: int) -> None:
+    """Reject an intermediate-validation schedule the callback cannot run.
+
+    `PeriodicValidationCallback.on_epoch_end` computes
+    ``(epoch - warmup) % interval``, so ``interval=0`` would raise
+    ``ZeroDivisionError`` mid-training, after the first ``warmup`` epochs
+    had already been paid for. A negative warmup has no meaning.
+    """
+    if interval < 1:
+        raise ValueError(
+            f"intermediate_validation_interval must be >= 1, got {interval}."
+        )
+    if warmup < 0:
+        raise ValueError(
+            f"intermediate_validation_warmup must be >= 0, got {warmup}."
+        )
+
+
 def _intermediate_validation_runs(config: ObjectiveConfig) -> bool:
     """Whether `PeriodicValidationCallback` is attached for this config.
 
@@ -717,10 +735,12 @@ class ObjectiveConfig:
         (default 250).
     intermediate_validation_interval
         Run a lightweight validation every *n* epochs for pruning
-        (default 10).
+        (default 10). Must be >= 1.
     intermediate_validation_warmup
         Skip the first *n* epochs before intermediate validation
-        (default 10).
+        (default 10). Under a decaying learning-rate schedule an early
+        check scores the model at a still-high learning rate; see
+        :func:`~bayesflow_hpo.optimize`.
     pruning_strategy
         Multi-objective pruning strategy.  One of ``"dominance"``
         (default), ``"mo-sha"``, ``"primary"``, or ``"none"``.
@@ -1053,6 +1073,10 @@ class ObjectiveConfig:
             raise ValueError(
                 f"report_frequency must be >= 1, got {self.report_frequency}."
             )
+        _check_intermediate_validation_schedule(
+            self.intermediate_validation_warmup,
+            self.intermediate_validation_interval,
+        )
         # Validate pruning_strategy.
         _valid = {"none", "dominance", "mo-sha", "primary"}
         if isinstance(self.pruning_strategy, tuple):

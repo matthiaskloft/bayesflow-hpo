@@ -21,7 +21,11 @@ from bayesflow_hpo.optimization.constraints import (
     MetricConstraintSpec,
     _detect_gpu_memory_mb,
 )
-from bayesflow_hpo.optimization.objective import GenericObjective, ObjectiveConfig
+from bayesflow_hpo.optimization.objective import (
+    GenericObjective,
+    ObjectiveConfig,
+    _check_intermediate_validation_schedule,
+)
 from bayesflow_hpo.optimization.study import (
     DEFAULT_STORAGE,
     _resolve_n_startup_trials,
@@ -186,6 +190,8 @@ def optimize(
     joint_metrics: dict[str, Any] | None = None,
     include_joint_metrics: bool = False,
     aggregate: Aggregate = "mean",
+    intermediate_validation_warmup: int = 10,
+    intermediate_validation_interval: int = 10,
 ) -> optuna.Study:
     """Run HPO with a high-level convenience API.
 
@@ -544,6 +550,26 @@ def optimize(
         the full parameter-by-condition grid; omitted metrics retain means.
         Geometric requires positive values. See
         :func:`~bayesflow_hpo.validation.pipeline.run_validation_pipeline`.
+    intermediate_validation_warmup
+        Number of epochs skipped before the first intermediate validation
+        (default 10). Epochs are counted from 0, as Keras passes them to
+        ``on_epoch_end``, so the first check runs after epoch index
+        ``intermediate_validation_warmup``. Intermediate validation only
+        runs when ``pruning_strategy`` is not ``"none"`` or
+        ``training_mode="open_ended"``; it is what pruning and
+        open-ended early stopping act on.
+
+        Under a decaying learning-rate schedule (e.g. cosine), an early
+        check scores the model while the learning rate is still high,
+        before the decay that the final score reflects. Raise the warmup
+        to move the checks later, e.g. ``intermediate_validation_warmup=48``
+        with ``intermediate_validation_interval=16`` at ``epochs=64`` makes
+        a single check at epoch index 48. Whether a check that late still
+        saves enough training to be worth pruning on is for the caller to
+        measure.
+    intermediate_validation_interval
+        Run an intermediate validation every *n* epochs after the warmup
+        (default 10). Must be >= 1.
 
     Returns
     -------
@@ -603,6 +629,12 @@ def optimize(
         raise ValueError(
             f"report_frequency must be >= 1, got {report_frequency}."
         )
+    # Also checked in ObjectiveConfig, which runs before any trial; repeated
+    # here so the error names optimize()'s own argument before the
+    # validation dataset is simulated.
+    _check_intermediate_validation_schedule(
+        intermediate_validation_warmup, intermediate_validation_interval
+    )
     # Startup counts are validated HERE, not only where they are consumed.
     # create_study() checks them too, but by then _create_and_run_study() has
     # already called optuna.delete_study() for a non-resumed run: a malformed
@@ -703,6 +735,8 @@ def optimize(
         validate_fn=validate_fn,
         checkpoint_pool=checkpoint_pool,
         aggregate=aggregate,
+        intermediate_validation_warmup=intermediate_validation_warmup,
+        intermediate_validation_interval=intermediate_validation_interval,
     )
 
     # Step 5: Derive directions
@@ -837,6 +871,8 @@ def _build_objective(
     validate_fn: ValidateFn | None,
     checkpoint_pool: CheckpointPool | None,
     aggregate: Aggregate = "mean",
+    intermediate_validation_warmup: int = 10,
+    intermediate_validation_interval: int = 10,
 ) -> GenericObjective:
     """Construct the :class:`GenericObjective` from configuration."""
     return GenericObjective(
@@ -872,6 +908,8 @@ def _build_objective(
             validate_fn=validate_fn,
             checkpoint_pool=checkpoint_pool,
             aggregate=aggregate,
+            intermediate_validation_warmup=intermediate_validation_warmup,
+            intermediate_validation_interval=intermediate_validation_interval,
         )
     )
 

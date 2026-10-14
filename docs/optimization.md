@@ -109,6 +109,17 @@ In `"mean"` mode, or `"pareto"` mode over a single metric, `cost_metric=None` le
 
 `pruning_n_startup_trials` controls how many completed trials are needed before pruning activates. When `None` (default), it is auto-detected from the sampler: `_n_startup_trials` for TPE/GP (25/10), `population_size` for NSGA-II/III (50), fallback 10 for others.
 
+`intermediate_validation_warmup` and `intermediate_validation_interval` (both
+default 10, also accepted by `optimize()`) set when `PeriodicValidationCallback`
+validates, and so when pruning or open-ended early stopping can act. Epochs are
+counted from 0: with `warmup=10, interval=10` the checks run at epoch indices
+10, 20, 30, ... Under `fixed_budget`'s cosine decay, an early check scores the
+model while the learning rate is still high, before the decay the final
+validation reflects. To prune only late in training, raise the warmup -- e.g.
+`intermediate_validation_warmup=48, intermediate_validation_interval=16` at
+`epochs=64` gives a single check at epoch index 48. Whether a check that late
+is reliable enough to prune on is for the caller to measure.
+
 #### Custom Training Function
 
 `train_fn` allows users to override the default training loop. The signature is `(approximator, simulator, hparams, callbacks) -> None`. When `None`, the objective uses `approximator.fit(simulator=..., epochs=..., num_batches=..., ...)`. Example:

@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **`optimize()` accepts `intermediate_validation_warmup` and
+  `intermediate_validation_interval`** (keyword-only, both default 10), passed
+  through to `ObjectiveConfig`. They set when intermediate validation -- and so
+  pruning -- runs, so a study on a decaying schedule can move its checks late
+  in training instead of disabling pruning (#131). `ObjectiveConfig` and
+  `optimize()` now reject `intermediate_validation_interval < 1` (previously a
+  `ZeroDivisionError` mid-training) and `intermediate_validation_warmup < 0`.
+
 ## 0.5.1 -- 2026-10-11
 
 ### Changed
