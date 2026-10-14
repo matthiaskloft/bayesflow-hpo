@@ -129,7 +129,9 @@ class CheckpointPool:
         :meth:`save_pruned` whenever a call passes none of its own.  A
         mapping, or a callable ``(approximator, trial_number) -> mapping``
         evaluated at save time.  Keys must be strings outside
-        :data:`RESERVED_METADATA_KEYS`, values JSON-serializable.  This is
+        :data:`RESERVED_METADATA_KEYS`, values strict-JSON-serializable:
+        ``NaN``/``inf`` are rejected, and so are NumPy scalars other than
+        ``np.float64`` -- convert with ``float()`` / ``.tolist()``.  This is
         how a hooks package supplies metadata to checkpoints written by
         ``optimize()`` without subclassing the pool.  Default ``None``:
         the sidecar is unchanged.
@@ -140,7 +142,16 @@ class CheckpointPool:
         If a mapping ``extra_metadata`` uses a reserved key.
     TypeError
         If a mapping ``extra_metadata`` has a non-string key or a value
-        that is not JSON-serializable.
+        that is not strict-JSON-serializable.
+
+    Notes
+    -----
+    Invalid metadata raises instead of being dropped, so no checkpoint is
+    written without it.  Inside ``optimize()`` a callable that raises (or
+    returns invalid metadata) for a *completed* trial therefore propagates
+    out of ``study.optimize()``: that trial is recorded as FAIL and the
+    run stops.  For a *pruned* trial the error is logged at WARNING and
+    the trial is not retained; the study continues.
     """
 
     def __init__(
@@ -328,7 +339,9 @@ class CheckpointPool:
 
         # Resolved after the retention draw, so a rejected offer never runs
         # the callable; and before the write, so a bad value raises without
-        # consuming the draw (`_pruned_seen` is untouched until success).
+        # counting the offer (`_pruned_seen` is untouched until success).
+        # The RNG has advanced by then, as on a failed write: uniformity is
+        # unaffected, only the seeded sequence shifts.
         extra = self._resolve_extra_metadata(
             extra_metadata, approximator, trial_number,
         )
@@ -432,7 +445,9 @@ def _validate_extra_metadata(extra: Any) -> dict[str, Any]:
         )
     result = dict(extra)
     try:
-        json.dumps(result)
+        # allow_nan=False: NaN/inf would be written as bare `NaN`, which
+        # strict JSON parsers reject.
+        json.dumps(result, allow_nan=False)
     except (TypeError, ValueError) as exc:
         raise TypeError(
             f"extra_metadata must be JSON-serializable: {exc}"

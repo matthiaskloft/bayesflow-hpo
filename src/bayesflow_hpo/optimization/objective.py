@@ -754,7 +754,9 @@ class ObjectiveConfig:
     checkpoint_pool
         Optional :class:`CheckpointPool` to persist the best trial
         weights.  When ``None`` a default pool of size 5 is created,
-        which retains no pruned trials; see ``pruned_pool_size``.
+        which retains no pruned trials; see ``pruned_pool_size``.  Set
+        the pool's ``extra_metadata`` to add caller-supplied keys to every
+        ``checkpoint.json`` it writes.
     build_approximator_fn
         Optional custom build function ``(hparams) -> Approximator``.
         Must return an **uncompiled** approximator.
@@ -1413,22 +1415,27 @@ class GenericObjective:
         only under-trained models a study produces, and nothing else in the
         run keeps them (bayesflow-hpo#106).  Failures here must not change
         what the study records, so they are swallowed: the trial is being
-        pruned either way.
+        pruned either way.  They are logged at WARNING, because the usual
+        cause is a caller's ``extra_metadata`` callable that raises or
+        returns invalid metadata -- a bug that would otherwise silently
+        empty the pruned pool.
         """
         if self._checkpoint_pool.pruned_pool_size <= 0:
             return
         try:
             step, score = _pruning_rung(callbacks)
+            # Recorded before the save, so a failing save cannot lose the
+            # rung the trial stopped at.
+            if step is not None:
+                trial.set_user_attr("pruned_at_step", step)
             self._checkpoint_pool.save_pruned(
                 trial_number=trial.number,
                 approximator=approximator,
                 step=step,
                 objective_value=score,
             )
-            if step is not None:
-                trial.set_user_attr("pruned_at_step", step)
         except Exception:
-            logger.debug(
+            logger.warning(
                 "Could not retain pruned checkpoint for trial %d",
                 trial.number, exc_info=True,
             )

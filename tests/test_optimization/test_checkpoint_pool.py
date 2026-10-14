@@ -409,6 +409,41 @@ class TestExtraMetadata:
         assert pool._pruned_seen == 0
         assert pool.pruned_trial_numbers == []
 
+    def test_callable_not_run_for_rejected_pruned_offer(
+        self, pool_dir, mock_approximator
+    ):
+        pool = CheckpointPool(pool_dir=pool_dir, pruned_pool_size=1, seed=0)
+        pool.save_pruned(0, mock_approximator)
+        extra = MagicMock(return_value={})
+        # Force the k/n draw to reject the offer.
+        with patch.object(pool._rng, "random", return_value=0.99):
+            assert pool.save_pruned(
+                1, mock_approximator, extra_metadata=extra,
+            ) is False
+        extra.assert_not_called()
+        assert pool._pruned_seen == 2
+
+    def test_pool_level_dict_mutated_after_construction_is_revalidated(
+        self, pool_dir, mock_approximator
+    ):
+        extra = {"ok": 1}
+        pool = CheckpointPool(pool_dir=pool_dir, extra_metadata=extra)
+        extra["note"] = "sneaky"
+        with pytest.raises(ValueError, match="reserved"):
+            pool.maybe_save(0, 0.5, mock_approximator)
+        assert pool.trial_numbers == []
+
+    def test_caller_dict_is_not_mutated(self, pool_dir, mock_approximator):
+        extra = {"a": 1}
+        pool = CheckpointPool(pool_dir=pool_dir)
+        pool.maybe_save(0, 0.5, mock_approximator, extra_metadata=extra)
+        assert extra == {"a": 1}
+
+    @pytest.mark.parametrize("value", [float("nan"), float("inf")])
+    def test_non_finite_float_rejected(self, pool_dir, value):
+        with pytest.raises(TypeError, match="JSON"):
+            CheckpointPool(pool_dir=pool_dir, extra_metadata={"x": value})
+
     def test_non_serializable_value_rejected(self, pool_dir):
         with pytest.raises(TypeError, match="JSON"):
             CheckpointPool(pool_dir=pool_dir, extra_metadata={"x": object()})

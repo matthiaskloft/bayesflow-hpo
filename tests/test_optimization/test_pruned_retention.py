@@ -198,3 +198,30 @@ class TestRetainPruned:
         approx.save_weights.side_effect = RuntimeError("disk full")
         self._objective(pool)._retain_pruned(MagicMock(number=3), approx, [])
         assert pool.pruned_trial_numbers == []
+
+    def test_bad_extra_metadata_keeps_the_rung_and_warns(
+        self, tmp_path, caplog
+    ):
+        """A failing metadata callable loses the checkpoint, not the rung."""
+        pool = CheckpointPool(
+            pool_dir=tmp_path / "cp", pruned_pool_size=2, seed=0,
+            extra_metadata=lambda approx, n: {"state": "oops"},
+        )
+        study = optuna.create_study(directions=["minimize"] * 2)
+        trial = study.ask()
+        cb = _make_callback(trial)
+        with patch.object(
+            cb,
+            "_run_lightweight_validation",
+            return_value={"calibration_error": 0.02, "nrmse": 0.04},
+        ):
+            cb.on_epoch_end(epoch=0)
+
+        with caplog.at_level(
+            "WARNING", logger="bayesflow_hpo.optimization.objective",
+        ):
+            self._objective(pool)._retain_pruned(trial, MagicMock(), [cb])
+
+        assert pool.pruned_trial_numbers == []
+        assert trial.user_attrs["pruned_at_step"] == 1
+        assert "Could not retain pruned checkpoint" in caplog.text

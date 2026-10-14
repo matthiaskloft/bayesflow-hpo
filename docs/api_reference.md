@@ -87,7 +87,7 @@ def optimize(
 | `warm_start_from` | Optional source `optuna.Study` to seed initial trials from. |
 | `warm_start_top_k` | Number of best trials to copy from the source study (default 25). |
 | `qmc_startup_trials` | Number of initial trials to sample with a Sobol quasi-random sequence before the main sampler takes over. Provides better space-filling coverage than random startup. Only non-rejected completions count. Default 0 (disabled). See `create_study` for details. |
-| `checkpoint_pool` | Optional `CheckpointPool` for persisting the best trial weights. Pass one built with `pruned_pool_size > 0` to also retain a bounded sample of *pruned* trials' weights, which the default pool discards. |
+| `checkpoint_pool` | Optional `CheckpointPool` for persisting the best trial weights. Pass one built with `pruned_pool_size > 0` to also retain a bounded sample of *pruned* trials' weights, which the default pool discards. Set its `extra_metadata` to add caller-supplied keys to every `checkpoint.json` it writes, scored and pruned. |
 | `show_progress_bar` | Whether to show Optuna's progress bar (default `True`). |
 | `max_samples_per_call` | Cap on posterior draws materialized by one `approximator.sample()` call during validation (default `DEFAULT_MAX_SAMPLES_PER_CALL`). Keyword-only, `int` or `None`; a float is rejected. Pass `None` to sample each condition in a single call. A custom *validate_fn* does not read this and sets its own cap -- `make_lc2st_validate_fn` takes one. |
 | `sampler_n_startup_trials` | Override how many trials a string sampler preset draws before its model takes over. `None` (default) keeps the preset value -- 25 for `"tpe"`. Ignored when *sampler* is a sampler instance. |
@@ -263,7 +263,7 @@ Public default implementations used by `optimize()` when no custom hooks are pro
 | `objective_metrics` | `['calibration_error', 'nrmse']` | List of metric keys to optimize simultaneously. Default `["calibration_error", "nrmse"]`. |
 | `objective_mode` | `'pareto'` | `"pareto"` (default) — each metric becomes its own Optuna objective; returns `len(objective_metrics) + 1` values (or one per metric when `cost_metric` is `None`). `"mean"` — arithmetic mean of the listed metrics forms a single scalar; returns 2 values `(mean, cost_score)` (or one when `cost_metric` is `None`). |
 | `cost_metric` | `'inference_time'` | Which cost objective to use as the last Optuna objective. `"inference_time"` (default) or `"param_count"`, or `None` to optimize the quality metrics alone. With `None` the param count and inference time are still measured and stored as trial user attributes for post-hoc ranking; they just do not become an Optuna direction. |
-| `checkpoint_pool` | `None` | Optional `CheckpointPool` to persist the best trial weights. When `None` a default pool of size 5 is created, which retains no pruned trials; see `pruned_pool_size`. |
+| `checkpoint_pool` | `None` | Optional `CheckpointPool` to persist the best trial weights. When `None` a default pool of size 5 is created, which retains no pruned trials; see `pruned_pool_size`. Set the pool's `extra_metadata` to add caller-supplied keys to every `checkpoint.json` it writes. |
 | `report_frequency` | `10` | How often (in epochs) the `OptunaReportCallback` stores `epoch_{N}_loss` user attributes on each trial. |
 | `build_approximator_fn` | `None` | Optional custom build function `(hparams) -> Approximator`. Must return an **uncompiled** approximator. |
 | `train_fn` | `None` | Optional custom training function `(approximator, simulator, hparams, callbacks) -> None`. |
@@ -384,15 +384,23 @@ without subclassing; a value passed to `maybe_save()` / `save_pruned()`
 replaces the pool-level one for that call. Default `None`: the sidecar is
 unchanged.
 
-Keys must be strings, values JSON-serializable, and the keys the pool
-writes itself (`RESERVED_METADATA_KEYS`: `trial_number`, `state`,
-`objective_value`, `pruned_at_step`, `weights_file`, `note`) cannot be
-overwritten. A violation raises (`ValueError` for a reserved key,
-`TypeError` otherwise) instead of writing a checkpoint without the
-metadata — at construction for a dict, at save time for a callable. A
-callable that raises or returns bad metadata during `optimize()` therefore
-fails the completed trial; for a pruned trial the failure is logged and
-the trial is not retained.
+Keys must be strings and values strict-JSON-serializable: `NaN`/`inf`
+are rejected, and so are NumPy scalars other than `np.float64` — convert
+with `float()` / `.tolist()`. The keys the pool writes itself cannot be
+overwritten: `trial_number`, `state`, `objective_value`,
+`pruned_at_step`, `weights_file`, `note` (available as
+`from bayesflow_hpo.optimization.checkpoint_pool import
+RESERVED_METADATA_KEYS`). A violation raises (`ValueError` for a reserved
+key, `TypeError` otherwise) instead of writing a checkpoint without the
+metadata — at construction for a dict, at save time for a callable.
+
+During `optimize()`, a callable that raises or returns bad metadata for a
+**completed** trial propagates out of the study: that trial is recorded as
+FAIL and **the whole `optimize()` run stops**. A dict is already checked
+when the pool is built, and a broken callable fails on the first trial the
+pool saves, so the error surfaces early. For a **pruned** trial the error
+is logged at WARNING and the trial is not retained (its `pruned_at_step`
+user attribute is still recorded); the study continues.
 
 ```python
 from bayesflow_hpo import CheckpointPool, optimize
