@@ -735,6 +735,7 @@ class TestIntermediateValidationScheduleWiring:
                     storage=None,
                     **kwargs,
                 )
+            mock_keys.assert_not_called()
             mock_setup.assert_not_called()
 
     def test_build_objective_sets_config_fields(self):

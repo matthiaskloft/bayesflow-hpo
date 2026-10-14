@@ -113,12 +113,30 @@ In `"mean"` mode, or `"pareto"` mode over a single metric, `cost_metric=None` le
 default 10, also accepted by `optimize()`) set when `PeriodicValidationCallback`
 validates, and so when pruning or open-ended early stopping can act. Epochs are
 counted from 0: with `warmup=10, interval=10` the checks run at epoch indices
-10, 20, 30, ... Under `fixed_budget`'s cosine decay, an early check scores the
-model while the learning rate is still high, before the decay the final
-validation reflects. To prune only late in training, raise the warmup -- e.g.
+10, 20, 30, ... Both training modes decay the learning rate -- Keras
+`CosineDecay` under `fixed_budget`, the inverse-square-root schedule of Vaswani
+et al. (2017) under `open_ended` -- so an early check scores the model at a
+higher learning rate than the final validation does. To prune only late in
+training, raise the warmup -- e.g.
 `intermediate_validation_warmup=48, intermediate_validation_interval=16` at
 `epochs=64` gives a single check at epoch index 48. Whether a check that late
 is reliable enough to prune on is for the caller to measure.
+
+- **Warmup at or beyond `epochs`.** No check runs, so the trial cannot be
+  pruned and, under `open_ended`, cannot stop early. A warning is logged once
+  per affected epoch count. With a sampled `epochs` dimension only some trials
+  may be affected.
+- **Patience counts checks.** `early_stopping_patience=5` at interval 16 is 80
+  epochs without improvement.
+- **The schedule is pinned to the study.** Intermediate scores are stored by
+  check number (`val_{metric}_step_{N}`, or `trial.report(step=N)` for a
+  single-objective study), and pruning compares trials at equal N. A study
+  therefore records its schedule (`bayesflow_hpo_intermediate_validation_schedule`),
+  and resuming or warm-starting with a different one raises once the study
+  holds intermediate scores. A study without the attribute is read as having
+  run the default 10/10. A run that does no intermediate validation
+  (`pruning_strategy="none"` under `fixed_budget`) neither checks nor records
+  it.
 
 #### Custom Training Function
 

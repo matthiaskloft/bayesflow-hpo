@@ -43,6 +43,7 @@ def test_public_study_creation_records_aggregation(monkeypatch):
 
     objective = SimpleNamespace(config=SimpleNamespace(
         objective_metrics=["nrmse"], pruning_n_startup_trials=5,
+        pruning_strategy="none", training_mode="fixed_budget",
     ))
     monkeypatch.setattr("bayesflow_hpo.api.optimize_until", lambda *a, **kw: None)
     study = _create_and_run_study(
@@ -81,7 +82,14 @@ def _direct_objective(aggregate, sample):
     from bayesflow_hpo.optimization.objective import GenericObjective
 
     objective = GenericObjective.__new__(GenericObjective)
-    objective.config = SimpleNamespace(aggregate=aggregate, search_space=sample)
+    # No intermediate validation, so the schedule guard stays out of these
+    # aggregation tests.
+    objective.config = SimpleNamespace(
+        aggregate=aggregate,
+        search_space=sample,
+        pruning_strategy="none",
+        training_mode="fixed_budget",
+    )
     return objective
 
 

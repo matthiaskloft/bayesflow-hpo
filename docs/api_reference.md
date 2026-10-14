@@ -96,8 +96,8 @@ def optimize(
 | `joint_metrics` | Configured joint metrics as `{name: fn}`, forwarded to the validation pipeline. Build one with `make_tarp_joint_metric`. |
 | `include_joint_metrics` | Whether joint metrics also run at every *intermediate* validation, under `PeriodicValidationCallback`. `False` by default, because the cost changes what pruning is for. |
 | `aggregate` | Scalar `"mean"` (default), `"worst"`, or `"geometric"`, or a metric-output-to-reduction mapping. Scalars reduce conditions per parameter, then average parameters. Explicit mapping entries reduce the full parameter-by-condition grid; omitted metrics retain means. Geometric requires positive values. See `run_validation_pipeline`. |
-| `intermediate_validation_warmup` | Number of epochs skipped before the first intermediate validation (default 10). Epochs are counted from 0, as Keras passes them to `on_epoch_end`, so the first check runs after epoch index `intermediate_validation_warmup`. Intermediate validation only runs when `pruning_strategy` is not `"none"` or `training_mode="open_ended"`; it is what pruning and open-ended early stopping act on. |
-| `intermediate_validation_interval` | Run an intermediate validation every *n* epochs after the warmup (default 10). Must be >= 1. |
+| `intermediate_validation_warmup` | Number of epochs skipped before the first intermediate validation (default 10). Epochs are counted from 0, as Keras passes them to `on_epoch_end`, so the first check runs after epoch index `intermediate_validation_warmup`. Must be an int >= 0. Intermediate validation only runs when `pruning_strategy` is not `"none"` or `training_mode="open_ended"`; it is what pruning and open-ended early stopping act on. |
+| `intermediate_validation_interval` | Run an intermediate validation every *n* epochs after the warmup (default 10). Must be an int >= 1. |
 <!-- END GENERATED: optimize-params -->
 
 `optimize()` takes no `pruner` argument: it drives multi-objective studies,
@@ -260,8 +260,8 @@ Public default implementations used by `optimize()` when no custom hooks are pro
 | `include_joint_metrics` | `False` | Whether joint metrics are computed at every intermediate validation as well as at final validation. |
 | `joint_metrics` | `None` | Configured joint metrics, `{name: fn}`. The route by which a joint metric that cannot run at its registry default -- `tarp_error`, which needs data-derived reference points -- reaches the validation pipeline. |
 | `n_intermediate_posterior_samples` | `250` | Posterior draws for mid-training pruning validation. |
-| `intermediate_validation_interval` | `10` | Run a lightweight validation every *n* epochs for pruning (default 10). Must be >= 1. |
-| `intermediate_validation_warmup` | `10` | Skip the first *n* epochs before intermediate validation (default 10). Under a decaying learning-rate schedule an early check scores the model at a still-high learning rate; see `optimize`. |
+| `intermediate_validation_interval` | `10` | Run a lightweight validation every *n* epochs for pruning (default 10). Must be an int >= 1. |
+| `intermediate_validation_warmup` | `10` | Skip the first *n* epochs before intermediate validation (default 10). Must be an int >= 0. Under a decaying learning-rate schedule an early check scores the model at a still-high learning rate; see `optimize`. A study records the schedule and refuses a different one once it holds intermediate scores; see `check_intermediate_validation_schedule`. |
 | `pruning_strategy` | `'dominance'` | Multi-objective pruning strategy. One of `"dominance"` (default), `"mo-sha"`, `"primary"`, or `"none"`. For `"primary"`, pass a tuple `("primary", metric_name)`. See `pruning_strategies`. |
 | `pruning_n_startup_trials` | `None` | Minimum completed trials before multi-objective pruning activates. `None` (default) → auto-detected from the sampler's `n_startup_trials` attribute (25 for TPE, fallback 10). Explicit `int` overrides auto-detection. |
 | `objective_metrics` | `['calibration_error', 'nrmse']` | List of metric keys to optimize simultaneously. Default `["calibration_error", "nrmse"]`. |

@@ -10,7 +10,19 @@
   pruning -- runs, so a study on a decaying schedule can move its checks late
   in training instead of disabling pruning (#131). `ObjectiveConfig` and
   `optimize()` now reject `intermediate_validation_interval < 1` (previously a
-  `ZeroDivisionError` mid-training) and `intermediate_validation_warmup < 0`.
+  `ZeroDivisionError` mid-training), `intermediate_validation_warmup < 0`, and
+  non-integer values of either (`TypeError`).
+- **A study records its intermediate-validation schedule** under the
+  `bayesflow_hpo_intermediate_validation_schedule` user attribute, and
+  `optimize(resume=True)`, `warm_start_from` and a directly built
+  `GenericObjective` refuse a different schedule once the study holds
+  intermediate scores. Pruning compares trials by check number, not by epoch,
+  so mixing schedules compared models at different points in training. A
+  study without the attribute is read as the previous fixed 10/10. Warm start
+  carries the source's schedule into the target.
+- **A warning is logged when `intermediate_validation_warmup >= epochs`**,
+  which schedules no intermediate validation for that trial, so it cannot be
+  pruned or, under `open_ended`, stopped early.
 
 ## 0.5.1 -- 2026-10-11
 

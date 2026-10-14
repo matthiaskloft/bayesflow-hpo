@@ -27,7 +27,11 @@ import numpy as np
 import optuna
 from optuna.trial import TrialState
 
-from bayesflow_hpo.objectives import mean_objective_score, schema_matches
+from bayesflow_hpo.objectives import (
+    INTERMEDIATE_VALIDATION_SCHEDULE_ATTR,
+    mean_objective_score,
+    schema_matches,
+)
 from bayesflow_hpo.optimization.constraints import MetricConstraintSpec
 from bayesflow_hpo.results.extraction import _objective_column_names
 
@@ -951,6 +955,16 @@ def create_study(
         if source_schema is not None:
             study.set_user_attr(
                 "bayesflow_hpo_objective_schema", source_schema
+            )
+        # Copied trials keep their step scores, so they keep the schedule
+        # those scores were taken at; `optimize()` has already refused a
+        # source whose schedule differs from the run's.
+        source_schedule = warm_start_from.user_attrs.get(
+            INTERMEDIATE_VALIDATION_SCHEDULE_ATTR
+        )
+        if source_schedule is not None:
+            study.set_user_attr(
+                INTERMEDIATE_VALIDATION_SCHEDULE_ATTR, source_schedule
             )
     return study
 

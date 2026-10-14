@@ -24,6 +24,7 @@ from __future__ import annotations
 import importlib.util
 import logging
 import math
+import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, NewType, TypeVar
@@ -680,6 +681,110 @@ def check_aggregation_settings(
         )
     if record:
         study.set_user_attr("bayesflow_hpo_aggregate", requested)
+
+
+#: User attribute recording the intermediate-validation schedule a study's
+#: step scores were taken at, as ``{"warmup": int, "interval": int}``.
+INTERMEDIATE_VALIDATION_SCHEDULE_ATTR = (
+    "bayesflow_hpo_intermediate_validation_schedule"
+)
+
+#: The schedule every study ran at before ``optimize()`` exposed it, and
+#: what an absent attribute is read as -- the same convention as a missing
+#: ``bayesflow_hpo_aggregate`` reading as ``"mean"``.
+DEFAULT_INTERMEDIATE_VALIDATION_SCHEDULE: dict[str, int] = {
+    "warmup": 10,
+    "interval": 10,
+}
+
+# `PeriodicValidationCallback` writes `val_{metric}_step_{N}` on
+# multi-objective trials; single-objective trials go through
+# `trial.report()` into `intermediate_values` instead.
+_STEP_SCORE_ATTR = re.compile(r"^val_.+_step_\d+$")
+
+
+def _has_step_scores(trial: Any) -> bool:
+    """Whether *trial* carries scores indexed by intermediate-validation step."""
+    if trial.intermediate_values:
+        return True
+    return any(_STEP_SCORE_ATTR.match(key) for key in trial.user_attrs)
+
+
+def check_intermediate_validation_schedule(
+    study: Any,
+    warmup: int,
+    interval: int,
+    *,
+    record: bool = True,
+    current_trial_number: int | None = None,
+) -> None:
+    """Refuse mixing intermediate-validation schedules; record new settings.
+
+    Intermediate scores are indexed by validation STEP, counted from 1, not
+    by epoch (``PeriodicValidationCallback``), and every pruning strategy
+    compares a running trial's step-N scores with other trials' step-N
+    scores. Step 1 is epoch index 10 under the default schedule and epoch
+    index 48 under ``warmup=48``, so a study whose stored step scores were
+    taken at one schedule and a run at another would compare models at
+    different points in training with nothing to say so.
+
+    A conflict needs a trial that actually carries step scores, other than
+    ``current_trial_number``: a study that never ran intermediate
+    validation (``pruning_strategy="none"`` under ``fixed_budget``) holds
+    nothing to mismatch. A missing attribute reads as
+    :data:`DEFAULT_INTERMEDIATE_VALIDATION_SCHEDULE`, the only schedule
+    ``optimize()`` could run before it accepted these arguments. A study
+    built directly from an ``ObjectiveConfig`` with another schedule before
+    this guard existed will be misread that way; set the attribute by hand
+    to the schedule it ran at.
+
+    Parameters
+    ----------
+    study
+        The Optuna study being written to, or a warm-start source.
+    warmup
+        Requested ``intermediate_validation_warmup``.
+    interval
+        Requested ``intermediate_validation_interval``.
+    record
+        Whether to write the requested schedule to the study. ``False``
+        for a warm-start source, which this run only reads.
+    current_trial_number
+        Trial to ignore when looking for step scores: Optuna has already
+        created it, but it has not been validated yet.
+
+    Raises
+    ------
+    ValueError
+        If the study records a different schedule and holds a trial with
+        step scores.
+    """
+    requested = {"warmup": int(warmup), "interval": int(interval)}
+    stored = study.user_attrs.get(INTERMEDIATE_VALIDATION_SCHEDULE_ATTR)
+    if not (
+        isinstance(stored, Mapping)
+        and isinstance(stored.get("warmup"), int)
+        and isinstance(stored.get("interval"), int)
+    ):
+        # Unrecognized reads as absent, matching the other settings guards:
+        # `user_attrs` is caller-writable and round-trips through JSON.
+        stored = DEFAULT_INTERMEDIATE_VALIDATION_SCHEDULE
+    stored = {"warmup": stored["warmup"], "interval": stored["interval"]}
+    if stored != requested and any(
+        trial.number != current_trial_number and _has_step_scores(trial)
+        for trial in study.get_trials(deepcopy=False)
+    ):
+        raise ValueError(
+            f"Study {study.study_name!r} holds intermediate validation scores "
+            f"taken at warmup={stored['warmup']}, "
+            f"interval={stored['interval']}, but this run requests "
+            f"warmup={requested['warmup']}, "
+            f"interval={requested['interval']}. Pruning compares scores by "
+            "validation step, so the two would be compared at different "
+            "epochs. Start a new study or restore the schedule."
+        )
+    if record:
+        study.set_user_attr(INTERMEDIATE_VALIDATION_SCHEDULE_ATTR, requested)
 
 
 def check_or_stamp_joint_metric_settings(
