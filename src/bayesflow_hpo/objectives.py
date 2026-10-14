@@ -25,7 +25,7 @@ import importlib.util
 import logging
 import math
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, NewType, TypeVar
 
@@ -749,6 +749,7 @@ def check_intermediate_validation_schedule(
     *,
     record: bool = True,
     current_trial_number: int | None = None,
+    trials: Sequence[Any] | None = None,
 ) -> None:
     """Refuse mixing intermediate-validation schedules; record new settings.
 
@@ -799,6 +800,12 @@ def check_intermediate_validation_schedule(
     current_trial_number
         Trial to ignore: Optuna has already created it, but it has not been
         validated yet.
+    trials
+        Trials to judge instead of all of *study*'s. For a warm-start
+        source, the trials that will actually be copied: the source's
+        running, pruned or unselected trials never reach the target, so
+        they cannot mix with its scores. *study* still supplies the
+        schedule read for trials without their own record.
 
     Raises
     ------
@@ -817,7 +824,8 @@ def check_intermediate_validation_schedule(
         # `user_attrs` is caller-writable and round-trips through JSON.
         stored = DEFAULT_INTERMEDIATE_VALIDATION_SCHEDULE
     stored = {"warmup": stored["warmup"], "interval": stored["interval"]}
-    for trial in study.get_trials(deepcopy=False):
+    candidates = study.get_trials(deepcopy=False) if trials is None else trials
+    for trial in candidates:
         if trial.number == current_trial_number:
             continue
         own = _trial_schedule(trial)

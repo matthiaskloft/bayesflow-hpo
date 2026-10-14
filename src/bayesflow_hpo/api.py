@@ -33,6 +33,7 @@ from bayesflow_hpo.optimization.study import (
     _resolve_n_startup_trials,
     create_study,
     optimize_until,
+    select_warm_start_trials,
 )
 from bayesflow_hpo.pipeline import check_pipeline
 from bayesflow_hpo.search_spaces.composite import CompositeSearchSpace
@@ -1263,13 +1264,18 @@ def _create_and_run_study(
     ):
         check_aggregation_settings(warm_start_from, aggregate, record=False)
         # Warm start copies trials WITH their user attributes, step scores
-        # included, and pruning then reads them as references.
+        # included, and pruning then reads them as references. Only the
+        # trials it will copy are judged: the source's running, pruned or
+        # unselected trials never reach the target.
         if schedule_applies:
             check_intermediate_validation_schedule(
                 warm_start_from,
                 cfg.intermediate_validation_warmup,
                 cfg.intermediate_validation_interval,
                 record=False,
+                trials=select_warm_start_trials(
+                    warm_start_from, top_k=warm_start_top_k, has_cost=has_cost
+                ),
             )
     if not resume and storage is not None:
         try:

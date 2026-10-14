@@ -235,7 +235,9 @@ def _objective(warmup, interval, pruning_strategy="dominance"):
     )
 
 
-def _create_and_run(objective, *, storage, resume, warm_start_from=None):
+def _create_and_run(
+    objective, *, storage, resume, warm_start_from=None, warm_start_top_k=5
+):
     from bayesflow_hpo.api import _create_and_run_study
 
     with patch("bayesflow_hpo.api.optimize_until"):
@@ -247,7 +249,7 @@ def _create_and_run(objective, *, storage, resume, warm_start_from=None):
             storage=storage,
             resume=resume,
             warm_start_from=warm_start_from,
-            warm_start_top_k=5,
+            warm_start_top_k=warm_start_top_k,
             n_trials=0,
             max_total_trials=None,
             show_progress_bar=False,
@@ -305,6 +307,65 @@ def test_warm_start_from_a_different_schedule_is_refused():
             storage=None,
             resume=False,
             warm_start_from=source,
+        )
+
+
+def _source_with_uncopied_10_10_trials():
+    """A 10/10 source whose only scores sit on trials warm start won't copy.
+
+    The single unscored COMPLETE trial ranks first (value 0.1) and is the
+    one copied at ``warm_start_top_k=1``.
+    """
+    # Created the way `optimize()` creates one, so it carries the objective
+    # schema warm start requires; "none" leaves its schedule unrecorded.
+    source = _create_and_run(
+        _objective(10, 10, pruning_strategy="none"), storage=None, resume=False
+    )
+    source.add_trial(optuna.trial.create_trial(value=0.1))
+    # Scored at 10/10, but outside top_k=1.
+    _add_scored_trial(source)
+    # Scored and pruned: warm start copies only COMPLETE trials.
+    source.add_trial(
+        optuna.trial.create_trial(
+            state=optuna.trial.TrialState.PRUNED,
+            user_attrs={"val_nrmse_step_1": 0.3},
+        )
+    )
+    # Still running at 10/10: its worker writes to the source, not the target.
+    running = source.ask()
+    stamp_trial_intermediate_validation_schedule(running, 10, 10)
+    return source
+
+
+def test_warm_start_judges_only_the_trials_it_copies():
+    """Regression for the second review round of #132."""
+    source = _source_with_uncopied_10_10_trials()
+
+    target = _create_and_run(
+        _objective(48, 16),
+        storage=None,
+        resume=False,
+        warm_start_from=source,
+        warm_start_top_k=1,
+    )
+
+    assert len(target.trials) == 1
+    assert target.user_attrs[INTERMEDIATE_VALIDATION_SCHEDULE_ATTR] == {
+        "warmup": 48,
+        "interval": 16,
+    }
+
+
+def test_warm_start_still_refuses_a_copied_scored_trial():
+    source = _source_with_uncopied_10_10_trials()
+
+    with pytest.raises(ValueError, match="holds intermediate validation"):
+        _create_and_run(
+            _objective(48, 16),
+            storage=None,
+            resume=False,
+            warm_start_from=source,
+            warm_start_top_k=2,
         )
 
 

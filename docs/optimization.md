@@ -136,7 +136,8 @@ is reliable enough to prune on is for the caller to measure.
   (`intermediate_validation_warmup` / `intermediate_validation_interval`
   trial attributes). Resuming, warm-starting, or starting a concurrent worker
   with a different schedule raises once another trial holds intermediate
-  scores at the old one or is still running under it. Trials without their
+  scores at the old one or is still running under it. For a warm start, only
+  the source trials that will be copied are judged. Trials without their
   own record are read at the study's schedule, and a study without the
   attribute as the default 10/10. A run that does no intermediate validation
   (`pruning_strategy="none"` under `fixed_budget`) neither checks nor records

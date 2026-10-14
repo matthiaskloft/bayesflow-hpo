@@ -22,7 +22,8 @@
   carries the source's schedule into the target. Each trial also records its
   own schedule before training, so a concurrent worker started with a
   different schedule is refused while another trial is still in its warmup,
-  before that trial has produced a score.
+  before that trial has produced a score. A warm start judges only the
+  source trials it copies (`select_warm_start_trials()`).
 - **A warning is logged when `intermediate_validation_warmup >= epochs`**,
   which schedules no intermediate validation for that trial, so it cannot be
   pruned or, under `open_ended`, stopped early.
