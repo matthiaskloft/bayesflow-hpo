@@ -12,6 +12,7 @@ import pytest
 from bayesflow_hpo.objectives import (
     INTERMEDIATE_VALIDATION_SCHEDULE_ATTR,
     check_intermediate_validation_schedule,
+    stamp_trial_intermediate_validation_schedule,
 )
 from bayesflow_hpo.optimization.validation_callback import (
     PeriodicValidationCallback,
@@ -154,6 +155,62 @@ def test_current_trial_is_ignored_but_other_running_trials_are_not():
     check_intermediate_validation_schedule(
         lone, 48, 16, current_trial_number=only.number
     )
+
+
+def _start_worker_trial(study, warmup, interval):
+    """What `GenericObjective` does for a trial before it trains."""
+    trial = study.ask()
+    check_intermediate_validation_schedule(
+        study, warmup, interval, current_trial_number=trial.number
+    )
+    stamp_trial_intermediate_validation_schedule(trial, warmup, interval)
+    return trial
+
+
+def test_overlapping_worker_in_warmup_blocks_a_schedule_change():
+    """Worker A's trial has no scores yet, but it will produce them at 10/10.
+
+    Regression for the interleaving in the review of #132: without the
+    per-trial record, worker B passed the guard and overwrote the study's
+    schedule, and both trials then stored `val_*_step_1` at different epochs.
+    """
+    study = _two_objective_study()
+    worker_a = _start_worker_trial(study, 10, 10)
+
+    with pytest.raises(ValueError, match=f"Trial {worker_a.number} .* is running"):
+        _start_worker_trial(study, 48, 16)
+    assert study.user_attrs[INTERMEDIATE_VALIDATION_SCHEDULE_ATTR] == {
+        "warmup": 10,
+        "interval": 10,
+    }
+
+
+def test_per_trial_record_outranks_an_overwritten_study_attribute():
+    study = _two_objective_study()
+    worker_a = _start_worker_trial(study, 10, 10)
+    worker_a.set_user_attr("val_nrmse_step_1", 0.3)
+    study.tell(worker_a, [0.2, 0.3])
+    # The study attribute is caller-writable; a trial's own record is what
+    # its scores were taken at.
+    study.set_user_attr(
+        INTERMEDIATE_VALIDATION_SCHEDULE_ATTR, {"warmup": 48, "interval": 16}
+    )
+
+    with pytest.raises(ValueError, match="warmup=10, interval=10"):
+        check_intermediate_validation_schedule(study, 48, 16)
+
+
+def test_finished_trial_without_scores_does_not_block():
+    """A failed or rejected trial produced nothing to mismatch."""
+    study = _two_objective_study()
+    failed = _start_worker_trial(study, 10, 10)
+    study.tell(failed, state=optuna.trial.TrialState.FAIL)
+
+    _start_worker_trial(study, 48, 16)
+    assert study.user_attrs[INTERMEDIATE_VALIDATION_SCHEDULE_ATTR] == {
+        "warmup": 48,
+        "interval": 16,
+    }
 
 
 def test_source_check_does_not_mutate_metadata():
@@ -304,8 +361,11 @@ def test_direct_objective_refuses_changed_schedule_before_sampling():
 
     with pytest.raises(ValueError, match="intermediate validation"):
         _direct_objective(10, 10)(study.ask())
+    trial = study.ask()
     with pytest.raises(_SampleReachedError):
-        _direct_objective(48, 16)(study.ask())
+        _direct_objective(48, 16)(trial)
+    assert trial.user_attrs["intermediate_validation_warmup"] == 48
+    assert trial.user_attrs["intermediate_validation_interval"] == 16
 
 
 @pytest.mark.parametrize(

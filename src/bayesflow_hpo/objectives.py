@@ -703,11 +703,43 @@ DEFAULT_INTERMEDIATE_VALIDATION_SCHEDULE: dict[str, int] = {
 _STEP_SCORE_ATTR = re.compile(r"^val_.+_step_\d+$")
 
 
+#: Trial user attributes recording the schedule THAT trial validates at,
+#: written by ``GenericObjective`` before training. The study attribute alone
+#: cannot vouch for a trial still running under an older schedule: it can be
+#: overwritten by another worker before that trial has produced a score.
+TRIAL_SCHEDULE_ATTRS = (
+    "intermediate_validation_warmup",
+    "intermediate_validation_interval",
+)
+
+
 def _has_step_scores(trial: Any) -> bool:
     """Whether *trial* carries scores indexed by intermediate-validation step."""
     if trial.intermediate_values:
         return True
     return any(_STEP_SCORE_ATTR.match(key) for key in trial.user_attrs)
+
+
+def _trial_schedule(trial: Any) -> dict[str, int] | None:
+    """The schedule *trial* recorded for itself, or ``None`` if it has none."""
+    warmup = trial.user_attrs.get(TRIAL_SCHEDULE_ATTRS[0])
+    interval = trial.user_attrs.get(TRIAL_SCHEDULE_ATTRS[1])
+    if isinstance(warmup, int) and isinstance(interval, int):
+        return {"warmup": warmup, "interval": interval}
+    return None
+
+
+def stamp_trial_intermediate_validation_schedule(
+    trial: Any, warmup: int, interval: int
+) -> None:
+    """Record on *trial* the schedule it is about to validate at.
+
+    Written before training, so a concurrent worker's
+    :func:`check_intermediate_validation_schedule` sees the schedule of a
+    trial that has not yet produced its first step score.
+    """
+    trial.set_user_attr(TRIAL_SCHEDULE_ATTRS[0], int(warmup))
+    trial.set_user_attr(TRIAL_SCHEDULE_ATTRS[1], int(interval))
 
 
 def check_intermediate_validation_schedule(
@@ -728,15 +760,30 @@ def check_intermediate_validation_schedule(
     taken at one schedule and a run at another would compare models at
     different points in training with nothing to say so.
 
-    A conflict needs a trial that actually carries step scores, other than
-    ``current_trial_number``: a study that never ran intermediate
-    validation (``pruning_strategy="none"`` under ``fixed_budget``) holds
-    nothing to mismatch. A missing attribute reads as
-    :data:`DEFAULT_INTERMEDIATE_VALIDATION_SCHEDULE`, the only schedule
+    Each trial is judged by its own schedule, recorded on it before
+    training (:func:`stamp_trial_intermediate_validation_schedule`). A
+    trial conflicts, other than ``current_trial_number``, when its schedule
+    differs from the requested one and it either carries step scores or is
+    still unfinished and so can produce them. The second case is what lets
+    two overlapping workers see each other: worker A's trial, still in its
+    warmup, has no scores yet, and the study attribute alone would let
+    worker B overwrite the schedule underneath it. A finished trial without
+    scores -- failed, rejected, or run with no intermediate validation --
+    holds nothing to mismatch.
+
+    A trial without its own record (written before this guard existed) is
+    read at the study attribute's schedule, and a missing study attribute
+    as :data:`DEFAULT_INTERMEDIATE_VALIDATION_SCHEDULE`, the only schedule
     ``optimize()`` could run before it accepted these arguments. A study
     built directly from an ``ObjectiveConfig`` with another schedule before
-    this guard existed will be misread that way; set the attribute by hand
-    to the schedule it ran at.
+    this guard existed will be misread that way; set the study attribute by
+    hand to the schedule it ran at.
+
+    One window stays open: between Optuna creating a trial and the objective
+    stamping it, the trial carries no record, so a worker checking in that
+    instant does not see it. Closing it would need a storage-level
+    compare-and-set that Optuna's user attributes do not offer -- the same
+    limit as :func:`check_or_stamp_joint_metric_settings`.
 
     Parameters
     ----------
@@ -750,14 +797,14 @@ def check_intermediate_validation_schedule(
         Whether to write the requested schedule to the study. ``False``
         for a warm-start source, which this run only reads.
     current_trial_number
-        Trial to ignore when looking for step scores: Optuna has already
-        created it, but it has not been validated yet.
+        Trial to ignore: Optuna has already created it, but it has not been
+        validated yet.
 
     Raises
     ------
     ValueError
-        If the study records a different schedule and holds a trial with
-        step scores.
+        If another trial ran, or is running, at a different schedule and
+        holds or can still produce step scores.
     """
     requested = {"warmup": int(warmup), "interval": int(interval)}
     stored = study.user_attrs.get(INTERMEDIATE_VALIDATION_SCHEDULE_ATTR)
@@ -770,15 +817,24 @@ def check_intermediate_validation_schedule(
         # `user_attrs` is caller-writable and round-trips through JSON.
         stored = DEFAULT_INTERMEDIATE_VALIDATION_SCHEDULE
     stored = {"warmup": stored["warmup"], "interval": stored["interval"]}
-    if stored != requested and any(
-        trial.number != current_trial_number and _has_step_scores(trial)
-        for trial in study.get_trials(deepcopy=False)
-    ):
+    for trial in study.get_trials(deepcopy=False):
+        if trial.number == current_trial_number:
+            continue
+        own = _trial_schedule(trial)
+        schedule = own if own is not None else stored
+        if schedule == requested:
+            continue
+        unfinished = own is not None and not trial.state.is_finished()
+        if not (unfinished or _has_step_scores(trial)):
+            continue
+        holds = (
+            "is running" if unfinished and not _has_step_scores(trial)
+            else "holds intermediate validation scores"
+        )
         raise ValueError(
-            f"Study {study.study_name!r} holds intermediate validation scores "
-            f"taken at warmup={stored['warmup']}, "
-            f"interval={stored['interval']}, but this run requests "
-            f"warmup={requested['warmup']}, "
+            f"Trial {trial.number} of study {study.study_name!r} {holds} at "
+            f"warmup={schedule['warmup']}, interval={schedule['interval']}, "
+            f"but this run requests warmup={requested['warmup']}, "
             f"interval={requested['interval']}. Pruning compares scores by "
             "validation step, so the two would be compared at different "
             "epochs. Start a new study or restore the schedule."

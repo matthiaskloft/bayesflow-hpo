@@ -19,7 +19,10 @@
   intermediate scores. Pruning compares trials by check number, not by epoch,
   so mixing schedules compared models at different points in training. A
   study without the attribute is read as the previous fixed 10/10. Warm start
-  carries the source's schedule into the target.
+  carries the source's schedule into the target. Each trial also records its
+  own schedule before training, so a concurrent worker started with a
+  different schedule is refused while another trial is still in its warmup,
+  before that trial has produced a score.
 - **A warning is logged when `intermediate_validation_warmup >= epochs`**,
   which schedules no intermediate validation for that trial, so it cannot be
   pruned or, under `open_ended`, stopped early.

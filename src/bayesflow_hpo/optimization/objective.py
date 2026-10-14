@@ -54,6 +54,7 @@ from bayesflow_hpo.objectives import (
     get_param_count,
     mean_objective_score,
     normalize_param_count,
+    stamp_trial_intermediate_validation_schedule,
     worst_objective_value,
     worst_raw_value,
 )
@@ -1661,6 +1662,11 @@ class GenericObjective:
                 config.intermediate_validation_warmup,
                 config.intermediate_validation_interval,
                 current_trial_number=trial.number,
+            )
+            stamp_trial_intermediate_validation_schedule(
+                trial,
+                config.intermediate_validation_warmup,
+                config.intermediate_validation_interval,
             )
 
         # --- Step 1: Sample hparams ---

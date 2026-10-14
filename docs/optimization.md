@@ -132,9 +132,13 @@ is reliable enough to prune on is for the caller to measure.
   check number (`val_{metric}_step_{N}`, or `trial.report(step=N)` for a
   single-objective study), and pruning compares trials at equal N. A study
   therefore records its schedule (`bayesflow_hpo_intermediate_validation_schedule`),
-  and resuming or warm-starting with a different one raises once the study
-  holds intermediate scores. A study without the attribute is read as having
-  run the default 10/10. A run that does no intermediate validation
+  and each trial records its own before training
+  (`intermediate_validation_warmup` / `intermediate_validation_interval`
+  trial attributes). Resuming, warm-starting, or starting a concurrent worker
+  with a different schedule raises once another trial holds intermediate
+  scores at the old one or is still running under it. Trials without their
+  own record are read at the study's schedule, and a study without the
+  attribute as the default 10/10. A run that does no intermediate validation
   (`pruning_strategy="none"` under `fixed_budget`) neither checks nor records
   it.
 
