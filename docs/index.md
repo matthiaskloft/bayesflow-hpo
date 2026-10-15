@@ -88,4 +88,5 @@ pip install bayesflow-hpo[dev]        # Development tools
 - Python >= 3.11
 - BayesFlow >= 2.0.0
 - Optuna >= 5.0.0, < 6.0.0
-- Keras >= 3.9, < 3.13 (PyTorch backend recommended)
+- Keras >= 3.9, < 3.13 plus a Keras backend installed separately (PyTorch recommended:
+  `pip install torch`, then `export KERAS_BACKEND=torch`); none is pulled in as a dependency

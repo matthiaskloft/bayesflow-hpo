@@ -139,7 +139,7 @@ Consistency model (`ConsistencyModel`).
 | `cm_s0` | int | — | no | `10` |
 | `cm_s1` | int | — | no | `50` |
 
-**Note:** `ConsistencyModelSpace` accepts `epochs` and `num_batches` in its constructor to compute `total_steps` for the consistency model schedule.
+**Note:** `ConsistencyModelSpace` has no `epochs`/`num_batches` constructor arguments. `build()` computes `total_steps` from the params dict: `cm_total_steps`, then `total_steps`; otherwise `epochs` (falling back to `n_epochs`, then 200) times `num_batches` (default 50), clamped to at least 1.
 
 ### StableConsistencyModelSpace
 

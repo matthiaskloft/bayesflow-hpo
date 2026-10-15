@@ -296,11 +296,11 @@ Two layers are supported:
 study = hpo.optimize(
     ...,
     metric_constraints_hard=[
-        ("calibration_error", 0.1, "below"),  # reject if cal_error > 0.1
-        ("coverage_90", 0.8, "above"),        # reject if coverage < 0.8
+        ("calibration_error", 0.1, "above"),  # reject if cal_error > 0.1
+        ("coverage_90", 0.8, "below"),        # reject if coverage < 0.8
     ],
     metric_constraints_soft=[
-        ("nrmse", 0.15, "below"),  # guide sampling away from high NRMSE
+        ("nrmse", 0.15, "above"),  # guide sampling away from high NRMSE
     ],
 )
 ```
@@ -367,7 +367,7 @@ Both `sampler` and `pruner` accept string presets or Optuna instances.
 
 | Preset | Sampler | Notes |
 |--------|---------|-------|
-| `"tpe"` | `TPESampler(multivariate=True, n_startup_trials=25)` | Default |
+| `"tpe"` | `TPESampler(multivariate=True, group=True, n_startup_trials=25)` | Default |
 | `"gp"` | `GPSampler(n_startup_trials=10)` | Gaussian process BO |
 | `"botorch"` | `BoTorchSampler(n_startup_trials=10)` | Requires `optuna-integration[botorch]` |
 | `"nsga2"` | `NSGAIISampler(population_size=50)` | Evolutionary multi-objective |

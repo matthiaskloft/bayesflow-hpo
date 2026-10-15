@@ -75,7 +75,7 @@ Convert all trials to a pandas DataFrame for analysis:
 from bayesflow_hpo import trials_to_dataframe
 
 df = trials_to_dataframe(study, include_pruned=False, include_ranks=True)
-# Columns: trial_number, state, value_0, value_1, param_*, user_attr_*, rank_*
+# Columns: trial_number, <param names>, <objective names>, <user attrs>, rank_*, rank
 ```
 
 ## Study Summary
@@ -155,10 +155,10 @@ metadata = get_workflow_metadata(
 
 path = save_workflow_with_metadata(
     approximator=workflow.approximator,
-    path="best_model/",
+    path="best_model",
     metadata=metadata,
 )
-# Creates: best_model/model.keras + best_model/metadata.json
+# Creates: best_model.keras + best_model.json (suffixes replace any on `path`)
 ```
 
 ### Load
@@ -166,7 +166,7 @@ path = save_workflow_with_metadata(
 ```python
 from bayesflow_hpo import load_workflow_with_metadata
 
-approximator, metadata = load_workflow_with_metadata("best_model/")
+approximator, metadata = load_workflow_with_metadata("best_model")
 ```
 
 ### Metadata Contents
@@ -174,10 +174,10 @@ approximator, metadata = load_workflow_with_metadata("best_model/")
 The metadata JSON includes:
 - `config` — All hyperparameters
 - `model_type` — Network type name
-- `saved_at` — ISO timestamp
-- `bayesflow_hpo_version` — Package version
-- `validation_results` — Full validation metrics (if provided)
-- Any `extra` fields you pass
+- `created_at` — ISO timestamp
+- `versions` — `bayesflow` and `numpy` versions
+- `validation` — The `validation_results` you pass (if provided)
+- Any `extra` fields you pass, merged at the top level
 
 ## Parameter Count Utilities
 
@@ -185,6 +185,6 @@ The metadata JSON includes:
 from bayesflow_hpo import get_param_count, normalize_param_count, denormalize_param_count
 
 count = get_param_count(workflow.approximator)        # e.g. 150_000
-score = normalize_param_count(count)                  # log10(150000) / 6.0 ≈ 0.86
+score = normalize_param_count(count)                  # log10(150000/1e3) / log10(1e6/1e3) ≈ 0.73
 count_back = denormalize_param_count(score)           # ≈ 150_000
 ```
