@@ -159,7 +159,7 @@ When `constant` is set, the dimension is not tuned by Optuna — it uses the con
 | `CouplingFlowSpace()` | `bf.networks.CouplingFlow` |
 | `FlowMatchingSpace()` | `bf.networks.FlowMatching` |
 | `DiffusionModelSpace()` | `bf.networks.DiffusionModel` |
-| `ConsistencyModelSpace(epochs, num_batches)` | `bf.networks.ConsistencyModel` |
+| `ConsistencyModelSpace()` | `bf.networks.ConsistencyModel` |
 | `StableConsistencyModelSpace()` | `bf.networks.StableConsistencyModel` |
 
 `FlowMatchingSpace` untuned constants are synchronized to BayesFlow
@@ -222,7 +222,8 @@ Builds an **uncompiled** `ContinuousApproximator` from sampled hyperparameters. 
 default_train_fn(approximator, simulator, hparams, callbacks) -> None
 default_validate_fn(approximator, validation_data, n_posterior_samples,
                     objective_metrics=None, joint_metrics=None,
-                    max_samples_per_call=20_000) -> dict[str, float]
+                    max_samples_per_call=20_000,
+                    aggregate="mean") -> dict[str, float]
 ```
 
 Public default implementations used by `optimize()` when no custom hooks are provided.

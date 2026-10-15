@@ -194,9 +194,9 @@ These wrap `bf.diagnostics.*` functions, reshaping `(n_sims, n_samples)` to the 
 |------|-------------|-------------|
 | `sbc_ks` | SBC KS statistic (minimize → 0 = uniform ranks) | `sbc_ks` |
 | `sbc_chi2` | SBC chi-squared statistic (minimize → 0 = uniform ranks) | `sbc_chi2` |
-| `coverage` | Two-sided SBC rank-based calibration (diagnostic) | `coverage_50`, ..., `coverage_99`, `mean_cal_error` |
-| `coverage_left` | Left-sided coverage, efficiency for RCTs (diagnostic) | `left_coverage_50`, ..., `left_mean_cal_error` |
-| `coverage_right` | Right-sided coverage, futility for RCTs (diagnostic) | `right_coverage_50`, ..., `right_mean_cal_error` |
+| `coverage` | Two-sided SBC rank-based calibration (diagnostic) | `coverage_90`, ..., `coverage_99`, `mean_cal_error` |
+| `coverage_left` | Left-sided coverage, efficiency for RCTs (diagnostic) | `left_coverage_90`, ..., `left_mean_cal_error` |
+| `coverage_right` | Right-sided coverage, futility for RCTs (diagnostic) | `right_coverage_90`, ..., `right_mean_cal_error` |
 | `bias` | Mean signed error of posterior mean (diagnostic) | `bias` |
 | `mae` | Mean absolute error of posterior mean | `mae` |
 | `correlation` | Pearson association of posterior means and truth; diagnostic only, not recovery error | `correlation` |
@@ -530,7 +530,7 @@ result.objective_scalar("calibration_error")  # default key
 result.objective_scalar("mean_cal_error")     # or any summary key
 ```
 
-Falls back to `mean_cal_error` then `1.0` if the key is missing.
+Falls back to `1.0` if the key is missing.
 
 ### Multi-Parameter Support
 
@@ -733,7 +733,7 @@ If the posterior is well-calibrated, SBC ranks should be uniform over `[0, n_pos
 from bayesflow_hpo.validation.sbc_tests import compute_sbc_uniformity_tests
 
 results = compute_sbc_uniformity_tests(ranks, n_posterior_samples, n_bins=20)
-# {"ks_statistic": ..., "ks_pvalue": ..., "chi2_statistic": ..., "chi2_pvalue": ...}
+# {"sbc_ks_stat": ..., "sbc_ks_pvalue": ..., "sbc_chi2_stat": ..., "sbc_chi2_pvalue": ...}
 ```
 
 - **KS test** — Kolmogorov-Smirnov test against `Uniform(0, n_posterior_samples)`

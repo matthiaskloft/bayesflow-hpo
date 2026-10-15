@@ -200,13 +200,13 @@ on individual dimensions or creating the space with overridden fields.
 
 | Setting | Default | Location |
 |---------|---------|----------|
-| Sampler | `TPESampler(seed=42, multivariate=True, n_startup_trials=25)` | `create_study()` |
-| Budget-aware constraints | Enabled | `_budget_constraints_func` |
+| Sampler | `TPESampler(seed=42, multivariate=True, group=True, n_startup_trials=25)` | `create_study()` |
+| Budget-aware constraints | Enabled | `_make_constraints_func` |
 | Pruner | `MedianPruner(n_startup=5, n_warmup=1, interval=1)` | `create_study()` |
 | Pruning strategy | `"dominance"` (per-objective normalized median) | `PeriodicValidationCallback` |
 | Pruning schedule | Every 10 epochs after 10-epoch warmup | `PeriodicValidationCallback` |
 | Intermediate posterior samples | **250** | `ObjectiveConfig` |
-| Batch loop size | `max(1, n_trials // 4)` | `optimize_until()` |
+| Batch loop size | `max(1, n_trained // 4)` | `optimize_until()` |
 | GC after trial | `True` | `optimize_until()` |
 | Warm-start ranking | Arithmetic mean of objective values (excl. param_score) | `_mean_ranking_key` |
 | `load_if_exists` | `True` | `create_study()` |

@@ -85,6 +85,7 @@ src/bayesflow_hpo/
 ├── objectives.py       # Param/cost normalization, objective value extraction
 ├── registration.py     # Custom network registration helpers
 ├── utils.py            # loguniform_float/int sampling helpers
+├── _display.py         # DisplayDataFrame (hides row index in display)
 ├── search_spaces/      # Dataclass-based search space definitions
 │   ├── base.py         # BaseSearchSpace (auto-derives dimensions from fields)
 │   ├── composite.py    # CompositeSearchSpace, NetworkSelectionSpace, SummarySelectionSpace
@@ -100,7 +101,7 @@ src/bayesflow_hpo/
 ├── types.py            # BuildApproximatorFn, TrainFn, ValidateFn type aliases
 ├── builders/           # Construct BayesFlow objects from trial params
 │   ├── workflow.py     # build_continuous_approximator(), _compile_for_compat()
-│   ├── adapter.py      # Adapter-related build logic
+│   ├── adapter.py      # Deprecated since v0.2.0 (adapter helpers removed)
 │   └── registry.py     # Builder registries for custom networks
 ├── optimization/       # Optuna study management + trial logic
 │   ├── study.py        # create_study(), sampler/pruner presets, optimize_until(), warm_start
@@ -114,18 +115,20 @@ src/bayesflow_hpo/
 │   └── validation_callback.py  # PeriodicValidationCallback (pluggable pruning)
 ├── validation/         # Fixed-dataset validation pipeline
 │   ├── data.py         # ValidationDataset generation + save/load
-│   ├── registry.py     # 16 built-in metrics (calibration, NRMSE, SBC, etc.)
+│   ├── registry.py     # 19 built-in metrics (calibration, NRMSE, SBC, TARP, C2ST, etc.)
 │   ├── pipeline.py     # run_validation_pipeline()
 │   ├── metrics.py      # compute_condition_metrics(), aggregate_condition_rows()
 │   ├── inference.py    # make_bayesflow_infer_fn()
 │   ├── c2st.py         # C2ST metrics (L-C2ST, global C2ST, ValidateFn factory)
+│   ├── tarp.py         # TARP coverage + make_tarp_joint_metric()
 │   ├── result.py       # ValidationResult dataclass
 │   ├── dry_run.py      # validate_once()
 │   └── sbc_tests.py    # SBC uniformity tests (KS, chi-squared)
 └── results/            # Post-optimization analysis + export
     ├── extraction.py   # trials_to_dataframe(), get_pareto_trials(), select_best_trial(), summarize_study()
     ├── export.py       # save/load_workflow_with_metadata(), get_workflow_metadata()
-    └── visualization.py # Pareto front, param importance, metric panels, scatter
+    ├── visualization.py # Pareto front, param importance, metric panels, scatter
+    └── _colors.py      # BayesFlow-aligned color palette
 ```
 
 ## Key Patterns
@@ -134,7 +137,7 @@ src/bayesflow_hpo/
 - **Registry pattern**: Search spaces, builders, and metrics all use name→factory registries with alias support
 - **CompositeSearchSpace**: Combines inference + summary + training sub-spaces; NetworkSelectionSpace / SummarySelectionSpace let Optuna choose network type
 - **Trial budget**: Trials exceeding `max_param_count` or `max_memory_mb` are rejected pre-training and NOT counted toward `n_trials`
-- **Public API**: `__init__.py` re-exports ~80 high-level symbols; internal helpers (e.g. `BaseSearchSpace`, `Dimension`, `MetricFn`, `sample_hyperparameters`) are accessible via submodule imports but intentionally excluded from the top-level API for stability
+- **Public API**: `__init__.py` re-exports ~110 high-level symbols; internal helpers (e.g. `BaseSearchSpace`, `Dimension`, `MetricFn`, `sample_hyperparameters`) are accessible via submodule imports but intentionally excluded from the top-level API for stability
 
 ## Key Features (non-exhaustive)
 

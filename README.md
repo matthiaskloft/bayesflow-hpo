@@ -18,7 +18,14 @@ pip install bayesflow-hpo[dashboard] # + Optuna dashboard
 pip install bayesflow-hpo[sklearn]   # + C2ST metrics
 ```
 
-Requires Python >= 3.11 and a Keras 3 backend (PyTorch recommended: `export KERAS_BACKEND=torch`).
+Requires Python >= 3.11 and a Keras 3 backend. No backend is installed as a
+dependency, so install one separately (PyTorch recommended) and select it before
+importing:
+
+```bash
+pip install torch                    # or the CPU wheel: --index-url https://download.pytorch.org/whl/cpu
+export KERAS_BACKEND=torch
+```
 
 ## How it works
 

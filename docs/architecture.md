@@ -56,6 +56,7 @@ src/bayesflow_hpo/
 │   ├── registry.py          # Metric registry (MetricFn, register/resolve/list)
 │   ├── result.py            # ValidationResult dataclass with table methods
 │   ├── c2st.py              # C2ST metrics (L-C2ST, global C2ST, ValidateFn factory)
+│   ├── tarp.py              # TARP coverage, make_tarp_joint_metric
 │   └── sbc_tests.py         # SBC uniformity tests (KS, chi-squared)
 │
 └── results/                 # Post-optimization analysis
@@ -111,7 +112,7 @@ A single HPO run follows this pipeline:
                                │
                     ┌──────────▼───────────────────┐
                     │   6. Train (configurable)     │
-                    │   (default: fit_online with   │
+                    │   (default: approximator.fit  │
                     │    early stopping & pruning,  │
                     │    or user-provided train_fn) │
                     └──────────┬───────────────────┘
@@ -159,7 +160,7 @@ Each dimension can be fixed at a specific value via `constant=<value>`. When set
 The validation pipeline uses a metric registry to resolve metric names to callable functions. Users can:
 - Choose which metrics to compute per trial via `metrics=["calibration_error", "coverage", ...]`
 - Register custom metrics via `register_metric(name, fn)`
-- Select which metric key drives the HPO objective via `objective_metric="calibration_error"`
+- Select which metric keys drive the HPO objectives via `objective_metrics=["calibration_error", ...]`
 
 ### Thin BayesFlow Wrappers
 
