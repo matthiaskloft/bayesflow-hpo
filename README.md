@@ -23,7 +23,9 @@ dependency, so install one separately (PyTorch recommended) and select it before
 importing:
 
 ```bash
-pip install torch                    # or the CPU wheel: --index-url https://download.pytorch.org/whl/cpu
+pip install torch
+# or the CPU wheel:
+pip install torch --index-url https://download.pytorch.org/whl/cpu
 export KERAS_BACKEND=torch
 ```
 
