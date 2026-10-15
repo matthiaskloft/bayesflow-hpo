@@ -94,11 +94,13 @@ search_space = hpo.CompositeSearchSpace(inference_space=inference_space)
 
 ## Contributing
 
-bayesflow-hpo is developed by a small group of researchers. Opening issues and
-pull requests is restricted to approved collaborators. If you use the package
-in your research and would like to report a problem, suggest a feature or
-collaborate, please contact the maintainer, and cite the package via
-[`CITATION.cff`](CITATION.cff) (GitHub's "Cite this repository").
+bayesflow-hpo is developed by a small group of researchers. Bug reports,
+questions and feature requests are welcome from everyone as
+[GitHub issues](https://github.com/matthiaskloft/bayesflow-hpo/issues).
+Pull requests are reserved for approved collaborators; if you would like to
+contribute code, please open an issue first to discuss it. If you use the
+package in your research, please cite it via [`CITATION.cff`](CITATION.cff)
+(GitHub's "Cite this repository").
 
 ### Development setup (collaborators)
 
