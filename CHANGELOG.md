@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.5.3 -- 2026-10-15
+
+First release published to PyPI (`pip install bayesflow-hpo`). No library
+code changes since 0.5.2.
+
+### Added
+
+- **Tag-triggered release workflow** (`.github/workflows/release.yml`, #135).
+  Pushing a `vX.Y.Z` tag checks that the version, `__version__` fallback,
+  `CITATION.cff` and this changelog agree, reruns CI, builds and smoke-tests
+  the wheel, publishes to PyPI via Trusted Publishing, and creates the GitHub
+  release. A manual run from `main` does a rehearsal on TestPyPI. See
+  `docs/releasing.md`.
+- **`CITATION.cff`**, so GitHub offers "Cite this repository".
+
 ## 0.5.2 -- 2026-10-14
 
 ### Added
