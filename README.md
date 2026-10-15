@@ -94,6 +94,14 @@ search_space = hpo.CompositeSearchSpace(inference_space=inference_space)
 
 ## Contributing
 
+bayesflow-hpo is developed by a small group of researchers. Opening issues and
+pull requests is restricted to approved collaborators. If you use the package
+in your research and would like to report a problem, suggest a feature or
+collaborate, please contact the maintainer, and cite the package via
+[`CITATION.cff`](CITATION.cff) (GitHub's "Cite this repository").
+
+### Development setup (collaborators)
+
 Each checkout needs its own virtual environment — including each `git worktree`,
 since an editable install resolves to the source tree it was installed from.
 
@@ -109,6 +117,10 @@ export KERAS_BACKEND=torch
 $PY -m pytest tests/ -v
 $PY -m ruff check src/ tests/
 ```
+
+New code must be backed by a research article or package documentation, with
+the reference recorded in [`docs/references.md`](docs/references.md); see
+[`docs/contributing-references.md`](docs/contributing-references.md).
 
 ## License
 
