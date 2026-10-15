@@ -27,6 +27,7 @@ def repo(tmp_path: Path) -> Path:
         tmp_path / "src" / "bayesflow_hpo" / "__init__.py",
     )
     shutil.copy(ROOT / "CHANGELOG.md", tmp_path / "CHANGELOG.md")
+    shutil.copy(ROOT / "CITATION.cff", tmp_path / "CITATION.cff")
     return tmp_path
 
 
@@ -78,4 +79,19 @@ def test_stale_fallback_version_rejected(repo: Path) -> None:
         encoding="utf-8",
     )
     with pytest.raises(ValueError, match="__version__"):
+        release_notes(repo, f"refs/tags/v{version}", "push")
+
+
+@pytest.mark.parametrize(
+    ("field", "stale"), [("version", "0.0.1"), ("date-released", "2000-01-01")]
+)
+def test_stale_citation_rejected(repo: Path, field: str, stale: str) -> None:
+    version = _version(repo)
+    cff = repo / "CITATION.cff"
+    text = "\n".join(
+        f"{field}: {stale}" if line.startswith(f"{field}:") else line
+        for line in cff.read_text(encoding="utf-8").splitlines()
+    )
+    cff.write_text(text + "\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="CITATION"):
         release_notes(repo, f"refs/tags/v{version}", "push")

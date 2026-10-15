@@ -81,6 +81,13 @@ def release_notes(root: Path, ref: str, event: str) -> str:
         raise ValueError(
             f"CHANGELOG.md needs a non-empty '## {version} -- YYYY-MM-DD' entry"
         )
+    citation = (root / "CITATION.cff").read_text(encoding="utf-8")
+    if not re.search(rf"(?m)^version: {re.escape(version)}$", citation):
+        raise ValueError("CITATION.cff version must match package version")
+    released = re.search(rf"(?m)^## {re.escape(version)} -- (\S+)$", changelog)
+    assert released is not None
+    if not re.search(rf"(?m)^date-released: {released[1]}$", citation):
+        raise ValueError("CITATION.cff date-released must match the changelog date")
     return match[1].strip() + "\n"
 
 

@@ -4,7 +4,8 @@ Release preparation stays in a reviewed PR. The `Release` workflow in
 `.github/workflows/release.yml` runs automatically on a pushed `vX.Y.Z` tag. It
 checks (`scripts/release_notes.py`) that the tag matches the `pyproject.toml`
 version, that the `__version__` fallback in `src/bayesflow_hpo/__init__.py`
-agrees, and that `CHANGELOG.md` has a dated `## X.Y.Z -- YYYY-MM-DD` entry; it
+agrees, that `CITATION.cff` carries the same version and the changelog's
+release date, and that `CHANGELOG.md` has a dated `## X.Y.Z -- YYYY-MM-DD` entry; it
 refuses commits that are not on `main`. Only stable three-part versions are
 supported.
 
@@ -43,8 +44,9 @@ No API token belongs in repository secrets: only the upload jobs get
 ## Each release
 
 1. In a PR, bump `version` in `pyproject.toml` and the `__version__` fallback
-   in `src/bayesflow_hpo/__init__.py`, and add a dated
-   `## X.Y.Z -- YYYY-MM-DD` section to `CHANGELOG.md`.
+   in `src/bayesflow_hpo/__init__.py`, add a dated
+   `## X.Y.Z -- YYYY-MM-DD` section to `CHANGELOG.md`, and set `version` and
+   `date-released` in `CITATION.cff` to the same version and date.
 2. Merge after review and wait for green `main` CI.
 3. Tag the merged commit and push the tag:
    `git tag vX.Y.Z <merged-commit> && git push origin vX.Y.Z`. A tag pushed
