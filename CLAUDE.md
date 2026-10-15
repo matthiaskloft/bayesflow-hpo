@@ -86,6 +86,7 @@ src/bayesflow_hpo/
 ├── registration.py     # Custom network registration helpers
 ├── utils.py            # loguniform_float/int sampling helpers
 ├── _display.py         # DisplayDataFrame (hides row index in display)
+├── _backend.py         # Early Keras-backend check with install hint
 ├── search_spaces/      # Dataclass-based search space definitions
 │   ├── base.py         # BaseSearchSpace (auto-derives dimensions from fields)
 │   ├── composite.py    # CompositeSearchSpace, NetworkSelectionSpace, SummarySelectionSpace

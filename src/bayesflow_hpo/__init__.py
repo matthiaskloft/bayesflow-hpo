@@ -34,6 +34,11 @@ try:
 except PackageNotFoundError:
     __version__ = "0.5.3"
 
+# ruff: noqa: E402 -- the backend check must run before anything imports Keras
+from bayesflow_hpo._backend import check_backend as _check_backend
+
+_check_backend()
+
 from bayesflow_hpo.api import infer_keys_from_adapter, optimize
 from bayesflow_hpo.builders import build_continuous_approximator
 from bayesflow_hpo.objectives import (
