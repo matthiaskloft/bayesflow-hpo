@@ -149,6 +149,12 @@ src/bayesflow_hpo/
 
 See [`docs/TODO.md`](docs/TODO.md) for open and completed project tasks.
 
+## Releasing
+
+See [`docs/releasing.md`](docs/releasing.md): bump `pyproject.toml`, the
+`__version__` fallback, `CITATION.cff` version/date and a dated `CHANGELOG.md` entry in a PR, then push a
+`vX.Y.Z` tag on `main`; `.github/workflows/release.yml` publishes to PyPI.
+
 ## References
 
 See [`docs/references.md`](docs/references.md) for verified APA 7 citations backing the implementation.
