@@ -18,15 +18,6 @@ Suggested execution order: I, then research follow-ups A2/A3.
 
 ---
 
-### Decide whether `bayesflow` needs a Keras backend extra
-
-Left over from the PyPI work (see Done). The PyPI package depends on
-`bayesflow` but installs no Keras backend; the README tells users to install
-`torch` and set `KERAS_BACKEND` themselves. Decide whether to keep that or add
-a backend extra (e.g. `bayesflow-hpo[torch]`).
-
----
-
 ### Package M: Spread-Calibration Diagnostic (`nrmse - sqrt(1 - r^2)`)
 
 Tracked in [issue #98](https://github.com/matthiaskloft/bayesflow-hpo/issues/98).
@@ -247,6 +238,14 @@ Remaining work:
 ---
 
 ## Done
+
+### Keras backend stays a separate install (2026-10-15)
+
+Decided against a backend extra (`bayesflow-hpo[torch]`): BayesFlow ships
+none either, and plain PyPI `torch` on Linux is the CUDA build, while the CPU
+wheel needs `--index-url`, which an extra cannot express. Instead,
+`import bayesflow_hpo` now fails early with an install hint when no backend
+(or not the one `KERAS_BACKEND` names) is installed (`_backend.py`).
 
 ### PyPI publishing (2026-10-15, PRs #135-#137)
 

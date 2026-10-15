@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- `import bayesflow_hpo` now raises an `ImportError` with an install hint
+  when no Keras backend is installed, or when `KERAS_BACKEND` names one
+  (jax, torch, tensorflow) that is not installed, instead of failing inside
+  BayesFlow or Keras.
+
 ## 0.5.3 -- 2026-10-15
 
 First release published to PyPI (`pip install bayesflow-hpo`). No library
