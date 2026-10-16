@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Added
+
+- **`metric_direction(name)`**, a public accessor for the direction the
+  objective applies to a metric (#126). Unlike `METRIC_DIRECTIONS.get(name)`
+  it honours `HIGHER_IS_BETTER` mutations and resolves aliases.
+  `metric_direction`, `register_metric_direction`, `METRIC_DIRECTIONS`,
+  `HIGHER_IS_BETTER` and `MetricDirection` are now top-level exports and
+  documented in `docs/api_reference.md`.
+
 ### Changed
 
 - `import bayesflow_hpo` now raises an `ImportError` with an install hint

@@ -16,6 +16,7 @@ from bayesflow_hpo.objectives import (
     extract_multi_objective_values,
     extract_objective_values,
     mean_objective_score,
+    metric_direction,
     normalize_param_count,
     register_metric_direction,
     worst_objective_value,
@@ -391,6 +392,28 @@ class TestMissingMetricDefaults:
         finally:
             METRIC_DIRECTIONS.pop("my_unbounded_score", None)
             HIGHER_IS_BETTER.discard("my_unbounded_score")
+
+    def test_metric_direction_matches_objective_not_raw_dict(self) -> None:
+        """The public accessor answers what the study minimizes (#126)."""
+        import bayesflow_hpo
+
+        assert bayesflow_hpo.metric_direction is metric_direction
+        assert metric_direction("contraction").higher_is_better
+        assert metric_direction("nonexistent_metric_xyz") is None
+        HIGHER_IS_BETTER.discard("contraction")
+        try:
+            # The raw dict still says higher-is-better; the objective does not.
+            assert METRIC_DIRECTIONS["contraction"].higher_is_better
+            assert metric_direction("contraction") is None
+        finally:
+            HIGHER_IS_BETTER.add("contraction")
+
+    def test_metric_direction_resolves_aliases(self) -> None:
+        from bayesflow_hpo.validation.registry import canonical_metric_name
+
+        canonical = canonical_metric_name("cal_error")
+        assert canonical != "cal_error"
+        assert metric_direction("cal_error") == metric_direction(canonical)
 
     def test_missing_worst_case_is_not_converted_twice(self):
         """`worst_objective_value` is already in minimize space."""

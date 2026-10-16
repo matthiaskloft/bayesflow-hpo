@@ -579,6 +579,31 @@ pseudocount. Per-metric mapping, worst-case direction resolution and the
 exception contract below are this package's own behaviour, not a method taken
 from a source.
 
+### Metric Directions
+
+Top-level exports, also importable from `bayesflow_hpo.objectives`:
+
+```python
+metric_direction(name: str) -> MetricDirection | None
+register_metric_direction(name, *, higher_is_better, worst_raw, to_minimize=None) -> None
+METRIC_DIRECTIONS: dict[str, MetricDirection]
+HIGHER_IS_BETTER: set[str]   # legacy; prefer register_metric_direction
+
+@dataclass(frozen=True)
+class MetricDirection:
+    higher_is_better: bool
+    to_minimize: Callable[[float], float]
+    worst_raw: float
+    worst_objective: float   # property, == to_minimize(worst_raw)
+```
+
+`metric_direction(name)` returns the direction the objective actually
+applies, resolving aliases. Use it rather than `METRIC_DIRECTIONS.get(name)`:
+the objective also honours mutations of `HIGHER_IS_BETTER` (a discarded
+built-in has no direction; an added name gets the historical `1 - value`
+conversion), and the raw dict does not see them. `None` means no recorded
+direction -- the metric is treated as lower-is-better and passed through.
+
 ### Errors
 
 All four are top-level exports and are also importable from
