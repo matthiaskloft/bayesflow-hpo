@@ -42,13 +42,18 @@ _check_backend()
 from bayesflow_hpo.api import infer_keys_from_adapter, optimize
 from bayesflow_hpo.builders import build_continuous_approximator
 from bayesflow_hpo.objectives import (
+    HIGHER_IS_BETTER,
+    METRIC_DIRECTIONS,
+    MetricDirection,
     compute_inference_time_per_dataset,
     denormalize_param_count,
     extract_multi_objective_values,
     extract_objective_values,
     get_param_count,
     mean_objective_score,
+    metric_direction,
     normalize_param_count,
+    register_metric_direction,
 )
 from bayesflow_hpo.optimization import (
     DEFAULT_STORAGE,
@@ -285,4 +290,10 @@ __all__ = [
     "is_joint_metric",
     "output_keys_for",
     "producer_for_key",
+    # Metric direction registry
+    "HIGHER_IS_BETTER",
+    "METRIC_DIRECTIONS",
+    "MetricDirection",
+    "metric_direction",
+    "register_metric_direction",
 ]

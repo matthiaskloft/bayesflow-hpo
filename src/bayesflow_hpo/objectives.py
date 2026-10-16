@@ -593,6 +593,33 @@ def _direction_for(key: CanonicalMetricName) -> MetricDirection | None:
     return None
 
 
+def metric_direction(name: str) -> MetricDirection | None:
+    """Return the direction the objective actually applies to a metric.
+
+    This is the public way to ask which way a metric points. Reading
+    :data:`METRIC_DIRECTIONS` directly is not equivalent: the objective also
+    honours mutations of :data:`HIGHER_IS_BETTER` (a discarded built-in is
+    treated as having no direction; an added name gets the historical
+    ``1 - value`` conversion), and a downstream that reduces over a grid by
+    the raw dict can disagree with what the study minimizes.
+
+    Parameters
+    ----------
+    name
+        Metric name or registered alias; resolved to its canonical spelling.
+
+    Returns
+    -------
+    MetricDirection or None
+        ``None`` means no recorded direction: the metric is treated as
+        lower-is-better and passed through unchanged.
+    """
+    # Local import: the registry imports this module.
+    from bayesflow_hpo.validation.registry import canonical_metric_name
+
+    return _direction_for(canonical_metric_name(name))
+
+
 def _metric_to_minimize(
     key: CanonicalMetricName, value: RawScore
 ) -> MinimizeScore:
