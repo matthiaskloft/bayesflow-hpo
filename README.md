@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/matthiaskloft/bayesflow-hpo/actions/workflows/ci.yml/badge.svg)](https://github.com/matthiaskloft/bayesflow-hpo/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/bayesflow-hpo.svg)](https://pypi.org/project/bayesflow-hpo/)
+[![GitHub release](https://img.shields.io/github/v/release/matthiaskloft/bayesflow-hpo.svg)](https://github.com/matthiaskloft/bayesflow-hpo/releases/latest)
 [![codecov](https://codecov.io/gh/matthiaskloft/bayesflow-hpo/branch/main/graph/badge.svg)](https://codecov.io/gh/matthiaskloft/bayesflow-hpo)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
