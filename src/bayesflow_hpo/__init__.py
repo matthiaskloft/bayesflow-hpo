@@ -32,7 +32,7 @@ from importlib.metadata import PackageNotFoundError, version
 try:
     __version__ = version("bayesflow-hpo")
 except PackageNotFoundError:
-    __version__ = "0.5.3"
+    __version__ = "0.6.0"
 
 # ruff: noqa: E402 -- the backend check must run before anything imports Keras
 from bayesflow_hpo._backend import check_backend as _check_backend
