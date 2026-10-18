@@ -3,8 +3,8 @@ message: "If this software supports your research, please cite it using the meta
 title: "bayesflow-hpo"
 abstract: "Generic hyperparameter optimization for BayesFlow neural posterior estimation."
 type: software
-version: 0.6.0
-date-released: 2026-10-17
+version: 0.6.1
+date-released: 2026-10-18
 authors:
   - family-names: Kloft
     given-names: Matthias
