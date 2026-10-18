@@ -595,8 +595,9 @@ def optimize(
         Posterior draws for the pre-flight :func:`check_pipeline` dry run
         (default 4). Kept small because the dry run only checks interfaces,
         but a metric that needs more draws than this returns no key and
-        fails the pre-flight; raise it to that metric's minimum. Must be an
-        int >= 1.
+        fails the pre-flight; raise it to that metric's minimum. Capped at
+        ``n_posterior_samples``, so the pre-flight never validates with more
+        draws than the trials do. Must be an int >= 1.
 
     Returns
     -------
@@ -714,7 +715,9 @@ def optimize(
         validate_fn=validate_fn,
         objective_metrics=objective_metrics,
         validation_conditions=validation_conditions,
-        n_posterior_samples=pipeline_check_posterior_samples,
+        # Never more draws than the trials validate with: a metric with a
+        # minimum draw count must fail here, not on every trained trial.
+        n_posterior_samples=min(pipeline_check_posterior_samples, n_posterior_samples),
         aggregate=aggregate,
     )
 

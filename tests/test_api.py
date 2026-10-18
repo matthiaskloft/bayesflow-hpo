@@ -370,10 +370,15 @@ def test_optimize_calls_check_pipeline():
 
 @pytest.mark.parametrize(
     ("kwargs", "expected"),
-    [({}, 4), ({"pipeline_check_posterior_samples": 8}, 8)],
+    [
+        ({}, 4),
+        ({"pipeline_check_posterior_samples": 8}, 8),
+        # Capped at the trials' draw count.
+        ({"n_posterior_samples": 2}, 2),
+    ],
 )
 def test_optimize_passes_pipeline_check_posterior_samples(kwargs, expected):
-    """The pre-flight's draw count defaults to 4 and is configurable."""
+    """The pre-flight's draw count defaults to 4, is configurable, and is capped."""
     with (
         patch("bayesflow_hpo.api.GenericObjective") as mock_obj_cls,
         patch("bayesflow_hpo.api.create_study"),
