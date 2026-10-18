@@ -208,7 +208,7 @@ def check_pipeline(
     validate_fn: ValidateFn | None = None,
     objective_metrics: list[str] | None = None,
     sims_per_condition: int = 5,
-    n_posterior_samples: int = 2,
+    n_posterior_samples: int = 4,
     validation_conditions: dict[str, list[Any]] | None = None,
     epochs: int = 1,
     num_batches: int = 1,
@@ -253,7 +253,8 @@ def check_pipeline(
     sims_per_condition
         Simulations per condition for tiny validation dataset.
     n_posterior_samples
-        Posterior draws for validation dry run.
+        Posterior draws for validation dry run (default 4). A metric that
+        needs more draws than this returns no key and fails the check.
     validation_conditions
         Optional condition grid for validation data generation.
     epochs
@@ -492,7 +493,7 @@ def check_pipeline(
         # metric stays refused: it is unbounded below, not above.
         #
         # It rejected it exactly where the pre-flight is meant to help. This
-        # runs at ``n_posterior_samples=2`` on a barely-trained model, where
+        # runs with few posterior draws on a barely-trained model, where
         # the SBC ranks are maximally non-uniform, ``gamma_discrepancy``
         # returns 0.0 and ``log(0)`` is -inf: not a broken hook, but the
         # correct value of a correct metric on a deliberately degenerate

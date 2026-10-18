@@ -195,6 +195,7 @@ def optimize(
     aggregate: Aggregate = "mean",
     intermediate_validation_warmup: int = 10,
     intermediate_validation_interval: int = 10,
+    pipeline_check_posterior_samples: int = 4,
 ) -> optuna.Study:
     """Run HPO with a high-level convenience API.
 
@@ -590,6 +591,12 @@ def optimize(
     intermediate_validation_interval
         Run an intermediate validation every *n* epochs after the warmup
         (default 10). Must be an int >= 1.
+    pipeline_check_posterior_samples
+        Posterior draws for the pre-flight :func:`check_pipeline` dry run
+        (default 4). Kept small because the dry run only checks interfaces,
+        but a metric that needs more draws than this returns no key and
+        fails the pre-flight; raise it to that metric's minimum. Must be an
+        int >= 1.
 
     Returns
     -------
@@ -655,6 +662,15 @@ def optimize(
     _check_intermediate_validation_schedule(
         intermediate_validation_warmup, intermediate_validation_interval
     )
+    if (
+        isinstance(pipeline_check_posterior_samples, bool)
+        or not isinstance(pipeline_check_posterior_samples, int)
+        or pipeline_check_posterior_samples < 1
+    ):
+        raise ValueError(
+            "pipeline_check_posterior_samples must be an int >= 1, got "
+            f"{pipeline_check_posterior_samples!r}."
+        )
     # Startup counts are validated HERE, not only where they are consumed.
     # create_study() checks them too, but by then _create_and_run_study() has
     # already called optuna.delete_study() for a non-resumed run: a malformed
@@ -698,6 +714,7 @@ def optimize(
         validate_fn=validate_fn,
         objective_metrics=objective_metrics,
         validation_conditions=validation_conditions,
+        n_posterior_samples=pipeline_check_posterior_samples,
         aggregate=aggregate,
     )
 

@@ -62,6 +62,7 @@ objects (e.g. `ObjectiveConfig`, `create_study`) directly.
 | `aggregate` | `'mean'` | Scalar `"mean"` (default), `"worst"`, or `"geometric"`, or a metric-output-to-reduction mapping. Scalars reduce conditions per parameter, then average parameters. Explicit mapping entries reduce the full parameter-by-condition grid; omitted metrics retain means. Geometric requires positive values. See `run_validation_pipeline`. |
 | `intermediate_validation_warmup` | `10` | Number of epochs skipped before the first intermediate validation (default 10). Epochs are counted from 0, as Keras passes them to `on_epoch_end`, so the first check runs after epoch index `intermediate_validation_warmup`. Must be an int >= 0. Intermediate validation only runs when `pruning_strategy` is not `"none"` or `training_mode="open_ended"`; it is what pruning and open-ended early stopping act on. |
 | `intermediate_validation_interval` | `10` | Run an intermediate validation every *n* epochs after the warmup (default 10). Must be an int >= 1. |
+| `pipeline_check_posterior_samples` | `4` | Posterior draws for the pre-flight `check_pipeline` dry run (default 4). Kept small because the dry run only checks interfaces, but a metric that needs more draws than this returns no key and fails the pre-flight; raise it to that metric's minimum. Must be an int >= 1. |
 <!-- END GENERATED: optimize-defaults -->
 
 ---
