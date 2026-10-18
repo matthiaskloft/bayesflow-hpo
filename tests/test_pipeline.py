@@ -649,3 +649,41 @@ class TestPreflightCollisionResolutionIsOrderFree:
             validate_fn=alias_only_validate,
             objective_metrics=["calibration_error"],
         )
+
+
+def _needs_draws(min_draws: int):
+    """A validate hook that, like a split-half metric, omits its key below
+    *min_draws* posterior draws instead of returning a number."""
+
+    def validate(approx: Any, vd: Any, n: int) -> dict[str, float]:
+        return {"calibration_error": 0.1} if n >= min_draws else {}
+
+    return validate
+
+
+def _check_with(validate_fn: Any, **kwargs: Any) -> None:
+    check_pipeline(
+        simulator=_FakeSimulator(),
+        adapter=canonical_adapter(),
+        search_space=_FakeSearchSpace(),
+        build_approximator_fn=lambda hp: _FakeApproximator(),
+        train_fn=lambda approx, sim, hp, cb: None,
+        validate_fn=validate_fn,
+        objective_metrics=["calibration_error"],
+        **kwargs,
+    )
+
+
+def test_check_pipeline_default_draws_satisfy_a_four_draw_metric() -> None:
+    """The default of 4 draws lets a metric needing 4 report its key (#145)."""
+    _check_with(_needs_draws(4))
+
+
+def test_check_pipeline_two_draws_reproduce_the_missing_key_failure() -> None:
+    """At the old default of 2 the same metric omits its key and is refused."""
+    with pytest.raises(PipelineError, match="missing required metric keys"):
+        _check_with(_needs_draws(4), n_posterior_samples=2)
+
+
+def test_check_pipeline_passes_a_metric_needing_more_draws_when_configured() -> None:
+    _check_with(_needs_draws(8), n_posterior_samples=8)
