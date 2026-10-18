@@ -40,7 +40,8 @@ def optimize(
     sampler_n_startup_trials=None, joint_metrics=None,
     include_joint_metrics=False, aggregate='mean',
     intermediate_validation_warmup=10,
-    intermediate_validation_interval=10
+    intermediate_validation_interval=10,
+    pipeline_check_posterior_samples=4
 ) -> optuna.Study
 ```
 <!-- END GENERATED: optimize-signature -->
@@ -98,6 +99,7 @@ def optimize(
 | `aggregate` | Scalar `"mean"` (default), `"worst"`, or `"geometric"`, or a metric-output-to-reduction mapping. Scalars reduce conditions per parameter, then average parameters. Explicit mapping entries reduce the full parameter-by-condition grid; omitted metrics retain means. Geometric requires positive values. See `run_validation_pipeline`. |
 | `intermediate_validation_warmup` | Number of epochs skipped before the first intermediate validation (default 10). Epochs are counted from 0, as Keras passes them to `on_epoch_end`, so the first check runs after epoch index `intermediate_validation_warmup`. Must be an int >= 0. Intermediate validation only runs when `pruning_strategy` is not `"none"` or `training_mode="open_ended"`; it is what pruning and open-ended early stopping act on. |
 | `intermediate_validation_interval` | Run an intermediate validation every *n* epochs after the warmup (default 10). Must be an int >= 1. |
+| `pipeline_check_posterior_samples` | Posterior draws for the pre-flight `check_pipeline` dry run (default 4). Kept small because the dry run only checks interfaces, but a metric that needs more draws than this returns no key and fails the pre-flight; raise it to that metric's minimum. Capped at `n_posterior_samples`, so the pre-flight never validates with more draws than the trials do. Must be an int >= 1. |
 <!-- END GENERATED: optimize-params -->
 
 `optimize()` takes no `pruner` argument: it drives multi-objective studies,
@@ -114,7 +116,7 @@ def check_pipeline(
     simulator, adapter, search_space,
     build_approximator_fn=None, train_fn=None, validate_fn=None,
     objective_metrics=None,
-    sims_per_condition=5, n_posterior_samples=2,
+    sims_per_condition=5, n_posterior_samples=4,
     validation_conditions=None, epochs=1, num_batches=1,
     aggregate="mean",
 ) -> None

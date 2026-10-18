@@ -368,6 +368,48 @@ def test_optimize_calls_check_pipeline():
         mock_check.assert_called_once()
 
 
+@pytest.mark.parametrize(
+    ("kwargs", "expected"),
+    [
+        ({}, 4),
+        ({"pipeline_check_posterior_samples": 8}, 8),
+        # Capped at the trials' draw count.
+        ({"n_posterior_samples": 2}, 2),
+    ],
+)
+def test_optimize_passes_pipeline_check_posterior_samples(kwargs, expected):
+    """The pre-flight's draw count defaults to 4, is configurable, and is capped."""
+    with (
+        patch("bayesflow_hpo.api.GenericObjective") as mock_obj_cls,
+        patch("bayesflow_hpo.api.create_study"),
+        patch("bayesflow_hpo.api.optimize_until"),
+        patch("bayesflow_hpo.api.check_pipeline") as mock_check,
+        patch("bayesflow_hpo.api.generate_validation_dataset") as mock_gen,
+    ):
+        mock_obj_cls.return_value = MagicMock(n_objectives=3)
+        mock_gen.return_value = _DUMMY_VALIDATION_DATA
+        optimize(
+            simulator=MagicMock(),
+            adapter=canonical_adapter(),
+            search_space=_make_fake_search_space(),
+            storage=None,
+            **kwargs,
+        )
+        assert mock_check.call_args.kwargs["n_posterior_samples"] == expected
+
+
+@pytest.mark.parametrize("value", [0, -1, 2.0, True])
+def test_optimize_rejects_bad_pipeline_check_posterior_samples(value):
+    with pytest.raises(ValueError, match="pipeline_check_posterior_samples"):
+        optimize(
+            simulator=MagicMock(),
+            adapter=canonical_adapter(),
+            search_space=_make_fake_search_space(),
+            storage=None,
+            pipeline_check_posterior_samples=value,
+        )
+
+
 # ---------------------------------------------------------------------------
 # Unit tests for extracted private helpers
 # ---------------------------------------------------------------------------
