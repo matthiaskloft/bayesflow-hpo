@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.1 -- 2026-10-18
 
 ### Changed
 
@@ -9,10 +9,11 @@
   `optimize()` takes a keyword-only `pipeline_check_posterior_samples`
   (default 4) that it passes to its own pre-flight, capped at
   `n_posterior_samples` so the pre-flight never validates with more draws
-  than the trials. It previously always used `check_pipeline`'s default. A metric that needs a minimum number of
-  draws returns no key below it, so the pre-flight refused a study whose
-  objective was such a metric (here, bayesflow-irt's `tcc_bias`, which needs
-  4) before a single trial ran, with no way to configure it.
+  than the trials. It previously always used `check_pipeline`'s default. A
+  metric that needs a minimum number of draws returns no key below it, so the
+  pre-flight refused a study whose objective was such a metric (here,
+  bayesflow-irt's `tcc_bias`, which needs 4) before a single trial ran, with no
+  way to configure it (#145).
 
 ## 0.6.0 -- 2026-10-17
 
