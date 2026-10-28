@@ -146,8 +146,14 @@ def test_optimize_forwards_worker_options():
     assert run.call_args.kwargs["constant_liar"] is True
 
 @pytest.mark.parametrize("seed", [-1, 2**32, 1.5])
-@pytest.mark.parametrize("sampler", [None, "tpe", "random"])
-def test_invalid_seed_preserves_existing_study(tmp_path, seed, sampler):
+@pytest.mark.parametrize(
+    ("sampler", "qmc_startup_trials"),
+    [(None, 0), ("tpe", 0), ("random", 0),
+     (optuna.samplers.RandomSampler(seed=1), 8)],
+)
+def test_invalid_seed_preserves_existing_study(
+    tmp_path, seed, sampler, qmc_startup_trials,
+):
     from bayesflow_hpo.api import _create_and_run_study
 
     storage = f"sqlite:///{tmp_path / 'preserve.db'}"
@@ -159,7 +165,8 @@ def test_invalid_seed_preserves_existing_study(tmp_path, seed, sampler):
         _create_and_run_study(
             objective=MagicMock(), study_name="preserve", directions=["minimize"],
             metric_names=["m"], storage=storage, resume=False, sampler=sampler,
-            sampler_seed=seed, n_trials=0, warm_start_from=None,
+            sampler_seed=seed, qmc_startup_trials=qmc_startup_trials,
+            n_trials=0, warm_start_from=None,
             warm_start_top_k=25, max_total_trials=None, show_progress_bar=False,
         )
     restored = optuna.load_study(study_name="preserve", storage=storage)
@@ -178,3 +185,40 @@ def test_custom_sampler_ignores_invalid_preset_seed():
         warm_start_top_k=25, max_total_trials=None, show_progress_bar=False,
     )
     assert study.sampler is sampler
+
+
+@pytest.mark.parametrize("seed", [None, 7, 123])
+def test_worker_seed_reaches_qmc_warmup(seed):
+    from bayesflow_hpo.optimization.study import QMCWarmupSampler
+
+    with patch(
+        "bayesflow_hpo.optimization.study.QMCWarmupSampler",
+        wraps=QMCWarmupSampler,
+    ) as wrapper:
+        create_study(storage=None, qmc_startup_trials=8, sampler_seed=seed)
+    assert wrapper.call_args.kwargs["seed"] == seed
+
+
+def test_qmc_worker_seeds_control_independent_draws_and_categorical_ties():
+    def draw(seed):
+        study = create_study(
+            storage=None, directions=["minimize"], qmc_startup_trials=8,
+            sampler_seed=seed,
+        )
+        study.add_trial(optuna.trial.create_trial(
+            value=0.0, params={"x": 0.5},
+            distributions={"x": optuna.distributions.FloatDistribution(0, 1)},
+        ))
+        trial = study.ask()
+        return (
+            trial.suggest_float("x", 0, 1),
+            trial.suggest_categorical("family", list("abcdef")),
+            trial.suggest_float("conditional", 0, 1),
+        )
+
+    first = draw(7)
+    second = draw(123)
+    assert draw(7) == first
+    assert first[0] == second[0]  # The unscrambled Sobol sequence stays shared.
+    assert first[1] != second[1]
+    assert first[2] != second[2]
