@@ -21,6 +21,7 @@ from __future__ import annotations
 import logging
 import warnings
 from collections.abc import Callable, Sequence
+from contextvars import ContextVar
 from typing import Any
 
 import numpy as np
@@ -184,6 +185,8 @@ def _resolve_sampler(
     budget_aware: bool = True,
     soft_thresholds: list[MetricConstraintSpec] | None = None,
     n_startup_trials: int | None = None,
+    sampler_seed: int | None = 42,
+    constant_liar: bool = False,
 ) -> optuna.samplers.BaseSampler:
     """Resolve a string preset to a configured Optuna sampler.
 
@@ -214,6 +217,14 @@ def _resolve_sampler(
         :class:`QMCWarmupSampler` warm-up phase already count toward it
         -- which is why a value at or below ``qmc_startup_trials`` lets
         the model take over as soon as that phase ends.
+
+    sampler_seed
+        Random seed for sampler presets. Default 42; None uses entropy.
+        Use a distinct seed for each worker. Ignored for sampler instances.
+    constant_liar
+        Whether the TPE preset penalizes running trials (default False).
+        Ignored by other presets and sampler instances. See Optuna's
+        TPESampler API reference for its distributed optimization guidance.
 
     Returns
     -------
@@ -271,7 +282,8 @@ def _resolve_sampler(
         # the whole space) and lets TPE model a conditional space's
         # family-specific dimensions jointly; see the Notes section above.
         return optuna.samplers.TPESampler(
-            seed=42,
+            seed=sampler_seed,
+            constant_liar=constant_liar,
             multivariate=True,
             group=True,
             n_startup_trials=25 if n_startup_trials is None else n_startup_trials,
@@ -281,7 +293,7 @@ def _resolve_sampler(
 
     def _make_gp() -> optuna.samplers.GPSampler:
         return optuna.samplers.GPSampler(
-            seed=42,
+            seed=sampler_seed,
             n_startup_trials=10 if n_startup_trials is None else n_startup_trials,
             constraints_func=constraints,
         )
@@ -295,7 +307,7 @@ def _resolve_sampler(
                 "Install with: pip install optuna-integration[botorch]"
             ) from None
         return BoTorchSampler(
-            seed=42,
+            seed=sampler_seed,
             n_startup_trials=10 if n_startup_trials is None else n_startup_trials,
             constraints_func=constraints,
         )
@@ -303,14 +315,14 @@ def _resolve_sampler(
     def _make_nsga2() -> optuna.samplers.NSGAIISampler:
         return optuna.samplers.NSGAIISampler(
             population_size=50,
-            seed=42,
+            seed=sampler_seed,
             constraints_func=constraints,
         )
 
     def _make_nsga3() -> optuna.samplers.NSGAIIISampler:
         return optuna.samplers.NSGAIIISampler(
             population_size=50,
-            seed=42,
+            seed=sampler_seed,
             constraints_func=constraints,
         )
 
@@ -323,10 +335,10 @@ def _resolve_sampler(
                 "that provides AutoSampler. It is not available in "
                 f"optuna {optuna.__version__}."
             ) from None
-        return AutoSampler(seed=42)
+        return AutoSampler(seed=sampler_seed)
 
     def _make_random() -> optuna.samplers.RandomSampler:
-        return optuna.samplers.RandomSampler(seed=42)
+        return optuna.samplers.RandomSampler(seed=sampler_seed)
 
     presets: dict[str, Callable[[], optuna.samplers.BaseSampler]] = {
         "tpe": _make_tpe,
@@ -376,12 +388,50 @@ def _resolve_n_startup_trials(sampler: optuna.samplers.BaseSampler) -> int:
     return 10
 
 
+_qmc_trial_number: ContextVar[int] = ContextVar("qmc_trial_number")
+
+
+class _TrialNumberQMCSampler(optuna.samplers.QMCSampler):
+    """Use storage-allocated trial numbers instead of Optuna's racy QMC counter.
+
+    Optuna 5's QMCSampler._find_sample_id reads and writes a study attribute
+    without an atomic increment. Trial numbers are unique within a study.
+    The first trial is independent; trial 1 starts at Sobol index 0.
+    Source: https://optuna.readthedocs.io/en/stable/_modules/
+    optuna/samplers/_qmc.html#QMCSampler
+    """
+
+    def sample_relative(
+        self,
+        study: optuna.Study,
+        trial: optuna.trial.FrozenTrial,
+        search_space: dict[str, optuna.distributions.BaseDistribution],
+    ) -> dict[str, Any]:
+        token = _qmc_trial_number.set(trial.number)
+        try:
+            return super().sample_relative(study, trial, search_space)
+        finally:
+            _qmc_trial_number.reset(token)
+
+    def _find_sample_id(
+        self,
+        study: optuna.Study,
+        search_space: dict[str, optuna.distributions.BaseDistribution],
+    ) -> int:
+        return max(0, _qmc_trial_number.get() - 1)
+
+
 class QMCWarmupSampler(optuna.samplers.BaseSampler):
     """Composite sampler that uses QMC (Sobol) for the first N trials.
 
     Wraps a main sampler and delegates to ``QMCSampler`` for the first
     *qmc_startup_trials* non-rejected completions, then transparently
     delegates all calls to the main sampler.
+
+    Progress is refreshed from shared study history before each trial.
+    Sobol indices use storage-assigned trial numbers minus one, avoiding
+    Optuna 5's non-atomic QMC counter across worker processes. Rejected or
+    independently sampled trials can leave gaps in the Sobol sequence.
 
     This is an internal class — the public API is the
     ``qmc_startup_trials`` parameter on :func:`create_study` and
@@ -480,7 +530,7 @@ class QMCWarmupSampler(optuna.samplers.BaseSampler):
             )
         self._main_sampler = main_sampler
         self._qmc_startup_trials = qmc_startup_trials
-        self._qmc_sampler = optuna.samplers.QMCSampler(
+        self._qmc_sampler = _TrialNumberQMCSampler(
             qmc_type="sobol",
             scramble=False,
             seed=seed,
@@ -599,6 +649,10 @@ class QMCWarmupSampler(optuna.samplers.BaseSampler):
         study: optuna.Study,
         trial: optuna.trial.FrozenTrial,
     ) -> None:
+        self._n_qmc_completed = sum(
+            t.state == TrialState.COMPLETE and "rejected_reason" not in t.user_attrs
+            for t in study.get_trials(deepcopy=False)
+        )
         self._active_sampler.before_trial(study, trial)
 
     def after_trial(
@@ -641,6 +695,8 @@ def create_study(
     # keyword-only separator either, so a parameter that can be bound
     # positionally is a parameter nothing may ever be inserted in front of.
     *,
+    sampler_seed: int | None = 42,
+    constant_liar: bool = False,
     sampler_n_startup_trials: int | None = None,
     has_cost: bool = True,
 ) -> optuna.Study:
@@ -681,7 +737,7 @@ def create_study(
         ``"random"``  ``RandomSampler()``
         ============= =================================================
 
-        All presets use ``seed=42``.  Presets that support
+        Presets use *sampler_seed* (default 42).  Presets that support
         ``constraints_func`` auto-wire budget constraints when
         ``budget_aware=True``.
     pruner
@@ -747,6 +803,13 @@ def create_study(
         Ignored when *sampler* is a sampler instance rather than a
         preset name, for the same reason *metric_constraints_soft* is:
         sampler internals cannot be patched safely.
+    sampler_seed
+        Random seed for sampler presets. Default 42; None uses entropy.
+        Use a distinct seed for each worker. Ignored for sampler instances.
+    constant_liar
+        Whether the TPE preset penalizes running trials (default False).
+        Ignored by other presets and sampler instances. See Optuna's
+        TPESampler API reference for its distributed optimization guidance.
     has_cost
         Whether the last objective is a cost score. Only affects how
         warm-start candidates are ranked: with ``cost_metric=None``
@@ -774,6 +837,8 @@ def create_study(
             budget_aware=budget_aware,
             soft_thresholds=metric_constraints_soft,
             n_startup_trials=sampler_n_startup_trials,
+            sampler_seed=sampler_seed,
+            constant_liar=constant_liar,
         )
     elif sampler is None:
         sampler = _resolve_sampler(
@@ -781,6 +846,8 @@ def create_study(
             budget_aware=budget_aware,
             soft_thresholds=metric_constraints_soft,
             n_startup_trials=sampler_n_startup_trials,
+            sampler_seed=sampler_seed,
+            constant_liar=constant_liar,
         )
     elif sampler_n_startup_trials is not None:
         logger.warning(
