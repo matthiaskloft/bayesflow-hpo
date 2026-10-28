@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.7.0 -- 2026-10-28
+
+### Added
+
+- `sampler_seed` and `constant_liar` options on `optimize()` and
+  `create_study()` for parallel workers sharing a study. Sampler presets
+  accept worker-specific seeds (or `None` for entropy), and the TPE preset
+  can penalize running trials with `constant_liar=True` (#147, #148).
+- Guidance for worker launch order, shared storage, checkpoint isolation,
+  and concurrent trial budgets.
+
+### Fixed
+
+- QMC warm-up allocates Sobol points using storage-assigned trial numbers,
+  avoiding Optuna's non-atomic shared counter, and refreshes completion
+  counts from shared study history (#148).
+- QMC independent sampling and categorical tie-breaking receive the worker
+  seed while the unscrambled Sobol sequence remains shared (#149).
+- Invalid preset or QMC warm-up seeds are rejected before a fresh run can
+  delete an existing study (#148, #149).
+
 ## 0.6.1 -- 2026-10-18
 
 ### Changed
