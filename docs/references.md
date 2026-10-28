@@ -1165,3 +1165,32 @@ on 2026-10-10; the QMC claim from the Optuna 5.0.0 source
 unconditional space and the balanced warm-up are asserted by
 `tests/test_optimization/test_qmc_warmup.py::TestConditionalSpaces`, which CI
 runs against Optuna 5.x.
+
+**Optuna contributors. (n.d.). `optuna.samplers.TPESampler`.** *Optuna
+5.0.0 documentation*. Retrieved October 28, 2026, from
+https://optuna.readthedocs.io/en/stable/reference/samplers/generated/optuna.samplers.TPESampler.html
+
+Documents `seed` and the running-trial penalty of `constant_liar`. The
+package explicitly defaults that flag to False as requested in issue #147;
+Optuna 5 itself now defaults it to True. Backs the parallel-worker preset
+options. Verified against official documentation and installed Optuna 5.0.0.
+
+**Optuna contributors. (n.d.). `optuna.samplers.QMCSampler`.** *Optuna
+5.0.0 documentation*. Retrieved October 28, 2026, from
+https://optuna.readthedocs.io/en/stable/reference/samplers/generated/optuna.samplers.QMCSampler.html
+
+Documents independent sampling for the first trial and fixed unscrambled
+Sobol sequences. Inspection of installed Optuna 5.0.0's
+`QMCSampler._find_sample_id` confirms its non-atomic read/write counter.
+The wrapper substitutes the unique trial number minus one to avoid that
+counter race; rejected trials can leave sequence gaps. This is an
+implementation correction backed by source inspection and multiprocessing
+regression tests, rather than a new statistical-method claim.
+
+**Optuna contributors. (n.d.). FAQ.** *Optuna 5.0.0 documentation*.
+Retrieved October 28, 2026, from https://optuna.readthedocs.io/en/stable/faq.html
+
+Backs the storage and reproducibility guidance for parallel workers. These
+three references are package documentation rather than research articles.
+An OpenAlex verification request was attempted but could not be retrieved
+in this environment; no bibliographic verification via OpenAlex is claimed.

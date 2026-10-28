@@ -36,9 +36,9 @@ def optimize(
     sampler=None, directions=None, warm_start_from=None,
     warm_start_top_k=25, qmc_startup_trials=0, checkpoint_pool=None,
     show_progress_bar=True, *,
-    max_samples_per_call=DEFAULT_MAX_SAMPLES_PER_CALL,
-    sampler_n_startup_trials=None, joint_metrics=None,
-    include_joint_metrics=False, aggregate='mean',
+    max_samples_per_call=DEFAULT_MAX_SAMPLES_PER_CALL, sampler_seed=42,
+    constant_liar=False, sampler_n_startup_trials=None,
+    joint_metrics=None, include_joint_metrics=False, aggregate='mean',
     intermediate_validation_warmup=10,
     intermediate_validation_interval=10,
     pipeline_check_posterior_samples=4
@@ -93,6 +93,8 @@ def optimize(
 | `checkpoint_pool` | Optional `CheckpointPool` for persisting the best trial weights. Pass one built with `pruned_pool_size > 0` to also retain a bounded sample of *pruned* trials' weights, which the default pool discards. Set its `extra_metadata` to add caller-supplied keys to every `checkpoint.json` it writes, scored and pruned. |
 | `show_progress_bar` | Whether to show Optuna's progress bar (default `True`). |
 | `max_samples_per_call` | Cap on posterior draws materialized by one `approximator.sample()` call during validation (default `DEFAULT_MAX_SAMPLES_PER_CALL`). Keyword-only, `int` or `None`; a float is rejected. Pass `None` to sample each condition in a single call. A custom *validate_fn* does not read this and sets its own cap -- `make_lc2st_validate_fn` takes one. |
+| `sampler_seed` | Random seed for sampler presets. Default 42; None uses entropy. Use a distinct seed for each worker. Ignored for sampler instances. |
+| `constant_liar` | Whether the TPE preset penalizes running trials (default False). Ignored by other presets and sampler instances. See Optuna's TPESampler API reference for its distributed optimization guidance. |
 | `sampler_n_startup_trials` | Override how many trials a string sampler preset draws before its model takes over. `None` (default) keeps the preset value -- 25 for `"tpe"`. Ignored when *sampler* is a sampler instance. |
 | `joint_metrics` | Configured joint metrics as `{name: fn}`, forwarded to the validation pipeline. Build one with `make_tarp_joint_metric`. |
 | `include_joint_metrics` | Whether joint metrics also run at every *intermediate* validation, under `PeriodicValidationCallback`. `False` by default, because the cost changes what pruning is for. |
@@ -781,3 +783,50 @@ compute_inference_time_per_dataset(inference_time, n_datasets) -> float
 loguniform_int(low, high, alpha=1.0, rng=None) -> int
 loguniform_float(low, high, alpha=1.0, rng=None) -> float
 ```
+
+### Multiple worker processes on one study
+
+Use a shared storage URL and study name, with `sampler="tpe"`,
+`constant_liar=True`, and a distinct `sampler_seed` per worker (or `None`
+for independent entropy). These options configure presets; configure a
+custom sampler instance directly. Constant liar penalizes running trials;
+it reduces collisions but does not guarantee unique parameter values,
+especially in discrete spaces or during random startup.
+
+Start exactly one worker with `resume=False`. This deletes any existing
+study of that name. Wait until it has created and initialized the study
+(preferably until its first trial is RUNNING), then launch the remaining
+workers with `resume=True`. Never launch another fresh worker against an
+active study. Resuming workers must use the same objective/schema,
+aggregation, search space and warm-up settings; do not repeat warm-start
+imports in each worker.
+
+For sustained parallel optimization, prefer PostgreSQL or MySQL. Optuna's
+FAQ discourages SQLite for parallel optimization because of write locks.
+Small SQLite cases are covered by regression tests, but this does not make
+SQLite suitable for heavy concurrent workloads. All workers must see the
+same storage, and available GPU memory must cover their combined models.
+
+The QMC warm-up uses unique storage-assigned trial numbers as Sobol indices
+instead of Optuna's non-atomic study-attribute counter. The first trial
+samples independently; subsequent trials use index `trial.number - 1`.
+Failed or rejected trials can leave gaps. Integer and categorical mappings
+can still repeat configurations. Workers refresh the warm-up completion
+count from shared history before each trial; already running warm-up trials
+may finish after the quota is reached.
+
+Built-in preflight builds, trains and validates a temporary model in each
+process without writing shared files. Custom build/train/validate hooks
+also run during preflight: use process-specific paths for any files those
+hooks create. Checkpoint pool rankings and retention are local to each
+worker; use separate working directories (and an absolute storage URL) to
+keep their default `checkpoints/` directories separate.
+
+`n_trials` and `max_total_trials` are checked per worker against shared
+history, not atomically reserved across workers. Each worker targets `n_trials` additional completions relative to the
+history it saw on entry, including completions from other workers. Concurrent
+workers can overshoot these targets by a batch of work per worker.
+
+References: [Optuna TPESampler](https://optuna.readthedocs.io/en/stable/reference/samplers/generated/optuna.samplers.TPESampler.html),
+[QMCSampler](https://optuna.readthedocs.io/en/stable/reference/samplers/generated/optuna.samplers.QMCSampler.html),
+and [parallel optimization FAQ](https://optuna.readthedocs.io/en/stable/faq.html#how-can-i-solve-the-error-that-occurs-when-performing-parallel-optimization-with-sqlite3).

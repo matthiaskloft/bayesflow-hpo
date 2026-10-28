@@ -189,6 +189,8 @@ def optimize(
     # everything after it, so a caller passing a metric list positionally
     # would have it arrive here and fail the `< 1` check.
     max_samples_per_call: int | None = DEFAULT_MAX_SAMPLES_PER_CALL,
+    sampler_seed: int | None = 42,
+    constant_liar: bool = False,
     sampler_n_startup_trials: int | None = None,
     joint_metrics: dict[str, Any] | None = None,
     include_joint_metrics: bool = False,
@@ -529,6 +531,13 @@ def optimize(
         space-filling coverage than random startup.  Only non-rejected
         completions count.  Default 0 (disabled).  See
         :func:`~bayesflow_hpo.create_study` for details.
+    sampler_seed
+        Random seed for sampler presets. Default 42; None uses entropy.
+        Use a distinct seed for each worker. Ignored for sampler instances.
+    constant_liar
+        Whether the TPE preset penalizes running trials (default False).
+        Ignored by other presets and sampler instances. See Optuna's
+        TPESampler API reference for its distributed optimization guidance.
     sampler_n_startup_trials
         Override how many trials a string sampler preset draws before
         its model takes over.  ``None`` (default) keeps the preset
@@ -801,6 +810,8 @@ def optimize(
         warm_start_from=warm_start_from,
         warm_start_top_k=warm_start_top_k,
         qmc_startup_trials=qmc_startup_trials,
+        sampler_seed=sampler_seed,
+        constant_liar=constant_liar,
         sampler_n_startup_trials=sampler_n_startup_trials,
         n_trials=n_trials,
         max_total_trials=max_total_trials,
@@ -1268,6 +1279,8 @@ def _create_and_run_study(
     warm_start_from: Any | None,
     warm_start_top_k: int,
     qmc_startup_trials: int = 0,
+    sampler_seed: int | None = 42,
+    constant_liar: bool = False,
     sampler_n_startup_trials: int | None = None,
     n_trials: int,
     max_total_trials: int | None,
@@ -1299,6 +1312,9 @@ def _create_and_run_study(
                     warm_start_from, top_k=warm_start_top_k, has_cost=has_cost
                 ),
             )
+    if sampler is None or isinstance(sampler, str):
+        # Use Optuna's own seed validation before deleting persisted trials.
+        optuna.samplers.RandomSampler(seed=sampler_seed)
     if not resume and storage is not None:
         try:
             optuna.delete_study(study_name=study_name, storage=storage)
@@ -1321,6 +1337,8 @@ def _create_and_run_study(
         warm_start_from=warm_start_from,
         warm_start_top_k=warm_start_top_k,
         qmc_startup_trials=qmc_startup_trials,
+        sampler_seed=sampler_seed,
+        constant_liar=constant_liar,
         sampler_n_startup_trials=sampler_n_startup_trials,
         has_cost=has_cost,
     )
