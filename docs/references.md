@@ -1141,7 +1141,6 @@ slices. Backs the aggregation missing-value convention; official package
 documentation is the primary source rather than an academic-method claim.
 An OpenAlex API search for `numpy.nanmean` returned no indexed works.
 
-<<<<<<< HEAD
 **Optuna developers. (2025). `optuna.samplers.TPESampler` and
 `optuna.samplers.QMCSampler`.** Optuna 5.0.0 API reference.
 https://optuna.readthedocs.io/en/v5.0.0/reference/generated/optuna.samplers.TPESampler.html
@@ -1166,7 +1165,7 @@ on 2026-10-10; the QMC claim from the Optuna 5.0.0 source
 unconditional space and the balanced warm-up are asserted by
 `tests/test_optimization/test_qmc_warmup.py::TestConditionalSpaces`, which CI
 runs against Optuna 5.x.
-=======
+
 **Optuna contributors. (n.d.). `optuna.samplers.TPESampler`.** *Optuna
 5.0.0 documentation*. Retrieved October 28, 2026, from
 https://optuna.readthedocs.io/en/stable/reference/samplers/generated/optuna.samplers.TPESampler.html
@@ -1195,4 +1194,3 @@ Backs the storage and reproducibility guidance for parallel workers. These
 three references are package documentation rather than research articles.
 An OpenAlex verification request was attempted but could not be retrieved
 in this environment; no bibliographic verification via OpenAlex is claimed.
->>>>>>> b6892b2 (fix(optimization): support parallel study workers (#147))

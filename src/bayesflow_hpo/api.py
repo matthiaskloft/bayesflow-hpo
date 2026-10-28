@@ -1312,6 +1312,9 @@ def _create_and_run_study(
                     warm_start_from, top_k=warm_start_top_k, has_cost=has_cost
                 ),
             )
+    if sampler is None or isinstance(sampler, str):
+        # Use Optuna's own seed validation before deleting persisted trials.
+        optuna.samplers.RandomSampler(seed=sampler_seed)
     if not resume and storage is not None:
         try:
             optuna.delete_study(study_name=study_name, storage=storage)

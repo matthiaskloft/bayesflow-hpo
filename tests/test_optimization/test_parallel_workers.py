@@ -144,3 +144,37 @@ def test_optimize_forwards_worker_options():
         )
     assert run.call_args.kwargs["sampler_seed"] == 77
     assert run.call_args.kwargs["constant_liar"] is True
+
+@pytest.mark.parametrize("seed", [-1, 2**32, 1.5])
+@pytest.mark.parametrize("sampler", [None, "tpe", "random"])
+def test_invalid_seed_preserves_existing_study(tmp_path, seed, sampler):
+    from bayesflow_hpo.api import _create_and_run_study
+
+    storage = f"sqlite:///{tmp_path / 'preserve.db'}"
+    study = create_study(
+        study_name="preserve", storage=storage, directions=["minimize"],
+    )
+    study.optimize(lambda trial: 0.5, n_trials=1)
+    with pytest.raises((ValueError, TypeError)):
+        _create_and_run_study(
+            objective=MagicMock(), study_name="preserve", directions=["minimize"],
+            metric_names=["m"], storage=storage, resume=False, sampler=sampler,
+            sampler_seed=seed, n_trials=0, warm_start_from=None,
+            warm_start_top_k=25, max_total_trials=None, show_progress_bar=False,
+        )
+    restored = optuna.load_study(study_name="preserve", storage=storage)
+    assert len(restored.trials) == 1
+    assert restored.trials[0].value == 0.5
+
+
+def test_custom_sampler_ignores_invalid_preset_seed():
+    from bayesflow_hpo.api import _create_and_run_study
+
+    sampler = optuna.samplers.RandomSampler(seed=1)
+    study = _create_and_run_study(
+        objective=MagicMock(), study_name="custom", directions=["minimize"],
+        metric_names=["m"], storage=None, resume=False, sampler=sampler,
+        sampler_seed=-1, n_trials=0, warm_start_from=None,
+        warm_start_top_k=25, max_total_trials=None, show_progress_bar=False,
+    )
+    assert study.sampler is sampler
