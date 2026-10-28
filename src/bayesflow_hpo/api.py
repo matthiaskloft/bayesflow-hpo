@@ -532,8 +532,9 @@ def optimize(
         completions count.  Default 0 (disabled).  See
         :func:`~bayesflow_hpo.create_study` for details.
     sampler_seed
-        Random seed for sampler presets. Default 42; None uses entropy.
-        Use a distinct seed for each worker. Ignored for sampler instances.
+        Random seed for sampler presets and QMC warm-up. Default 42;
+        None uses entropy. Use a distinct seed for each worker. Custom
+        sampler instances retain their own seed; QMC warm-up uses this seed.
     constant_liar
         Whether the TPE preset penalizes running trials (default False).
         Ignored by other presets and sampler instances. See Optuna's
@@ -1312,7 +1313,7 @@ def _create_and_run_study(
                     warm_start_from, top_k=warm_start_top_k, has_cost=has_cost
                 ),
             )
-    if sampler is None or isinstance(sampler, str):
+    if sampler is None or isinstance(sampler, str) or qmc_startup_trials > 0:
         # Use Optuna's own seed validation before deleting persisted trials.
         optuna.samplers.RandomSampler(seed=sampler_seed)
     if not resume and storage is not None:

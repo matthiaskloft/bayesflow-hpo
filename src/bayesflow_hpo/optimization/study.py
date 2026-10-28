@@ -220,7 +220,7 @@ def _resolve_sampler(
 
     sampler_seed
         Random seed for sampler presets. Default 42; None uses entropy.
-        Use a distinct seed for each worker. Ignored for sampler instances.
+        Use a distinct seed for each worker.
     constant_liar
         Whether the TPE preset penalizes running trials (default False).
         Ignored by other presets and sampler instances. See Optuna's
@@ -804,8 +804,9 @@ def create_study(
         preset name, for the same reason *metric_constraints_soft* is:
         sampler internals cannot be patched safely.
     sampler_seed
-        Random seed for sampler presets. Default 42; None uses entropy.
-        Use a distinct seed for each worker. Ignored for sampler instances.
+        Random seed for sampler presets and QMC warm-up. Default 42;
+        None uses entropy. Use a distinct seed for each worker. Custom
+        sampler instances retain their own seed; QMC warm-up uses this seed.
     constant_liar
         Whether the TPE preset penalizes running trials (default False).
         Ignored by other presets and sampler instances. See Optuna's
@@ -872,7 +873,7 @@ def create_study(
                 "(e.g. 8, 16, 32). Proceeding with the requested value.",
                 qmc_startup_trials,
             )
-        sampler = QMCWarmupSampler(sampler, qmc_startup_trials)
+        sampler = QMCWarmupSampler(sampler, qmc_startup_trials, seed=sampler_seed)
 
     if isinstance(pruner, str):
         pruner = _resolve_pruner(pruner)
