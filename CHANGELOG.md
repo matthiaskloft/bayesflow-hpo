@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased (recommended version: 0.8.0)
+## 0.8.0 -- 2026-11-07
 
 ### Changed (breaking)
 
