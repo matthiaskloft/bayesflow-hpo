@@ -24,12 +24,26 @@ exclusive.
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, fields
 from typing import Any, Protocol
 
 # Sentinel to distinguish "no constant set" from "constant is None".
 _UNSET: Any = object()
+
+
+def signature_default(cls: Any, param: str, fallback: Any) -> Any:
+    """Return the default of ``param`` in ``cls.__init__``, else ``fallback``.
+
+    Untuned search-space constants follow BayesFlow's own defaults; reading
+    them from the installed constructor keeps them in step with the release.
+    """
+    try:
+        value = inspect.signature(cls).parameters[param].default
+    except (KeyError, ValueError, TypeError):
+        return fallback
+    return fallback if value is inspect.Parameter.empty else value
 
 
 @dataclass

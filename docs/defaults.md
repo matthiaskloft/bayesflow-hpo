@@ -102,7 +102,7 @@ samples the corresponding network-specific dimensions.
 | `cf_subnet_width` | 32--256, step 32 | yes | — |
 | `cf_subnet_depth` | 1--3 | yes | — |
 | `cf_dropout` | 0.0--0.3 | yes | — |
-| `cf_activation` | silu, relu, mish | no | `"silu"` |
+| `cf_activation` | — | no | `"hard_silu"` |
 | `cf_transform` | affine, spline | no | `"affine"` |
 | `cf_permutation` | random, orthogonal | no | `"random"` |
 | `cf_use_actnorm` | True, False | no | `True` |
@@ -116,19 +116,18 @@ samples the corresponding network-specific dimensions.
 | `fm_dropout` | 0.0--0.2 | yes | — |
 | `fm_activation` | — | no | `"mish"` |
 | `fm_use_optimal_transport` | — | no | `False` |
-| `fm_time_power_law_alpha` | — | no | `0.0` |
+| `fm_time_power_law_alpha` | — | no | `-0.5` |
 | `fm_time_embedding_dim` | — | no | `32` |
 | `fm_integrate_method` | — | no | `"tsit5"` |
 | `fm_integrate_steps` | — | no | `"adaptive"` |
 | `fm_merge` | — | no | `"concat"` |
 | `fm_norm` | — | no | `"layer"` |
 | `fm_residual` | — | no | `True` |
-| `fm_spectral_normalization` | — | no | `False` |
 | `fm_kernel_initializer` | — | no | `"he_normal"` |
 
 Untuned constants are synchronized to BayesFlow defaults at runtime
 (`bf.networks.TimeMLP` and
-`bf.networks.FlowMatching.INTEGRATE_DEFAULT_CONFIG`). The listed constants
+`bayesflow.networks.defaults.FLOW_MATCHING_INTEGRATE_DEFAULTS`). The listed constants
 are the current defaults in this environment.
 
 Profile helpers:
@@ -146,13 +145,12 @@ Profile helpers:
 | `ds_width` | 32--256, step 32 | yes | — |
 | `ds_dropout` | 0.0--0.3 | yes | — |
 | `ds_activation` | silu, mish | no | `"silu"` |
-| `ds_spectral_normalization` | True, False | no | `False` |
+| `ds_embed_dim` | — | no | `64` |
 | `ds_inner_pooling` | — | no | `"mean"` |
-| `ds_output_pooling` | — | no | `"mean"` |
 
-Architecture: the `invariant_outer` MLP uses `(width, summary_dim)`
-as a bottleneck, matching BayesFlow's default architecture.  All other
-MLPs use `(width, width)`.
+Architecture: `ds_width` sets the equivariant-layer MLP
+`mlp_widths=(width, width)`; `ds_embed_dim` is the shared working width
+(BayesFlow 2.1 `DeepSet`).
 
 ### SetTransformerSpace
 
@@ -163,8 +161,7 @@ MLPs use `(width, width)`.
 | `st_num_heads` | 1, 2, 4, 8 | yes | — |
 | `st_num_layers` | 1--4 | yes | — |
 | `st_dropout` | 0.0--0.3 | yes | — |
-| `st_mlp_width` | — | no | `128` |
-| `st_mlp_depth` | — | no | `2` |
+| `st_expansion_factor` | — | no | `4.0` |
 | `st_num_inducing_points` | — | no | `None` |
 
 ### TrainingSpace

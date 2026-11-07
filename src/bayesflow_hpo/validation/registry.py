@@ -982,17 +982,27 @@ def _bf_mean_calibration_error(
 def _bf_rmse(
     draws: np.ndarray, true_values: np.ndarray,
 ) -> dict[str, float]:
-    """Root Mean Squared Error of posterior means vs true values.
+    """Root Mean Squared Error of the posterior draws around the truth.
 
-    Uses BayesFlow's ``root_mean_squared_error`` when available,
-    otherwise falls back to a manual NumPy implementation.
+    Per dataset, the root of the mean squared error of the draws (so the
+    posterior spread counts, not only the posterior mean), then a median
+    over datasets, as BayesFlow 2.1 computes it. Uses BayesFlow's
+    ``root_mean_squared_error`` when available,
+    otherwise falls back to a manual NumPy implementation (which scores the
+    posterior mean only, so the two paths differ).
     """
     import bayesflow as bf
 
     rmse_fn = getattr(bf.diagnostics, "root_mean_squared_error", None)
     if rmse_fn is not None:
         estimates, targets = _reshape_for_bf(draws, true_values)
-        result = rmse_fn(estimates=estimates, targets=targets)
+        # Unnormalized, as documented. The BayesFlow default is a
+        # normalization in both versions ("range" in 2.0.8, the stochastic
+        # "prior" in 2.1), so the bare call returned an NRMSE (2.0.8 and
+        # 2.1.0 sources compared, 2026-11-07). 2.1 also changed the
+        # reduction: RMSE over draws per dataset, then a median over datasets
+        # (2.0.8: RMSE over datasets per draw, then a median over draws).
+        result = rmse_fn(estimates=estimates, targets=targets, normalize=None)
         return {"rmse": float(np.mean(result["values"]))}
 
     posterior_mean = np.mean(draws, axis=1)
@@ -1003,7 +1013,7 @@ def _bf_rmse(
 def _bf_nrmse(
     draws: np.ndarray, true_values: np.ndarray,
 ) -> dict[str, float]:
-    """Normalized RMSE (range-normalized) of posterior means.
+    """Range-normalized RMSE of the posterior draws (see :func:`_bf_rmse`).
 
     Divides RMSE by the range of true values so the metric is
     comparable across parameters with different scales.

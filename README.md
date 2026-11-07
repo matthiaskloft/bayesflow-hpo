@@ -4,7 +4,7 @@
 [![PyPI](https://img.shields.io/pypi/v/bayesflow-hpo.svg)](https://pypi.org/project/bayesflow-hpo/)
 [![GitHub release](https://img.shields.io/github/v/release/matthiaskloft/bayesflow-hpo.svg)](https://github.com/matthiaskloft/bayesflow-hpo/releases/latest)
 [![codecov](https://codecov.io/gh/matthiaskloft/bayesflow-hpo/branch/main/graph/badge.svg)](https://codecov.io/gh/matthiaskloft/bayesflow-hpo)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 Automated hyperparameter optimization for [BayesFlow](https://github.com/bayesflow-org/bayesflow) 2.x neural posterior estimation (NPE) models, powered by [Optuna](https://optuna.org/).
@@ -19,7 +19,9 @@ pip install bayesflow-hpo[dashboard] # + Optuna dashboard
 pip install bayesflow-hpo[sklearn]   # + C2ST metrics
 ```
 
-Requires Python >= 3.11 and a Keras 3 backend. No backend is installed as a
+Requires Python >= 3.12, BayesFlow >= 2.1.0 and a Keras 3 backend (>= 3.15).
+BayesFlow 2.0.x is not supported; weights trained under 2.0.x cannot be loaded
+on 2.1, see the [changelog](CHANGELOG.md). No backend is installed as a
 dependency, so install one separately (PyTorch recommended) and select it before
 importing:
 
@@ -55,7 +57,7 @@ export KERAS_BACKEND=torch
 ## Features
 
 - **10 network search spaces** — CouplingFlow, FlowMatching, DiffusionModel, ConsistencyModel, StableConsistencyModel, DeepSet, SetTransformer, FusionTransformer, TimeSeriesNetwork, TimeSeriesTransformer
-- **FlowMatching solver controls** — tune or fix `fm_integrate_method` / `fm_integrate_steps` plus TimeMLP kwargs (`fm_merge`, `fm_norm`, `fm_residual`, `fm_spectral_normalization`) with BayesFlow-default constants when untuned
+- **FlowMatching solver controls** — tune or fix `fm_integrate_method` / `fm_integrate_steps` plus TimeMLP kwargs (`fm_merge`, `fm_norm`, `fm_residual`) with BayesFlow-default constants when untuned
 - **Network selection** — let Optuna choose the best architecture via `NetworkSelectionSpace` / `SummarySelectionSpace`
 - **Sampler presets** — TPE, GP, BoTorch, NSGA-II/III, Auto, Random with auto-wired budget constraints
 - **QMC warm-up** — Sobol sequences for better space-filling startup coverage

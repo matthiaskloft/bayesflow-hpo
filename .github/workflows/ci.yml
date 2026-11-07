@@ -20,7 +20,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
       - run: pip install ruff
       - run: ruff check src/ tests/ scripts/
 
@@ -30,7 +30,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
       # Pure stdlib: it reads docs/references.md and src/, and imports
       # nothing from the package, so it needs no backend and no install.
       - run: python scripts/check_citations.py
@@ -41,7 +41,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
       # Also pure stdlib: cross-references are resolved by parsing the
       # source tree, not by importing it, so this needs no backend either.
       - run: python scripts/check_docstrings.py
@@ -54,7 +54,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
       - run: pip install torch --index-url https://download.pytorch.org/whl/cpu
       - run: pip install -e ".[dev]" -c .github/ci-constraints.txt
       # Paths come from [tool.mypy] files in pyproject.toml.
@@ -65,7 +65,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+        python-version: ["3.12", "3.13"]
     env:
       KERAS_BACKEND: torch
     steps:

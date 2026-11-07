@@ -12,6 +12,7 @@ from bayesflow_hpo.search_spaces.base import (
     CategoricalDimension,
     FloatDimension,
     IntDimension,
+    signature_default,
 )
 
 
@@ -33,9 +34,9 @@ class DiffusionModelSpace(BaseSearchSpace):
     Fixed dimensions (widen to tune)
     --------------------------------
     dm_noise_schedule : str
-        Noise schedule type. Fixed at ``"edm"``.
+        Noise schedule type. Fixed at the BayesFlow default (``"cosine"`` in 2.1).
     dm_prediction_type : str
-        Prediction target. Fixed at ``"F"``.
+        Prediction target. Fixed at the BayesFlow default (``"velocity"`` in 2.1).
     """
 
     subnet_width: IntDimension = field(
@@ -56,12 +57,18 @@ class DiffusionModelSpace(BaseSearchSpace):
     )
     noise_schedule: CategoricalDimension = field(
         default_factory=lambda: CategoricalDimension(
-            "dm_noise_schedule", constant="edm"
+            "dm_noise_schedule",
+            constant=signature_default(
+                bf.networks.DiffusionModel, "noise_schedule", "cosine"
+            ),
         )
     )
     prediction_type: CategoricalDimension = field(
         default_factory=lambda: CategoricalDimension(
-            "dm_prediction_type", constant="F"
+            "dm_prediction_type",
+            constant=signature_default(
+                bf.networks.DiffusionModel, "prediction_type", "velocity"
+            ),
         )
     )
 

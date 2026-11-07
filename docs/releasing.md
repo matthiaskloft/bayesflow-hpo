@@ -10,7 +10,7 @@ refuses commits that are not on `main`. Only stable three-part versions are
 supported.
 
 The workflow then reruns the full CI (`ci.yml`: lint, citations, docstrings,
-mypy, tests on 3.11--3.13) against the tagged commit, builds the wheel and sdist
+mypy, tests on 3.12--3.13) against the tagged commit, builds the wheel and sdist
 with `python -m build`, checks metadata with `twine check --strict`, and runs
 `scripts/check_distribution.py`, which inspects both archives for local
 runtime content and installs the wheel (with the CPU torch backend) into a

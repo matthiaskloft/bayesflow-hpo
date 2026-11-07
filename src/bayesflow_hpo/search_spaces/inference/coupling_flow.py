@@ -16,6 +16,16 @@ from bayesflow_hpo.search_spaces.base import (
 )
 
 
+def _coupling_activation_default() -> str:
+    """Coupling-subnet activation from ``COUPLING_MLP_DEFAULTS`` (BayesFlow 2.1)."""
+    try:
+        from bayesflow.networks.defaults import COUPLING_MLP_DEFAULTS
+
+        return str(COUPLING_MLP_DEFAULTS["activation"])
+    except (ImportError, KeyError):
+        return "hard_silu"
+
+
 @dataclass
 class CouplingFlowSpace(BaseSearchSpace):
     """Search space for `bf.networks.CouplingFlow`.
@@ -34,8 +44,8 @@ class CouplingFlowSpace(BaseSearchSpace):
     Fixed dimensions (widen to tune)
     --------------------------------
     cf_activation : str
-        Subnet activation. Fixed at BayesFlow default (not exposed by BF
-        as a top-level kwarg; uses subnet default).
+        Subnet activation. Fixed at BayesFlow's coupling default
+        (``COUPLING_MLP_DEFAULTS["activation"]``, ``"hard_silu"`` in 2.1).
     cf_transform : str
         Coupling transform type. Fixed at ``"affine"``.
     cf_permutation : str
@@ -60,7 +70,7 @@ class CouplingFlowSpace(BaseSearchSpace):
     )
     activation: CategoricalDimension = field(
         default_factory=lambda: CategoricalDimension(
-            "cf_activation", constant="silu"
+            "cf_activation", constant=_coupling_activation_default()
         )
     )
     transform: CategoricalDimension = field(

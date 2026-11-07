@@ -22,10 +22,9 @@ class FusionTransformerSpace(BaseSearchSpace):
 
     Fixed dimensions (widen to tune)
     --------------------------------
-    ft_mlp_width : int
-        Feed-forward MLP width. Fixed at ``128``.
-    ft_mlp_depth : int
-        Feed-forward MLP depth. Fixed at ``2``.
+    ft_expansion_factor : float
+        Width multiplier of the gated feed-forward block (BayesFlow >= 2.1
+        replaced ``mlp_width``/``mlp_depth`` with this). Fixed at ``4.0``.
     ft_bidirectional : bool
         Bidirectional template (LSTM/GRU). Fixed at ``True``.
     ft_template_type : str
@@ -54,11 +53,8 @@ class FusionTransformerSpace(BaseSearchSpace):
     dropout: FloatDimension = field(
         default_factory=lambda: FloatDimension("ft_dropout", low=0.0, high=0.3)
     )
-    mlp_width: IntDimension = field(
-        default_factory=lambda: IntDimension("ft_mlp_width", constant=128)
-    )
-    mlp_depth: IntDimension = field(
-        default_factory=lambda: IntDimension("ft_mlp_depth", constant=2)
+    expansion_factor: FloatDimension = field(
+        default_factory=lambda: FloatDimension("ft_expansion_factor", constant=4.0)
     )
     bidirectional: BoolDimension = field(
         default_factory=lambda: BoolDimension(
@@ -77,15 +73,12 @@ class FusionTransformerSpace(BaseSearchSpace):
         num_layers = int(params["ft_num_layers"])
         embed_dim = int(params["ft_embed_dim"])
         num_heads = int(params["ft_num_heads"])
-        mlp_width = int(params["ft_mlp_width"])
-        mlp_depth = int(params["ft_mlp_depth"])
 
         return bf.networks.FusionTransformer(
             summary_dim=int(params["ft_summary_dim"]),
             embed_dims=tuple([embed_dim] * num_layers),
             num_heads=tuple([num_heads] * num_layers),
-            mlp_widths=tuple([mlp_width] * num_layers),
-            mlp_depths=tuple([mlp_depth] * num_layers),
+            expansion_factor=float(params["ft_expansion_factor"]),
             template_dim=int(params["ft_template_dim"]),
             dropout=float(params["ft_dropout"]),
             template_type=params["ft_template_type"],

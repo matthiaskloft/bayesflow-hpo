@@ -21,14 +21,13 @@ def test_sampling_includes_all_dimensions():
     # Constants (always present with BF defaults)
     assert params["fm_activation"] == "mish"
     assert params["fm_use_optimal_transport"] is False
-    assert params["fm_time_power_law_alpha"] == 0.0
+    assert params["fm_time_power_law_alpha"] == -0.5
     assert params["fm_time_embedding_dim"] == 32
     assert params["fm_integrate_method"] == "tsit5"
     assert params["fm_integrate_steps"] == "adaptive"
     assert params["fm_merge"] == "concat"
     assert params["fm_norm"] == "layer"
     assert params["fm_residual"] is True
-    assert params["fm_spectral_normalization"] is False
     assert params["fm_kernel_initializer"] == "he_normal"
 
 
@@ -53,13 +52,13 @@ def test_build_passes_all_params(monkeypatch):
     params = space.sample(FakeTrial())
     space.build(params)
     assert captured["use_optimal_transport"] is False
-    assert captured["time_power_law_alpha"] == 0.0
+    assert captured["time_power_law_alpha"] == -0.5
     assert captured["subnet_kwargs"]["activation"] == "mish"
     assert captured["subnet_kwargs"]["time_embedding_dim"] == 32
     assert captured["subnet_kwargs"]["merge"] == "concat"
     assert captured["subnet_kwargs"]["norm"] == "layer"
     assert captured["subnet_kwargs"]["residual"] is True
-    assert captured["subnet_kwargs"]["spectral_normalization"] is False
+    assert "spectral_normalization" not in captured["subnet_kwargs"]
     assert captured["subnet_kwargs"]["kernel_initializer"] == "he_normal"
     assert captured["integrate_kwargs"] == {
         "method": "tsit5",
@@ -99,9 +98,6 @@ def test_untuned_defaults_match_bayesflow_defaults():
     assert space.merge.constant == _timemlp_default("merge", "concat")
     assert space.norm.constant == _timemlp_default("norm", "layer")
     assert space.residual.constant == bool(_timemlp_default("residual", True))
-    assert space.spectral_normalization.constant == bool(
-        _timemlp_default("spectral_normalization", False)
-    )
     assert space.kernel_initializer.constant == _timemlp_default(
         "kernel_initializer", "he_normal"
     )

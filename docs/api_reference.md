@@ -168,7 +168,7 @@ When `constant` is set, the dimension is not tuned by Optuna — it uses the con
 
 `FlowMatchingSpace` untuned constants are synchronized to BayesFlow
 defaults at runtime (`bf.networks.TimeMLP` signature defaults and
-`bf.networks.FlowMatching.INTEGRATE_DEFAULT_CONFIG`).
+`bayesflow.networks.defaults.FLOW_MATCHING_INTEGRATE_DEFAULTS`).
 
 `FlowMatchingSpace` profile helpers:
 - `FlowMatchingSpace.fast()`
