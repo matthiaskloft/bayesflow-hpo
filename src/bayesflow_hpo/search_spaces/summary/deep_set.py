@@ -9,7 +9,6 @@ import bayesflow as bf
 
 from bayesflow_hpo.search_spaces.base import (
     BaseSearchSpace,
-    BoolDimension,
     CategoricalDimension,
     FloatDimension,
     IntDimension,
@@ -27,7 +26,8 @@ class DeepSetSpace(BaseSearchSpace):
     ds_depth : int
         Number of DeepSet processing blocks (1--4).
     ds_width : int
-        MLP width for all sub-MLPs (32--256, step 32).
+        Hidden width of the MLP inside every equivariant layer (32--256,
+        step 32); the MLP has two hidden layers of this width.
     ds_dropout : float
         Dropout rate (0.0--0.3).
 
@@ -35,18 +35,24 @@ class DeepSetSpace(BaseSearchSpace):
     --------------------------------
     ds_activation : str
         Activation function. Fixed at ``"silu"``.
-    ds_spectral_normalization : bool
-        Spectral normalization. Fixed at ``False``.
+    ds_embed_dim : int
+        Working width shared by all equivariant layers. Fixed at ``64``
+        (BayesFlow default).
     ds_inner_pooling : str
-        Inner pooling strategy. Fixed at ``"mean"``.
-    ds_output_pooling : str
-        Output pooling strategy. Fixed at ``"mean"``.
+        Pooling used inside the equivariant layers. Fixed at ``"mean"``.
 
     Architecture notes
     ------------------
-    The ``invariant_outer`` MLP uses ``(width, summary_dim)`` to act as a
-    bottleneck, matching BayesFlow's default architecture.  All other MLPs
-    use ``(width, width)``.
+    BayesFlow 2.1 rewrote ``DeepSet`` (stacked equivariant layers, then
+    pooling by multi-head attention and a linear projection to
+    ``summary_dim``). The 2.0.x arguments ``mlp_widths_equivariant``,
+    ``mlp_widths_invariant_*``, ``output_pooling`` and
+    ``spectral_normalization`` no longer exist there and are silently
+    dropped, so ``ds_output_pooling`` and ``ds_spectral_normalization`` were
+    removed from this space (bayesflow-hpo 0.8.0). ``ds_width`` now sets the
+    equivariant-layer MLP ``mlp_widths=(width, width)``
+    (``bayesflow/networks/summary/deep_set/deep_set.py``, verified against
+    bayesflow 2.1.0, 2026-11-07).
     """
 
     summary_dim: IntDimension = field(
@@ -66,19 +72,12 @@ class DeepSetSpace(BaseSearchSpace):
             "ds_activation", constant="silu"
         )
     )
-    spectral_norm: BoolDimension = field(
-        default_factory=lambda: BoolDimension(
-            "ds_spectral_normalization", constant=False
-        )
+    embed_dim: IntDimension = field(
+        default_factory=lambda: IntDimension("ds_embed_dim", constant=64)
     )
     inner_pooling: CategoricalDimension = field(
         default_factory=lambda: CategoricalDimension(
             "ds_inner_pooling", constant="mean"
-        )
-    )
-    output_pooling: CategoricalDimension = field(
-        default_factory=lambda: CategoricalDimension(
-            "ds_output_pooling", constant="mean"
         )
     )
 
@@ -103,13 +102,9 @@ class DeepSetSpace(BaseSearchSpace):
         return bf.networks.DeepSet(
             summary_dim=summary_dim,
             depth=int(params["ds_depth"]),
-            mlp_widths_equivariant=(width, width),
-            mlp_widths_invariant_inner=(width, width),
-            mlp_widths_invariant_outer=(width, summary_dim),
-            mlp_widths_invariant_last=(width, width),
+            embed_dim=int(params["ds_embed_dim"]),
+            mlp_widths=(width, width),
             dropout=float(params["ds_dropout"]),
             activation=params["ds_activation"],
-            spectral_normalization=bool(params["ds_spectral_normalization"]),
             inner_pooling=params["ds_inner_pooling"],
-            output_pooling=params["ds_output_pooling"],
         )

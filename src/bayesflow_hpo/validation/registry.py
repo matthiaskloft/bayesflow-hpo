@@ -992,7 +992,13 @@ def _bf_rmse(
     rmse_fn = getattr(bf.diagnostics, "root_mean_squared_error", None)
     if rmse_fn is not None:
         estimates, targets = _reshape_for_bf(draws, true_values)
-        result = rmse_fn(estimates=estimates, targets=targets)
+        # Unnormalized, as documented. The BayesFlow default is a
+        # normalization in both versions ("range" in 2.0.8, the stochastic
+        # "prior" in 2.1), so the bare call returned an NRMSE (2.0.8 and
+        # 2.1.0 sources compared, 2026-11-07). 2.1 also changed the
+        # reduction: RMSE over draws per dataset, then a median over datasets
+        # (2.0.8: RMSE over datasets per draw, then a median over draws).
+        result = rmse_fn(estimates=estimates, targets=targets, normalize=None)
         return {"rmse": float(np.mean(result["values"]))}
 
     posterior_mean = np.mean(draws, axis=1)

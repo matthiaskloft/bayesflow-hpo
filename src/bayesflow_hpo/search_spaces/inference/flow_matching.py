@@ -18,7 +18,19 @@ from bayesflow_hpo.search_spaces.base import (
 
 
 def _timemlp_default(param: str, fallback: Any) -> Any:
-    """Read a default value from ``bf.networks.TimeMLP`` safely."""
+    """Read a default value used by ``FlowMatching``'s TimeMLP safely.
+
+    ``TIME_MLP_DEFAULTS`` (BayesFlow >= 2.1) takes precedence over the
+    ``TimeMLP`` signature because ``FlowMatching`` merges it into
+    ``subnet_kwargs`` before building the subnet.
+    """
+    try:
+        from bayesflow.networks.defaults import TIME_MLP_DEFAULTS
+
+        if param in TIME_MLP_DEFAULTS:
+            return TIME_MLP_DEFAULTS[param]
+    except ImportError:
+        pass
     try:
         value = inspect.signature(bf.networks.TimeMLP).parameters[param].default
     except (KeyError, ValueError, TypeError):
@@ -28,10 +40,11 @@ def _timemlp_default(param: str, fallback: Any) -> Any:
 
 def _flowmatching_integrate_default(param: str, fallback: Any) -> Any:
     """Read default integration settings from ``bf.networks.FlowMatching``."""
-    defaults = getattr(bf.networks.FlowMatching, "INTEGRATE_DEFAULT_CONFIG", None)
-    if not isinstance(defaults, dict):
+    try:
+        from bayesflow.networks.defaults import FLOW_MATCHING_INTEGRATE_DEFAULTS
+    except ImportError:
         return fallback
-    return defaults.get(param, fallback)
+    return FLOW_MATCHING_INTEGRATE_DEFAULTS.get(param, fallback)
 
 
 @dataclass
@@ -44,9 +57,11 @@ class FlowMatchingSpace(BaseSearchSpace):
     they remain semantically neutral across BayesFlow updates:
 
     - TimeMLP-related constants are read from
-      ``inspect.signature(bf.networks.TimeMLP)``
+      ``bayesflow.networks.defaults.TIME_MLP_DEFAULTS`` (the dict
+      ``FlowMatching`` merges under ``subnet_kwargs`` in BayesFlow 2.1),
+      then from ``inspect.signature(bf.networks.TimeMLP)``
     - Integration constants are read from
-      ``bf.networks.FlowMatching.INTEGRATE_DEFAULT_CONFIG``
+      ``bayesflow.networks.defaults.FLOW_MATCHING_INTEGRATE_DEFAULTS``
 
     If these runtime lookups are unavailable, safe fallback constants are
     used. Use :meth:`fast`, :meth:`balanced`, :meth:`quality`, or
@@ -114,12 +129,6 @@ class FlowMatchingSpace(BaseSearchSpace):
         default_factory=lambda: BoolDimension(
             "fm_residual",
             constant=bool(_timemlp_default("residual", True)),
-        )
-    )
-    spectral_normalization: BoolDimension = field(
-        default_factory=lambda: BoolDimension(
-            "fm_spectral_normalization",
-            constant=bool(_timemlp_default("spectral_normalization", False)),
         )
     )
     kernel_initializer: CategoricalDimension = field(
@@ -215,9 +224,6 @@ class FlowMatchingSpace(BaseSearchSpace):
             "merge": params["fm_merge"],
             "norm": params["fm_norm"],
             "residual": bool(params["fm_residual"]),
-            "spectral_normalization": bool(
-                params["fm_spectral_normalization"]
-            ),
             "kernel_initializer": params["fm_kernel_initializer"],
         }
 

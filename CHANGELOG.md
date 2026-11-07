@@ -1,5 +1,53 @@
 # Changelog
 
+## Unreleased (recommended version: 0.8.0)
+
+### Changed (breaking)
+
+- **BayesFlow 2.1 is required; 2.0.x is no longer supported.** The package
+  now declares `bayesflow>=2.1.0`, `keras>=3.15.0` (the `<3.13` cap is gone),
+  `numpy>=2.5.1`, `scipy>=1.18.0`, `pandas>=3.0.5`, `matplotlib>=3.11.1` and
+  `requires-python = ">=3.12"`, the floors BayesFlow 2.1.0 itself imposes.
+  `pip install "bayesflow>=2.1.0" bayesflow-hpo` resolves again (#152). CI runs
+  Python 3.12 and 3.13 (BayesFlow 2.1.0 excludes 3.14).
+- **Search-space dimensions that BayesFlow 2.1 ignores were removed.**
+  BayesFlow 2.1 drops unknown network keyword arguments without an error, so
+  these dimensions would have kept sampling and tuned nothing:
+  - `st_mlp_width`, `st_mlp_depth`, `tst_mlp_width`, `tst_mlp_depth`,
+    `ft_mlp_width`, `ft_mlp_depth` (the transformer feed-forward block is now
+    gated and sized by `expansion_factor`). Replaced by constants
+    `st_expansion_factor`, `tst_expansion_factor`, `ft_expansion_factor`
+    (4.0, the BayesFlow default).
+  - `ds_spectral_normalization`, `ds_output_pooling` (no longer `DeepSet`
+    arguments); `ds_width` now sets `mlp_widths=(width, width)` and the new
+    constant `ds_embed_dim` (64) is the shared working width.
+  - `fm_spectral_normalization` (TimeMLP has no such option).
+- **The `rmse` metric is now an unnormalized RMSE.** It called BayesFlow's
+  `root_mean_squared_error` with its default normalization (`"range"` in 2.0.8,
+  the stochastic `"prior"` in 2.1), so it returned a normalized value. It now
+  passes `normalize=None`. BayesFlow 2.1 also reduces differently (RMSE over
+  posterior draws per dataset, then a median over datasets). `nrmse` still
+  uses `normalize="range"`, but the numbers are not comparable with 2.0.x.
+- The parameter-count heuristic for set, time-series and fusion transformers
+  follows the 2.1 block (four attention projections plus a gated
+  feed-forward of width `ceil64(int(embed_dim * expansion_factor * 2 / 3))`).
+- `FlowMatchingSpace` untuned constants are read from
+  `bayesflow.networks.defaults.TIME_MLP_DEFAULTS` and
+  `FLOW_MATCHING_INTEGRATE_DEFAULTS`; the old `FlowMatching.INTEGRATE_DEFAULT_CONFIG`
+  lookup no longer exists in 2.1 and silently fell back.
+
+### Notes
+
+- Weights saved under 2.0.x (`weights.weights.h5`, `.keras`, checkpoint-pool
+  directories) cannot be loaded on 2.1: the variable sets differ. Retrain; do
+  not resume 2.0.x studies, because the same search-space values now describe
+  different networks (smaller attention blocks, orthogonal initializers).
+- Coupling-flow subnets default to `kernel_initializer="orthogonal"` in 2.1
+  (was `glorot_uniform`); this package does not set one, so seeded results
+  differ from 2.0.x.
+- Added `tests/test_bayesflow_21_compat.py`, which fails if a search space
+  passes a keyword the BayesFlow constructor does not declare.
+
 ## 0.7.0 -- 2026-10-28
 
 ### Added

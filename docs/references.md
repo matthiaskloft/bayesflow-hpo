@@ -771,7 +771,8 @@ implementation) for the design in
   carries no lockfile, so the resolved version depends on when the
   environment was built. Nothing here imports it -- the citation records
   whose convention `prior_derangement` follows, not a dependency -- so the
-  floor is deliberately left alone. (BayesFlow
+  floor is deliberately left alone. (From bayesflow-hpo 0.8.0 the declared
+  floor is `bayesflow>=2.1.0`, which includes it.) (BayesFlow
   `bayesflow/diagnostics/metrics/accuracy_random_points.py` at tag
   `v2.0.13`, verified 2026-09-16.)
 - **Sec. 4.2** explores "the dependence on the reference point distribution

@@ -70,7 +70,7 @@ interpreter and the venv above has not been created or not been used.
 
 ## Conventions
 
-- Python >= 3.11
+- Python >= 3.12
 - Keras backend: PyTorch preferred
 - src/ layout + setuptools
 - pytest + ruff

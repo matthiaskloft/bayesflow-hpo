@@ -34,10 +34,9 @@ class SetTransformerSpace(BaseSearchSpace):
 
     Fixed dimensions (widen to tune)
     --------------------------------
-    st_mlp_width : int
-        Feed-forward MLP width. Fixed at ``128``.
-    st_mlp_depth : int
-        Feed-forward MLP depth. Fixed at ``2``.
+    st_expansion_factor : float
+        Width multiplier of the gated feed-forward block (BayesFlow >= 2.1
+        replaced ``mlp_width``/``mlp_depth`` with this). Fixed at ``4.0``.
     st_num_inducing_points : int
         Number of inducing points for ISAB. Fixed at ``None``
         (disabled by default in BayesFlow).
@@ -60,11 +59,8 @@ class SetTransformerSpace(BaseSearchSpace):
     dropout: FloatDimension = field(
         default_factory=lambda: FloatDimension("st_dropout", low=0.0, high=0.3)
     )
-    mlp_width: IntDimension = field(
-        default_factory=lambda: IntDimension("st_mlp_width", constant=128)
-    )
-    mlp_depth: IntDimension = field(
-        default_factory=lambda: IntDimension("st_mlp_depth", constant=2)
+    expansion_factor: FloatDimension = field(
+        default_factory=lambda: FloatDimension("st_expansion_factor", constant=4.0)
     )
     num_inducing: IntDimension = field(
         default_factory=lambda: IntDimension(
@@ -90,16 +86,13 @@ class SetTransformerSpace(BaseSearchSpace):
         num_layers = int(params["st_num_layers"])
         embed_dim = int(params["st_embed_dim"])
         num_heads = int(params["st_num_heads"])
-        mlp_width = int(params["st_mlp_width"])
-        mlp_depth = int(params["st_mlp_depth"])
 
         kwargs: dict[str, Any] = {
             "summary_dim": int(params["st_summary_dim"]),
             "embed_dims": tuple([embed_dim] * num_layers),
             "num_heads": tuple([num_heads] * num_layers),
             "dropout": float(params["st_dropout"]),
-            "mlp_widths": tuple([mlp_width] * num_layers),
-            "mlp_depths": tuple([mlp_depth] * num_layers),
+            "expansion_factor": float(params["st_expansion_factor"]),
         }
         num_inducing = params["st_num_inducing_points"]
         if num_inducing is not None:

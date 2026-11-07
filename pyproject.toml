@@ -9,24 +9,23 @@ description = "Generic hyperparameter optimization for BayesFlow neural posterio
 readme = "README.md"
 license = {text = "MIT"}
 authors = [{name = "matthiaskloft"}]
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
 ]
 dependencies = [
-    "bayesflow>=2.0.0",
+    "bayesflow>=2.1.0",
     "optuna>=5.0.0,<6.0.0",
-    "numpy>=1.24",
-    "pandas>=2.0",
-    "scipy>=1.10",
-    "matplotlib>=3.7",
-    "keras>=3.9,<3.13",
+    "numpy>=2.5.1",
+    "pandas>=3.0.5",
+    "scipy>=1.18.0",
+    "matplotlib>=3.11.1",
+    "keras>=3.15.0",
 ]
 
 [project.optional-dependencies]
@@ -53,13 +52,15 @@ markers = [
 
 [tool.ruff]
 line-length = 88
-target-version = "py311"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
+# PEP 695 syntax (UP040, UP047) is a style migration, not needed for 3.12.
+ignore = ["UP040", "UP047"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 files = ["src/bayesflow_hpo"]
 # The package ships py.typed, so consumers already type-check against it.
 # Third-party stubs are the gap: keras, optuna and matplotlib are partially or

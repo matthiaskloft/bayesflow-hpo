@@ -77,16 +77,15 @@ Continuous normalizing flow via flow matching (`FlowMatching`).
 | `fm_merge` | cat | — | no | `"concat"` |
 | `fm_norm` | cat | — | no | `"layer"` |
 | `fm_residual` | bool | — | no | `True` |
-| `fm_spectral_normalization` | bool | — | no | `False` |
 | `fm_kernel_initializer` | cat | — | no | `"he_normal"` |
 
 Untuned constants are synchronized to BayesFlow defaults at runtime
-(`bf.networks.TimeMLP` defaults plus
-`bf.networks.FlowMatching.INTEGRATE_DEFAULT_CONFIG`). The values in this
+(`bayesflow.networks.defaults.TIME_MLP_DEFAULTS` and
+`FLOW_MATCHING_INTEGRATE_DEFAULTS`, BayesFlow >= 2.1). The values in this
 table reflect the current BayesFlow release used by this project.
 
 `build()` maps flat `fm_*` params to:
-- `subnet_kwargs={widths, dropout, activation, time_embedding_dim, merge, norm, residual, spectral_normalization, kernel_initializer}`
+- `subnet_kwargs={widths, dropout, activation, time_embedding_dim, merge, norm, residual, kernel_initializer}`
 - `integrate_kwargs={method, steps}`
 
 `fm_integrate_steps` usually has the strongest inference-time effect because it multiplies velocity-network evaluations during ODE sampling.
@@ -165,9 +164,8 @@ Permutation-invariant summary via DeepSets (`DeepSet`).
 | `ds_width` | int | [32, 256], step 32 | yes | — |
 | `ds_dropout` | float | [0.0, 0.3] | yes | — |
 | `ds_activation` | cat | silu, mish | no | `"silu"` |
-| `ds_spectral_normalization` | bool | — | no | `False` |
+| `ds_embed_dim` | int | — | no | `64` |
 | `ds_inner_pooling` | cat | — | no | `"mean"` |
-| `ds_output_pooling` | cat | — | no | `"mean"` |
 
 ### SetTransformerSpace
 
@@ -180,8 +178,7 @@ Attention-based set summary (`SetTransformer`).
 | `st_num_heads` | cat | 1, 2, 4, 8 | yes | — |
 | `st_num_layers` | int | [1, 4] | yes | — |
 | `st_dropout` | float | [0.0, 0.3] | yes | — |
-| `st_mlp_width` | int | — | no | `128` |
-| `st_mlp_depth` | int | — | no | `2` |
+| `st_expansion_factor` | float | — | no | `4.0` |
 | `st_num_inducing_points` | int | — | no | `None` |
 
 ### TimeSeriesNetworkSpace
@@ -209,8 +206,7 @@ Transformer-based temporal summary (`TimeSeriesTransformer`).
 | `tst_num_heads` | cat | 1, 2, 4, 8 | yes | — |
 | `tst_num_layers` | int | [1, 4] | yes | — |
 | `tst_dropout` | float | [0.0, 0.3] | yes | — |
-| `tst_mlp_width` | int | — | no | `128` |
-| `tst_mlp_depth` | int | — | no | `2` |
+| `tst_expansion_factor` | float | — | no | `4.0` |
 | `tst_time_embedding` | cat | — | no | `"time2vec"` |
 
 ### FusionTransformerSpace
@@ -225,8 +221,7 @@ Cross-attention fusion summary (`FusionTransformer`).
 | `ft_num_layers` | int | [1, 4] | yes | — |
 | `ft_template_dim` | int | [32, 256], step 32 | yes | — |
 | `ft_dropout` | float | [0.0, 0.3] | yes | — |
-| `ft_mlp_width` | int | — | no | `128` |
-| `ft_mlp_depth` | int | — | no | `2` |
+| `ft_expansion_factor` | float | — | no | `4.0` |
 | `ft_bidirectional` | bool | — | no | `True` |
 | `ft_template_type` | cat | — | no | `"lstm"` |
 

@@ -60,6 +60,29 @@ def _mlp_block_params(
     return max(1, first + middle + last)
 
 
+def _glu_ffn_width(embed_dim: int, expansion_factor: float) -> int:
+    """Intermediate width of BayesFlow 2.1's gated feed-forward block.
+
+    ``ceil64(int(embed_dim * expansion_factor * 2 / 3))``
+    (``bayesflow/networks/summary/transformers/helpers/blocks/
+    transformer_feedforward.py``, bayesflow 2.1.0).
+    """
+    width = int(embed_dim * expansion_factor * 2 / 3)
+    return max(64, -(-width // 64) * 64)
+
+
+def _attention_block_params(
+    embed_dim: int, expansion_factor: float
+) -> int:
+    """Estimate one BayesFlow 2.1 attention block (MHA + gated FFN).
+
+    Four ``embed_dim x embed_dim`` attention projections plus a GLU
+    feed-forward with three ``embed_dim x ffn`` matrices (all bias-free).
+    """
+    ffn = _glu_ffn_width(embed_dim, expansion_factor)
+    return 4 * embed_dim * embed_dim + 3 * embed_dim * ffn
+
+
 def _estimate_summary_params(params: dict[str, Any]) -> tuple[int, int]:
     """Estimate (param_count, summary_dim) for the summary network.
 
@@ -84,11 +107,8 @@ def _estimate_summary_params(params: dict[str, Any]) -> tuple[int, int]:
         summary_dim = _safe_int(params.get("tst_summary_dim"), 16)
         embed_dim = _safe_int(params.get("tst_embed_dim"), 64)
         layers = _safe_int(params.get("tst_num_layers"), 2)
-        heads = _safe_int(params.get("tst_num_heads"), 4)
-        mlp_width = _safe_int(params.get("tst_mlp_width"), 2 * embed_dim)
-        total = layers * (
-            embed_dim * embed_dim + embed_dim * mlp_width + heads * embed_dim
-        )
+        expansion = _safe_float(params.get("tst_expansion_factor"), 4.0)
+        total = layers * _attention_block_params(embed_dim, expansion)
         return max(1, total), summary_dim
 
     if "tsn_summary_dim" in params:
@@ -102,14 +122,8 @@ def _estimate_summary_params(params: dict[str, Any]) -> tuple[int, int]:
         summary_dim = _safe_int(params.get("st_summary_dim"), 16)
         embed_dim = _safe_int(params.get("st_embed_dim"), 64)
         layers = _safe_int(params.get("st_num_layers"), 2)
-        heads = _safe_int(params.get("st_num_heads"), 4)
-        mlp_width = _safe_int(params.get("st_mlp_width"), 2 * embed_dim)
-        mlp_depth = _safe_int(params.get("st_mlp_depth"), 2)
-        total = layers * (
-            embed_dim * embed_dim
-            + heads * embed_dim
-            + _mlp_block_params(embed_dim, mlp_width, mlp_depth, embed_dim)
-        )
+        expansion = _safe_float(params.get("st_expansion_factor"), 4.0)
+        total = layers * _attention_block_params(embed_dim, expansion)
         return max(1, total), summary_dim
 
     summary_dim = _safe_int(params.get("ds_summary_dim"), 8)
