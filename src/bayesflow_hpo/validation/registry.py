@@ -982,10 +982,14 @@ def _bf_mean_calibration_error(
 def _bf_rmse(
     draws: np.ndarray, true_values: np.ndarray,
 ) -> dict[str, float]:
-    """Root Mean Squared Error of posterior means vs true values.
+    """Root Mean Squared Error of the posterior draws around the truth.
 
-    Uses BayesFlow's ``root_mean_squared_error`` when available,
-    otherwise falls back to a manual NumPy implementation.
+    Per dataset, the root of the mean squared error of the draws (so the
+    posterior spread counts, not only the posterior mean), then a median
+    over datasets, as BayesFlow 2.1 computes it. Uses BayesFlow's
+    ``root_mean_squared_error`` when available,
+    otherwise falls back to a manual NumPy implementation (which scores the
+    posterior mean only, so the two paths differ).
     """
     import bayesflow as bf
 
@@ -1009,7 +1013,7 @@ def _bf_rmse(
 def _bf_nrmse(
     draws: np.ndarray, true_values: np.ndarray,
 ) -> dict[str, float]:
-    """Normalized RMSE (range-normalized) of posterior means.
+    """Range-normalized RMSE of the posterior draws (see :func:`_bf_rmse`).
 
     Divides RMSE by the range of true values so the metric is
     comparable across parameters with different scales.

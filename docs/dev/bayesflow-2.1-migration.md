@@ -87,3 +87,16 @@ Not changed because nothing needed it: `Adapter.add_transform` and the moved
 3. `expansion_factor` is constant; making it a tuned dimension is a one-line
    change per space but widens the search.
 4. No clean refusal for loading a 2.0.x checkpoint; candidate for a follow-up.
+5. Constants that follow BayesFlow's *2.0.8* defaults and were not changed
+   here (review found them; changing them alters results, so it needs a
+   decision): `fm_time_power_law_alpha=0.0` (2.1 default -0.5),
+   `dm_noise_schedule="edm"` and `dm_prediction_type="F"` (2.1: `cosine`,
+   `velocity`), `cf_activation="silu"` (2.1 `COUPLING_MLP_DEFAULTS`:
+   `hard_silu`). The project rule says untuned defaults follow BayesFlow.
+6. The `TimeSeriesNetworkSpace` parameter estimate is ~7.8x too low (it
+   predates this change; not touched).
+7. `rmse` on 2.1 measures posterior spread around the truth per dataset; the
+   NumPy fallback scores the posterior mean. They differ by design of the
+   fallback; only the BayesFlow path is used when 2.1 is installed.
+8. CI resolves the newest BayesFlow; `.github/ci-constraints.txt` pins only
+   optuna, so the 2.1.0 floor itself is not tested.

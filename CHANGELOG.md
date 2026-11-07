@@ -28,9 +28,14 @@
   passes `normalize=None`. BayesFlow 2.1 also reduces differently (RMSE over
   posterior draws per dataset, then a median over datasets). `nrmse` still
   uses `normalize="range"`, but the numbers are not comparable with 2.0.x.
-- The parameter-count heuristic for set, time-series and fusion transformers
-  follows the 2.1 block (four attention projections plus a gated
-  feed-forward of width `ceil64(int(embed_dim * expansion_factor * 2 / 3))`).
+- The parameter-count heuristic (`max_param_count` pre-check) was rebuilt for
+  the 2.1 `DeepSet`, `SetTransformer`, `TimeSeriesTransformer` and
+  `FusionTransformer`: four attention projections plus a gated feed-forward of
+  width `ceil64(int(embed_dim * expansion_factor * 2 / 3))`, attention pooling,
+  and the recurrent template. Checked against built networks at the
+  low, middle and high end of each space (`tests/test_optimization/
+  test_constraints.py`): the estimate is at or above the built count. Before,
+  the DeepSet estimate was 5--31x too low and the Fusion one 5--8x too low.
 - `FlowMatchingSpace` untuned constants are read from
   `bayesflow.networks.defaults.TIME_MLP_DEFAULTS` and
   `FLOW_MATCHING_INTEGRATE_DEFAULTS`; the old `FlowMatching.INTEGRATE_DEFAULT_CONFIG`

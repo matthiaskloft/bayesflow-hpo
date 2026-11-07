@@ -83,6 +83,16 @@ def _attention_block_params(
     return 4 * embed_dim * embed_dim + 3 * embed_dim * ffn
 
 
+def _pma_params(embed_dim: int, num_seeds: int, expansion_factor: float) -> int:
+    """Estimate BayesFlow 2.1 pooling-by-attention (attention + two GLU FFNs)."""
+    ffn = _glu_ffn_width(embed_dim, expansion_factor)
+    return (
+        4 * embed_dim * embed_dim
+        + 2 * 3 * embed_dim * ffn
+        + num_seeds * embed_dim
+    )
+
+
 def _estimate_summary_params(params: dict[str, Any]) -> tuple[int, int]:
     """Estimate (param_count, summary_dim) for the summary network.
 
@@ -100,7 +110,12 @@ def _estimate_summary_params(params: dict[str, Any]) -> tuple[int, int]:
         embed_dim = _safe_int(params.get("ft_embed_dim"), 64)
         layers = _safe_int(params.get("ft_num_layers"), 2)
         template_dim = _safe_int(params.get("ft_template_dim"), 128)
-        total = layers * (embed_dim * embed_dim + 2 * embed_dim * template_dim)
+        expansion = _safe_float(params.get("ft_expansion_factor"), 4.0)
+        # Bidirectional recurrent template (4 gates x 2 directions) plus the
+        # attention blocks; measured 1.2--1.3x above the built network on
+        # 2.1.0 (conservative on purpose).
+        template = 8 * template_dim * (template_dim + embed_dim)
+        total = template + layers * _attention_block_params(embed_dim, expansion)
         return max(1, total), summary_dim
 
     if "tst_summary_dim" in params:
@@ -123,19 +138,28 @@ def _estimate_summary_params(params: dict[str, Any]) -> tuple[int, int]:
         embed_dim = _safe_int(params.get("st_embed_dim"), 64)
         layers = _safe_int(params.get("st_num_layers"), 2)
         expansion = _safe_float(params.get("st_expansion_factor"), 4.0)
-        total = layers * _attention_block_params(embed_dim, expansion)
+        inducing = params.get("st_num_inducing_points")
+        # An inducing-point layer holds two attention blocks plus the points.
+        per_layer = _attention_block_params(embed_dim, expansion)
+        if inducing is not None:
+            per_layer = 2 * per_layer + _safe_int(inducing, 0) * embed_dim
+        total = layers * per_layer + _pma_params(embed_dim, 4, expansion)
         return max(1, total), summary_dim
 
-    summary_dim = _safe_int(params.get("ds_summary_dim"), 8)
-    deepset_width = _safe_int(params.get("ds_width"), 64)
-    deepset_depth = _safe_int(params.get("ds_depth"), 2)
-    # Inner MLP: obs_dim → width (depth hidden layers)
-    # + outer MLP: width → summary_dim (depth hidden layers).
-    # Use obs_dim=1 as conservative lower bound for the input embedding.
-    obs_dim = 1
-    inner = _mlp_block_params(obs_dim, deepset_width, deepset_depth, deepset_width)
-    outer = _mlp_block_params(deepset_width, deepset_width, deepset_depth, summary_dim)
-    return max(1, inner + outer), summary_dim
+    summary_dim = _safe_int(params.get("ds_summary_dim"), 16)
+    width = _safe_int(params.get("ds_width"), 64)
+    depth = _safe_int(params.get("ds_depth"), 2)
+    embed = _safe_int(params.get("ds_embed_dim"), 64)
+    # BayesFlow 2.1 DeepSet: ``depth`` equivariant layers (two invariant
+    # 3-block MLPs on embed_dim, one MLP with a projector and widths
+    # (width, width)), then attention pooling at width ``width`` with 4 seeds
+    # and a linear head. Fitted on built networks (bayesflow 2.1.0): within
+    # +-15% of the built count; the 1.4x margin keeps it at or above it.
+    layer = 6 * embed**2 + 4 * embed * width + width**2 + width * embed + embed**2
+    pooling = _pma_params(width, 4, 4.0)
+    head = 4 * width * summary_dim
+    total = int(1.4 * (depth * layer + pooling + head))
+    return max(1, total), summary_dim
 
 
 def _estimate_inference_params(params: dict[str, Any], summary_dim: int) -> int:
