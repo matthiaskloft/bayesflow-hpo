@@ -45,6 +45,13 @@
   `FLOW_MATCHING_INTEGRATE_DEFAULTS`; the old `FlowMatching.INTEGRATE_DEFAULT_CONFIG`
   lookup no longer exists in 2.1 and silently fell back.
 
+- **Untuned constants now follow BayesFlow 2.1's defaults** (they still held
+  2.0.8 values): `fm_time_power_law_alpha` -0.5 (was 0.0), `dm_noise_schedule`
+  `"cosine"` (was `"edm"`), `dm_prediction_type` `"velocity"` (was `"F"`),
+  `cf_activation` `"hard_silu"` (was `"silu"`, which was never BayesFlow's
+  coupling default). Pass an explicit `CategoricalDimension`/`FloatDimension`
+  with `constant=` to restore the old values.
+
 ### Notes
 
 - Weights saved under 2.0.x (`weights.weights.h5`, `.keras`, checkpoint-pool

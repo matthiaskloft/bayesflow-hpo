@@ -14,6 +14,7 @@ from bayesflow_hpo.search_spaces.base import (
     CategoricalDimension,
     FloatDimension,
     IntDimension,
+    signature_default,
 )
 
 
@@ -92,7 +93,10 @@ class FlowMatchingSpace(BaseSearchSpace):
     )
     time_alpha: FloatDimension = field(
         default_factory=lambda: FloatDimension(
-            "fm_time_power_law_alpha", constant=0.0
+            "fm_time_power_law_alpha",
+            constant=signature_default(
+                bf.networks.FlowMatching, "time_power_law_alpha", -0.5
+            ),
         )
     )
     time_embedding_dim: IntDimension = field(

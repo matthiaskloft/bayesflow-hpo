@@ -27,8 +27,8 @@ from bayesflow_hpo.search_spaces.summary.time_series_transformer import (
 @pytest.mark.parametrize(
     ("space", "constant_key", "expected_value"),
     [
-        (DiffusionModelSpace(), "dm_noise_schedule", "edm"),
-        (DiffusionModelSpace(), "dm_prediction_type", "F"),
+        (DiffusionModelSpace(), "dm_noise_schedule", "cosine"),
+        (DiffusionModelSpace(), "dm_prediction_type", "velocity"),
         (ConsistencyModelSpace(), "cm_max_time", 200),
         (ConsistencyModelSpace(), "cm_sigma2", 1.0),
         (ConsistencyModelSpace(), "cm_s0", 10),
@@ -37,7 +37,7 @@ from bayesflow_hpo.search_spaces.summary.time_series_transformer import (
         (CouplingFlowSpace(), "cf_use_actnorm", True),
         (CouplingFlowSpace(), "cf_transform", "affine"),
         (CouplingFlowSpace(), "cf_permutation", "random"),
-        (CouplingFlowSpace(), "cf_activation", "silu"),
+        (CouplingFlowSpace(), "cf_activation", "hard_silu"),
         (DeepSetSpace(), "ds_activation", "silu"),
         (DeepSetSpace(), "ds_embed_dim", 64),
         (DeepSetSpace(), "ds_inner_pooling", "mean"),

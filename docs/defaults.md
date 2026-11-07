@@ -102,7 +102,7 @@ samples the corresponding network-specific dimensions.
 | `cf_subnet_width` | 32--256, step 32 | yes | — |
 | `cf_subnet_depth` | 1--3 | yes | — |
 | `cf_dropout` | 0.0--0.3 | yes | — |
-| `cf_activation` | silu, relu, mish | no | `"silu"` |
+| `cf_activation` | — | no | `"hard_silu"` |
 | `cf_transform` | affine, spline | no | `"affine"` |
 | `cf_permutation` | random, orthogonal | no | `"random"` |
 | `cf_use_actnorm` | True, False | no | `True` |
@@ -116,7 +116,7 @@ samples the corresponding network-specific dimensions.
 | `fm_dropout` | 0.0--0.2 | yes | — |
 | `fm_activation` | — | no | `"mish"` |
 | `fm_use_optimal_transport` | — | no | `False` |
-| `fm_time_power_law_alpha` | — | no | `0.0` |
+| `fm_time_power_law_alpha` | — | no | `-0.5` |
 | `fm_time_embedding_dim` | — | no | `32` |
 | `fm_integrate_method` | — | no | `"tsit5"` |
 | `fm_integrate_steps` | — | no | `"adaptive"` |

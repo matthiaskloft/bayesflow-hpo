@@ -54,7 +54,7 @@ Coupling-based normalizing flow (BayesFlow `CouplingFlow`).
 | `cf_subnet_width` | int | [32, 256], step 32 | yes | — |
 | `cf_subnet_depth` | int | [1, 3] | yes | — |
 | `cf_dropout` | float | [0.0, 0.3] | yes | — |
-| `cf_activation` | cat | silu, relu, mish | no | `"silu"` |
+| `cf_activation` | cat | — | no | `"hard_silu"` |
 | `cf_transform` | cat | affine, spline | no | `"affine"` |
 | `cf_permutation` | cat | random, orthogonal | no | `"random"` |
 | `cf_use_actnorm` | bool | — | no | `True` |
@@ -70,7 +70,7 @@ Continuous normalizing flow via flow matching (`FlowMatching`).
 | `fm_dropout` | float | [0.0, 0.2] | yes | — |
 | `fm_activation` | cat | — | no | `"mish"` |
 | `fm_use_optimal_transport` | bool | — | no | `False` |
-| `fm_time_power_law_alpha` | float | — | no | `0.0` |
+| `fm_time_power_law_alpha` | float | — | no | `-0.5` |
 | `fm_time_embedding_dim` | int | — | no | `32` |
 | `fm_integrate_method` | cat | — | no | `"tsit5"` |
 | `fm_integrate_steps` | cat | — | no | `"adaptive"` |
@@ -121,8 +121,8 @@ Score-based diffusion model (`DiffusionModel`).
 | `dm_subnet_depth` | int | [1, 6] | yes | — |
 | `dm_dropout` | float | [0.0, 0.2] | yes | — |
 | `dm_activation` | cat | mish, silu | yes | — |
-| `dm_noise_schedule` | cat | edm, cosine | no | `"edm"` |
-| `dm_prediction_type` | cat | F, velocity, noise, x | no | `"F"` |
+| `dm_noise_schedule` | cat | — | no | `"cosine"` |
+| `dm_prediction_type` | cat | — | no | `"velocity"` |
 
 ### ConsistencyModelSpace
 

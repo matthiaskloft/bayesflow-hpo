@@ -21,7 +21,7 @@ def test_sampling_includes_all_dimensions():
     # Constants (always present with BF defaults)
     assert params["fm_activation"] == "mish"
     assert params["fm_use_optimal_transport"] is False
-    assert params["fm_time_power_law_alpha"] == 0.0
+    assert params["fm_time_power_law_alpha"] == -0.5
     assert params["fm_time_embedding_dim"] == 32
     assert params["fm_integrate_method"] == "tsit5"
     assert params["fm_integrate_steps"] == "adaptive"
@@ -52,7 +52,7 @@ def test_build_passes_all_params(monkeypatch):
     params = space.sample(FakeTrial())
     space.build(params)
     assert captured["use_optimal_transport"] is False
-    assert captured["time_power_law_alpha"] == 0.0
+    assert captured["time_power_law_alpha"] == -0.5
     assert captured["subnet_kwargs"]["activation"] == "mish"
     assert captured["subnet_kwargs"]["time_embedding_dim"] == 32
     assert captured["subnet_kwargs"]["merge"] == "concat"

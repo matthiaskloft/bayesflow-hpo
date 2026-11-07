@@ -351,4 +351,21 @@ def test_summary_estimate_is_not_below_built_network(space_name, position):
     network = space.build(params)
     network(np.random.randn(4, 20, 3).astype("float32"))
     estimate, _ = _estimate_summary_params(params)
-    assert estimate >= 0.95 * network.count_params()
+    assert estimate >= network.count_params()
+
+
+@pytest.mark.parametrize("embed_dim", [128, 256])
+def test_deepset_estimate_covers_wide_embedding(embed_dim):
+    import numpy as np
+    from conftest import FakeTrial
+
+    from bayesflow_hpo.optimization.constraints import _estimate_summary_params
+    from bayesflow_hpo.search_spaces.summary.deep_set import DeepSetSpace
+
+    space = DeepSetSpace()
+    params = space.sample(FakeTrial())
+    params["ds_embed_dim"] = embed_dim
+    network = space.build(params)
+    network(np.random.randn(4, 20, 3).astype("float32"))
+    estimate, _ = _estimate_summary_params(params)
+    assert estimate >= network.count_params()

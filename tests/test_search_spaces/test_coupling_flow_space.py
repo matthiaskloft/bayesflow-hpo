@@ -16,7 +16,7 @@ def test_sampling_includes_all_dimensions():
     assert "cf_dropout" in params
 
     # Constants (always present)
-    assert params["cf_activation"] == "silu"
+    assert params["cf_activation"] == "hard_silu"
     assert params["cf_transform"] == "affine"
     assert params["cf_permutation"] == "random"
     assert params["cf_use_actnorm"] is True

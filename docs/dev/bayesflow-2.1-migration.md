@@ -87,12 +87,11 @@ Not changed because nothing needed it: `Adapter.add_transform` and the moved
 3. `expansion_factor` is constant; making it a tuned dimension is a one-line
    change per space but widens the search.
 4. No clean refusal for loading a 2.0.x checkpoint; candidate for a follow-up.
-5. Constants that follow BayesFlow's *2.0.8* defaults and were not changed
-   here (review found them; changing them alters results, so it needs a
-   decision): `fm_time_power_law_alpha=0.0` (2.1 default -0.5),
-   `dm_noise_schedule="edm"` and `dm_prediction_type="F"` (2.1: `cosine`,
-   `velocity`), `cf_activation="silu"` (2.1 `COUPLING_MLP_DEFAULTS`:
-   `hard_silu`). The project rule says untuned defaults follow BayesFlow.
+5. Resolved after review: the untuned constants that still held 2.0.8 values
+   now follow 2.1 (`fm_time_power_law_alpha` -0.5, `dm_noise_schedule`
+   `cosine`, `dm_prediction_type` `velocity`, `cf_activation` `hard_silu`),
+   read from the installed constructors via `signature_default`
+   (`search_spaces/base.py`) and `COUPLING_MLP_DEFAULTS`.
 6. The `TimeSeriesNetworkSpace` parameter estimate is ~7.8x too low (it
    predates this change; not touched).
 7. `rmse` on 2.1 measures posterior spread around the truth per dataset; the
