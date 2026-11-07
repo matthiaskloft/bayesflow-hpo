@@ -36,6 +36,10 @@
   low, middle and high end of each space (`tests/test_optimization/
   test_constraints.py`): the estimate is at or above the built count. Before,
   the DeepSet estimate was 5--31x too low and the Fusion one 5--8x too low.
+- `ds_width` semantics: it used to set four separate `DeepSet` MLP widths; it
+  now sets only the equivariant-layer MLP, and `embed_dim` is the new constant
+  `ds_embed_dim` (64). The same `ds_width` therefore builds a different, much
+  larger network than on 2.0.x.
 - `FlowMatchingSpace` untuned constants are read from
   `bayesflow.networks.defaults.TIME_MLP_DEFAULTS` and
   `FLOW_MATCHING_INTEGRATE_DEFAULTS`; the old `FlowMatching.INTEGRATE_DEFAULT_CONFIG`

@@ -127,7 +127,7 @@ samples the corresponding network-specific dimensions.
 
 Untuned constants are synchronized to BayesFlow defaults at runtime
 (`bf.networks.TimeMLP` and
-`bf.networks.FlowMatching.INTEGRATE_DEFAULT_CONFIG`). The listed constants
+`bayesflow.networks.defaults.FLOW_MATCHING_INTEGRATE_DEFAULTS`). The listed constants
 are the current defaults in this environment.
 
 Profile helpers:
